@@ -1,0 +1,10 @@
+# End-to-end integration test
+#
+# Build the core with libcurl transport, spawn the backend, init the
+# SDK pointed at it, track events, verify they arrive in the backend DB.
+add_executable(unitrack_e2e e2e_test.cpp)
+target_link_libraries(unitrack_e2e PRIVATE unitrack)
+target_include_directories(unitrack_e2e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core/src
+)

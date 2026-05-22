@@ -1,0 +1,42 @@
+{
+  "name": "@unitrack/react-native",
+  "version": "1.0.0",
+  "description": "UniTrack — universal mobile analytics SDK for React Native. Auto-captures screens, taps, network, crashes, OOM, JSON errors.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "ios",
+    "android",
+    "RNUniTrack.podspec",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "react-native",
+    "analytics",
+    "tracking",
+    "mobile",
+    "ios",
+    "android"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unitrack/sdk.git",
+    "directory": "platforms/react-native"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-native": ">=0.65.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.0",
+    "typescript": "^5.0.0"
+  }
+}

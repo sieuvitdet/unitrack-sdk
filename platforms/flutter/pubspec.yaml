@@ -1,0 +1,25 @@
+name: unitrack
+description: UniTrack — universal mobile analytics SDK for Flutter. Auto-captures screens, taps, network, crashes, OOM, JSON errors.
+version: 1.0.0
+homepage: https://github.com/unitrack/sdk
+
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.unitrack.flutter
+        pluginClass: UniTrackPlugin
+      ios:
+        pluginClass: UniTrackPlugin

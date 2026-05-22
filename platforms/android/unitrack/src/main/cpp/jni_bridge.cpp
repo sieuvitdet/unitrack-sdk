@@ -1,0 +1,141 @@
+/*
+ * JNI bridge — converts JNI calls from NativeBridge.kt into core C API
+ * calls. Each method does:
+ *   1. Pull jstring → C UTF-8 string with GetStringUTFChars
+ *   2. Call ut_* from libunitrack
+ *   3. Release the JNI string
+ *
+ * The Kotlin side holds the ut_context as a `Long` (cast pointer).
+ */
+
+#include <jni.h>
+#include <cstdint>
+#include "unitrack/unitrack.h"
+
+static inline ut_context* ctx_of(jlong p) {
+    return reinterpret_cast<ut_context*>(static_cast<uintptr_t>(p));
+}
+
+// Helper: scoped UTF-8 C string from jstring.
+namespace {
+struct JStr {
+    JNIEnv* env;
+    jstring j;
+    const char* s;
+    JStr(JNIEnv* e, jstring js) : env(e), j(js),
+        s(js ? e->GetStringUTFChars(js, nullptr) : nullptr) {}
+    ~JStr() { if (s && j) env->ReleaseStringUTFChars(j, s); }
+    const char* c() const { return s ? s : ""; }
+};
+}
+
+extern "C" {
+
+JNIEXPORT jlong JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeInit(
+    JNIEnv* env, jobject /*self*/,
+    jstring apiKey, jstring cfg, jint platform)
+{
+    JStr k(env, apiKey), c(env, cfg);
+    ut_context* ctx = ut_init(k.c(), c.c(), (ut_platform)platform);
+    return static_cast<jlong>(reinterpret_cast<uintptr_t>(ctx));
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeShutdown(
+    JNIEnv*, jobject, jlong p) { ut_shutdown(ctx_of(p)); }
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeFlush(
+    JNIEnv*, jobject, jlong p) { ut_flush(ctx_of(p)); }
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeIdentify(
+    JNIEnv* env, jobject, jlong p, jstring uid, jstring traits)
+{
+    JStr u(env, uid), t(env, traits);
+    ut_identify(ctx_of(p), u.c(), t.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeReset(
+    JNIEnv*, jobject, jlong p) { ut_reset(ctx_of(p)); }
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeTrack(
+    JNIEnv* env, jobject, jlong p, jstring ev, jstring props)
+{
+    JStr e(env, ev), pr(env, props);
+    ut_track(ctx_of(p), e.c(), pr.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetScreen(
+    JNIEnv* env, jobject, jlong p, jstring name)
+{
+    JStr n(env, name);
+    ut_set_screen(ctx_of(p), n.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetEnabled(
+    JNIEnv*, jobject, jlong p, jboolean on)
+{
+    ut_set_enabled(ctx_of(p), on ? 1 : 0);
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogTap(
+    JNIEnv* env, jobject, jlong p, jstring key, jstring scr, jstring extra)
+{
+    JStr k(env, key), s(env, scr), x(env, extra);
+    ut_log_tap(ctx_of(p), k.c(), s.c(), x.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogNetwork(
+    JNIEnv* env, jobject, jlong p, jstring url, jstring method, jint status,
+    jlong dur, jlong req_bytes, jlong resp_bytes, jstring err)
+{
+    JStr u(env, url), m(env, method), e(env, err);
+    ut_log_network(ctx_of(p), u.c(), m.c(), status,
+                   (long)dur, (long)req_bytes, (long)resp_bytes, e.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogJsonError(
+    JNIEnv* env, jobject, jlong p, jstring t, jstring err, jstring stk, jstring prev)
+{
+    JStr tt(env, t), e(env, err), s(env, stk), pv(env, prev);
+    ut_log_json_error(ctx_of(p), tt.c(), e.c(), s.c(), pv.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogMemoryWarning(
+    JNIEnv* env, jobject, jlong p, jlong used, jlong limit, jstring scr)
+{
+    JStr s(env, scr);
+    ut_log_memory_warning(ctx_of(p), (long)used, (long)limit, s.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogCrash(
+    JNIEnv* env, jobject, jlong p, jstring crash)
+{
+    JStr c(env, crash);
+    ut_log_crash(ctx_of(p), c.c());
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogForeground(
+    JNIEnv*, jobject, jlong p) { ut_log_foreground(ctx_of(p)); }
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogBackground(
+    JNIEnv*, jobject, jlong p) { ut_log_background(ctx_of(p)); }
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogAppStart(
+    JNIEnv*, jobject, jlong p, jlong ms) { ut_log_app_start(ctx_of(p), (long)ms); }
+
+} // extern "C"
