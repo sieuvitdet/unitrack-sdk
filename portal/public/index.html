@@ -499,13 +499,14 @@ setInterval(()=>{ if(me&&route.name==='project'&&route.tab==='logs'&&!$('#drawer
 
 let me=null;
 async function boot(){
-  try{
-    const r=await fetch(BASE+'/auth/me');
-    if(r.ok){ me=await r.json(); onAuthed(); return; }
-  }catch(e){}
-  // Not authed — show login form
+  // Show login form immediately — no blank screen while waiting for /auth/me
   const isSignup=/[?&]signup=1/.test(location.search);
   renderAuth(isSignup?'signup':'login');
+  // Then check if already logged in — if yes, replace with dashboard
+  try{
+    const r=await fetch(BASE+'/auth/me');
+    if(r.ok){ me=await r.json(); onAuthed(); }
+  }catch(e){}
 }
 function onAuthed(){
   $('#nav').hidden=false;
