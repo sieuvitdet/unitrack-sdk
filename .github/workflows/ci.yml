@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core-tests:
+    name: Core tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sqlite3 dev (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Configure
+        run: |
+          cmake -S core -B build/host \
+                -DUT_BUILD_TESTS=ON \
+                -DUT_USE_BUNDLED_SQLITE=OFF
+
+      - name: Build
+        run: cmake --build build/host -j
+
+      - name: Test
+        run: ./build/host/tests/unitrack_tests
+
+  ios-build:
+    name: iOS framework
+    runs-on: macos-14
+    needs: core-tests
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/fetch_sqlite.sh
+      - run: ./scripts/build_ios.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UniTrack.xcframework
+          path: dist/UniTrack.xcframework
+
+  android-build:
+    name: Android AAR
+    runs-on: ubuntu-latest
+    needs: core-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - run: ./scripts/fetch_sqlite.sh
+      - run: ./scripts/build_android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unitrack.aar
+          path: dist/unitrack.aar
+
+  rn-build:
+    name: React Native package
+    runs-on: ubuntu-latest
+    needs: core-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: ./scripts/build_rn.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unitrack-rn-tarball
+          path: dist/*.tgz
+
+  flutter-build:
+    name: Flutter package
+    runs-on: ubuntu-latest
+    needs: core-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: '3.24.0' }
+      - run: |
+          cd platforms/flutter
+          flutter pub get
+          flutter analyze
