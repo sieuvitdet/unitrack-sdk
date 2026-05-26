@@ -1,0 +1,15 @@
+{
+  "name": "@unitrack/snowplow",
+  "version": "1.0.0",
+  "description": "Snowplow provider for UniTrack React Native — forwards events to a Snowplow collector.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "license": "MIT",
+  "peerDependencies": {
+    "@unitrack/react-native": "*",
+    "@snowplow/react-native-tracker": ">=0.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
