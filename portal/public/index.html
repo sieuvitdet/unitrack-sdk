@@ -17,17 +17,17 @@
   header h1{font-size:16px;margin:0;font-weight:600;}
   header .crumb{color:var(--muted);font-size:13px;margin-left:4px;}
   header .live{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
-  /* The [hidden] attribute must win over the display:flex/inline above, or the
-     nav + logout box show even when logged out. */
   [hidden]{display:none !important;}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,215,150,.5)}70%{box-shadow:0 0 0 8px rgba(39,215,150,0)}100%{box-shadow:0 0 0 0 rgba(39,215,150,0)}}
   .wrap{padding:22px;max-width:1400px;margin:0 auto;}
-  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;}
+  .btn:hover{opacity:.9;}
   .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line);}
   .btn.sm{padding:5px 10px;font-size:12px;}
   .btn.danger{background:var(--danger);}
-  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;}
+  input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:18px;}
   .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0;padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px;}
@@ -38,6 +38,7 @@
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);}
   td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top;}
   tr.click:hover{background:var(--panel2);cursor:pointer;}
+  tr.click{cursor:pointer;transition:background .1s;}
   .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600;background:var(--chip);color:var(--accent);white-space:nowrap;}
   .badge.flutter{color:#7ee787;}.badge.native_ios{color:#a5a5ff;}.badge.native_android{color:#7ee787;}.badge.react_native{color:#79c0ff;}
   .badge.crash,.badge.json_parse_error,.badge.network_error{color:var(--danger);background:#2a1620;}
@@ -51,7 +52,6 @@
   .tab{padding:11px 12px;font-size:13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;}
   .tab.active{color:var(--text);border-bottom-color:var(--accent);}
   .empty{padding:40px;text-align:center;color:var(--muted);}
-  /* drag-drop */
   .deflist{display:flex;flex-direction:column;gap:8px;padding:14px 16px;}
   .def{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:grab;display:flex;justify-content:space-between;align-items:center;}
   .def:active{cursor:grabbing;}
@@ -59,25 +59,30 @@
   .elrow{transition:background .15s;}
   .elrow.drop{background:rgba(91,140,255,.18);outline:2px dashed var(--accent);}
   .pill{background:var(--chip);border-radius:6px;padding:1px 8px;font-size:11px;}
-  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:0;width:440px;max-width:92vw;}
+  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:0;width:480px;max-width:92vw;}
   dialog::backdrop{background:rgba(0,0,0,.5);}
-  .dlg-h{padding:16px;border-bottom:1px solid var(--line);font-weight:600;}
-  .dlg-b{padding:16px;display:flex;flex-direction:column;gap:12px;}
+  .dlg-h{padding:16px;border-bottom:1px solid var(--line);font-weight:600;display:flex;justify-content:space-between;align-items:center;}
+  .dlg-b{padding:16px;display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow-y:auto;}
   .dlg-f{padding:14px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;}
   label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px;}
-  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,60vw);max-width:96vw;background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;z-index:20;display:flex;flex-direction:column;}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(860px,70vw);max-width:96vw;background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;z-index:20;display:flex;flex-direction:column;}
   @media(max-width:760px){.drawer{width:96vw;}}
   .drawer.open{transform:translateX(0);}
   .drawer .dh{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--line);}
   .drawer .dh button{margin-left:auto;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;}
   .drawer .db{padding:16px;overflow:auto;}
-  /* Wrap long JSON instead of scrolling horizontally, so values are readable. */
   .drawer pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;overflow-x:hidden;}
   .scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:15;display:none;}
   .scrim.open{display:block;}
   .kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin-bottom:14px;font-size:13px;}
   .kv .key{color:var(--muted);}
   .kv .mono{word-break:break-word;overflow-wrap:anywhere;}
+  .filter-bar{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .filter-bar input,.filter-bar select{height:32px;font-size:12px;padding:6px 10px;}
+  .autocomplete-list{position:absolute;background:var(--panel2);border:1px solid var(--line);border-radius:6px;max-height:200px;overflow-y:auto;z-index:10;min-width:200px;}
+  .autocomplete-list .item{padding:8px 12px;cursor:pointer;font-size:12px;}
+  .autocomplete-list .item:hover{background:var(--panel);color:var(--accent2);}
+  .relative{position:relative;}
 </style>
 </head>
 <body>
@@ -89,11 +94,9 @@
   <div class="live" id="userBox" hidden><span class="muted" id="userEmail"></span> · <a id="logout">Đăng xuất</a></div>
 </header>
 <div class="wrap" id="view">
-  <!-- Static login form: visible immediately, works even if JS is blocked
-       (posts as a normal form). JS upgrades it to the SPA flow when it runs. -->
   <div id="bootLogin" style="max-width:380px;margin:8vh auto">
     <div class="panel" id="bootLoginPanel" style="padding:0">
-      <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v17</span></h2>
+      <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v18</span></h2>
       <form method="POST" action="auth/login-form" style="padding:18px;display:flex;flex-direction:column;gap:12px">
         <div><label>Email</label><input name="email" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
         <div><label>Mật khẩu</label><input name="password" type="password" required placeholder="••••••" style="width:100%"/></div>
@@ -127,9 +130,8 @@
   </div>
 </div>
 
-<!-- new project dialog -->
 <dialog id="projDlg">
-  <div class="dlg-h">Tạo dự án mới</div>
+  <div class="dlg-h">Tạo dự án mới<button onclick="projDlg.close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
   <div class="dlg-b">
     <div><label>Tên dự án</label><input id="pName" placeholder="Mobix Shop" style="width:100%"/></div>
     <div><label>App bundle / package</label><input id="pBundle" placeholder="asia.mobix.shop" style="width:100%"/></div>
@@ -144,21 +146,32 @@
   <div class="dlg-f"><button class="btn ghost" onclick="projDlg.close()">Huỷ</button><button class="btn" id="pCreate">Tạo</button></div>
 </dialog>
 
+<dialog id="treeMappingDlg">
+  <div class="dlg-h">Gán event<button onclick="treeMappingDlg.close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+  <div class="dlg-b">
+    <div class="muted" style="font-size:12px;margin-bottom:10px" id="treeMappingInfo"></div>
+    <div><label>Tên nghiệp vụ</label>
+      <div class="relative">
+        <input id="treeMapName" placeholder="vd: user_purchase_completed" style="width:100%"/>
+        <div id="treeNameSuggest" class="autocomplete-list" style="display:none"></div>
+      </div>
+    </div>
+    <div><label>Schema iglu (tuỳ chọn)</label><input id="treeMapSchema" placeholder="iglu:vendor/event/jsonschema/1-0-0" style="width:100%"/></div>
+  </div>
+  <div class="dlg-f"><button class="btn ghost" onclick="treeMappingDlg.close()">Huỷ</button><button class="btn" id="treeSaveMap">Lưu</button></div>
+</dialog>
+
 <script>
-// The static #bootLogin form is already on screen and fully functional via a
-// plain form POST. JS only ENHANCES — it must never blank the page out from
-// under that form. We leave #view untouched until we know the user is authed.
 const BASE = location.pathname.replace(/\/index\.html$/,'').replace(/\/$/,'');
 async function api(p,o){
   const r=await fetch(BASE+p,o);
-  if(r.status===401){ me=null; renderAuth('login'); throw new Error('Phiên hết hạn, vui lòng đăng nhập lại'); }
+  if(r.status===401){ me=null; renderAuth('login'); throw new Error('Phiên hết hạn'); }
   const ct=r.headers.get('content-type')||'';
   const body=ct.includes('json')?await r.json().catch(()=>({})):await r.text();
   if(!r.ok) throw new Error((body&&body.error)||('HTTP '+r.status));
   return body;
 }
 const $=(s)=>document.querySelector(s);
-// Brief confirmation toast (bottom-center). Used e.g. after a mapping is saved.
 function toast(msg,kind){
   let t=document.getElementById('toast');
   if(!t){ t=document.createElement('div'); t.id='toast';
@@ -171,23 +184,19 @@ function toast(msg,kind){
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtAgo=(ms)=>{if(!ms)return'—';const s=(Date.now()-ms)/1000;if(s<60)return Math.floor(s)+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';};
 const fmtTime=(ms)=>new Date(ms).toLocaleString('vi-VN',{hour12:false});
-// Small inline tags derived from an event's properties, shown next to the event
-// name in the log table (so you see key context without opening the drawer).
 function evTag(r){
-  let p=r.properties; if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){p={};}}
+  let p=r.properties; if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){p={};}}\
   p=p||{};
   const tag=(t,color)=>` <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:${color};color:#fff;vertical-align:middle">${t}</span>`;
   let out='';
   if(r.event_name==='crash' && (p.crash_on_launch===true||p.crash_on_launch==='true')) out+=tag('on-launch','#b91c1c');
   if(r.event_name==='notification' && p.state) out+=tag(p.state,{foreground:'#2563eb',background:'#6b7280',silent:'#7c3aed'}[p.state]||'#6b7280');
-  if(r.event_name==='notification' && p.action==='opened') out+=tag('opened','#059669');
   return out;
 }
 
 let route = {name:'projects', pid:null, tab:'logs'};
 function go(r){route={...route,...r};render();}
 
-// ---------- router ----------
 $('#navProjects').onclick=()=>go({name:'projects'});
 $('#navCms').onclick=()=>go({name:'cms'});
 
@@ -197,11 +206,10 @@ async function render(){
     if(route.name==='project'){ return await renderProject(); }
     if(route.name==='cms'){ $('#crumb').textContent='· CMS'; return await renderCMS(); }
   }catch(e){
-    $('#view').innerHTML=`<div class="panel" style="padding:20px"><b style="color:var(--danger)">Lỗi hiển thị</b><pre style="white-space:pre-wrap;color:var(--muted)">${esc(e&&e.stack||e)}</pre></div>`;
+    $('#view').innerHTML=`<div class="panel" style="padding:20px"><b style="color:var(--danger)">Lỗi</b><pre style="white-space:pre-wrap;color:var(--muted)">${esc(e&&e.stack||e)}</pre></div>`;
   }
 }
 
-// ---------- CMS overview ----------
 function gradeColor(g){return {A:'var(--accent2)',B:'var(--accent)',C:'var(--warn)',D:'var(--danger)','N/A':'var(--muted)'}[g]||'var(--muted)';}
 function scoreBar(h){
   return `<div style="display:flex;align-items:center;gap:8px">
@@ -221,33 +229,24 @@ async function renderCMS(){
       <div class="card"><div class="k">Naming warnings</div><div class="v" style="color:${t.naming_warnings?'var(--danger)':'inherit'}">${t.naming_warnings}</div></div>
     </div>
     <div class="panel"><table>
-      <thead><tr><th>Dự án</th><th>Source</th><th>Events</th><th>Định nghĩa</th><th>Naming</th><th>Health Score</th><th></th></tr></thead>
+      <thead><tr><th>Dự án</th><th>Source</th><th>Events</th><th>Định nghĩa</th><th>Health Score</th><th></th></tr></thead>
       <tbody>${data.projects.length?data.projects.map(p=>`
-        <tr>
-          <td class="click" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted mono" style="font-size:11px">${esc(p.app_bundle)||''}</div></td>
+        <tr class="click">
+          <td onclick="go({name:'project',pid:${p.id},tab:'logs'})"><b>${esc(p.name)}</b><div class="muted mono" style="font-size:11px">${esc(p.app_bundle)||''}</div></td>
           <td><span class="badge ${esc(p.source_type)}">${esc(p.source_type)||'—'}</span></td>
           <td>${p.total_events}</td>
-          <td>${p.elements_defined}/${p.elements_total} <span class="muted">(${p.definition_rate}%)</span></td>
-          <td>${p.naming_warnings?`<span style="color:var(--danger)">⚠ ${p.naming_warnings}</span>`:'<span style="color:var(--accent2)">✓</span>'}</td>
+          <td>${p.elements_defined}/${p.elements_total}</td>
           <td>${scoreBar(p.health)}</td>
-          <td style="white-space:nowrap">
-            <a class="btn ghost sm" onclick="go({name:'project',pid:${p.id},tab:'logs'})">Mở</a>
-            <a class="btn ghost sm" href="${BASE}/api/projects/${p.id}/export">⬇ Excel</a>
-          </td>
-        </tr>`).join(''):'<tr><td colspan=7 class=empty>Chưa có dự án.</td></tr>'}
-      </tbody></table></div>
-    <div class="panel"><h2>Chi tiết score (click dự án ở trên để mở)</h2>
-      <div style="padding:14px 16px" class="muted">Health Score = Coverage 30% · Naming 20% · Diversity 15% · Crash 20% · Activity 15%</div>
-    </div>`;
-  document.querySelectorAll('.click[data-id]').forEach(el=>el.onclick=()=>go({name:'project',pid:el.dataset.id,tab:'logs'}));
+          <td style="white-space:nowrap"><a class="btn ghost sm" onclick="go({name:'project',pid:${p.id}})">Mở</a></td>
+        </tr>`).join(''):'<tr><td colspan=6 class=empty>Chưa có dự án.</td></tr>'}
+      </tbody></table></div>`;
 }
 
-// ---------- projects list ----------
 async function renderProjects(){
   const projs = await api('/api/projects');
   $('#view').innerHTML = `
     <div class="row" style="justify-content:space-between;margin-bottom:16px">
-      <h2 style="margin:0;border:none;padding:0;text-transform:none;font-size:18px;color:var(--text);letter-spacing:0">Dự án</h2>
+      <h2 style="margin:0;border:none;padding:0;text-transform:none;font-size:18px;color:var(--text)">Dự án</h2>
       <button class="btn" id="newProj">+ Dự án mới</button>
     </div>
     <div class="panel">
@@ -260,11 +259,11 @@ async function renderProjects(){
           <td>${p.event_count}</td>
           <td><span class="keybox">${esc(p.api_key)}</span></td>
           <td><button class="btn ghost sm del" data-id="${p.id}">Xoá</button></td>
-        </tr>`).join(''):'<tr><td colspan="6" class="empty">Chưa có dự án. Tạo dự án để lấy API key.</td></tr>'}
+        </tr>`).join(''):'<tr><td colspan="6" class="empty">Chưa có dự án.</td></tr>'}
       </tbody></table>
     </div>`;
   $('#newProj').onclick=()=>{ $('#pName').value='';$('#pBundle').value='';$('#projDlg').showModal(); };
-  document.querySelectorAll('tr.click').forEach(tr=>tr.onclick=(e)=>{ if(e.target.closest('.del'))return; go({name:'project',pid:tr.dataset.id,tab:'logs'}); });
+  document.querySelectorAll('tr.click').forEach(tr=>tr.onclick=(e)=>{ if(e.target.closest('.del'))return; go({name:'project',pid:tr.dataset.id}); });
   document.querySelectorAll('.del').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); if(confirm('Xoá dự án này?')){ await fetch(`${BASE}/api/projects/${b.dataset.id}`,{method:'DELETE'}); renderProjects(); }});
 }
 
@@ -275,7 +274,12 @@ $('#pCreate').onclick=async()=>{
   $('#projDlg').close(); renderProjects();
 };
 
-// ---------- project detail ----------
+const PROVIDER_COLORS={unitrack:'#2563eb',snowplow:'#16a34a',firebase:'#d97706'};
+function providerBadge(p){
+  const c=PROVIDER_COLORS[p]||'#6b7280';
+  return `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:${c};color:#fff">${esc(p||'unitrack')}</span>`;
+}
+
 async function renderProject(){
   const pid=route.pid;
   const [p,stats]=await Promise.all([api(`/api/projects/${pid}`),api(`/api/projects/${pid}/stats`)]);
@@ -284,234 +288,119 @@ async function renderProject(){
     <div class="row" style="justify-content:space-between;margin-bottom:16px">
       <div class="row">
         <a onclick="go({name:'projects'})">← Dự án</a>
-        <h2 style="margin:0;border:none;padding:0;text-transform:none;font-size:18px;color:var(--text);letter-spacing:0">${esc(p.name)}</h2>
+        <h2 style="margin:0;border:none;padding:0;text-transform:none;font-size:18px;color:var(--text)">${esc(p.name)}</h2>
         <span class="badge ${esc(p.source_type)}">${esc(p.source_type)}</span>
       </div>
       <div class="row">
         <span class="keybox" title="API key">${esc(p.api_key)}</span>
-        <button class="btn ghost sm" id="provBtn">⚙ Providers</button>
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
-      </div>
-    </div>
-    <div class="panel" id="provPanel" style="display:none;padding:16px;margin-bottom:16px">
-      <b>Providers — forward & xem log đa nguồn</b>
-      <div class="muted" style="font-size:12px;margin:6px 0 12px">
-        Khi bật, portal hiển thị log từ provider tương ứng (nhãn màu trong bảng Log).
-      </div>
-      <label class="row" style="gap:8px"><input type="checkbox" id="provSnow"> Snowplow</label>
-      <div id="snowCfg" style="margin:6px 0 12px 24px">
-        <div class="muted" style="font-size:12px">Snowplow collector endpoint của bạn (trỏ tracker tới đây):</div>
-        <div class="keybox mono" style="display:block;margin:4px 0">${location.origin}${BASE}/sp/${esc(p.api_key)}</div>
-        <div class="muted" style="font-size:12px;margin-top:6px">Forward tới collector THẬT (để trống = chỉ thu ở portal):</div>
-        <input id="spForward" placeholder="https://collector-that.cua-ban.com" style="width:100%;margin-top:4px" value="${esc(p.sp_forward_url||'')}"/>
-      </div>
-      <label class="row" style="gap:8px"><input type="checkbox" id="provFire"> Firebase <span class="muted" style="font-size:12px">(SDK gửi bản sao về portal)</span></label>
-      <div class="row" style="margin-top:12px"><button class="btn sm" id="provSave">Lưu</button></div>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <b>Map event → Snowplow schema</b>
-      <div class="muted" style="font-size:12px;margin:6px 0 10px">
-        Khi Snowplow thêm loại event mới, thêm map ở đây để portal đóng gói đúng
-        schema rồi forward — KHÔNG cần build lại app. Event đã có schema chuẩn (app
-        tự bắn) thì để <i>forward = off</i> (portal chỉ log).
-      </div>
-      <table style="margin-bottom:10px"><thead><tr>
-        <th>Event name (thô)</th><th>Mode</th><th>Schema (iglu)</th><th>Forward</th><th></th>
-      </tr></thead><tbody id="spMapRows"></tbody></table>
-      <div class="row" style="gap:6px;flex-wrap:wrap">
-        <input id="smName" placeholder="event_name (vd: check)" style="flex:1;min-width:120px"/>
-        <select id="smMode"><option value="self_describing">self-describing</option><option value="structured">structured</option></select>
-        <input id="smSchema" placeholder="iglu:vendor/event_check/jsonschema/1-0-0" style="flex:2;min-width:200px"/>
-        <label class="row" style="gap:4px;font-size:12px"><input type="checkbox" id="smFwd" checked> forward</label>
-        <button class="btn sm" id="smAdd">+ Thêm map</button>
       </div>
     </div>
     <div class="cards">
       <div class="card"><div class="k">Events</div><div class="v">${stats.total}</div></div>
       <div class="card"><div class="k">Sessions</div><div class="v">${stats.sessions}</div></div>
       <div class="card"><div class="k">Users</div><div class="v">${stats.users}</div></div>
-      <div class="card"><div class="k">1h qua</div><div class="v">${stats.last_hour}</div></div>
       <div class="card"><div class="k">Crashes</div><div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div></div>
     </div>
     <div class="panel">
       <div class="tabs">
         <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
-        <div class="tab ${route.tab==='events'?'active':''}" data-tab="events">Khai báo & gán event</div>
         <div class="tab ${route.tab==='tree'?'active':''}" data-tab="tree">Cây class → event</div>
-        <div class="tab ${route.tab==='config'?'active':''}" data-tab="config">Config (remote)</div>
       </div>
       <div id="tabBody"></div>
     </div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>go({tab:t.dataset.tab}));
-  // Providers settings panel.
-  const provs=(()=>{ try{return JSON.parse(p.providers||'[]');}catch(_){return [];} })();
-  $('#provSnow').checked=provs.includes('snowplow');
-  $('#provFire').checked=provs.includes('firebase');
-  $('#provBtn').onclick=()=>{ const el=$('#provPanel'); el.style.display=el.style.display==='none'?'block':'none'; };
-  $('#provSave').onclick=async()=>{
-    const list=[]; if($('#provSnow').checked)list.push('snowplow'); if($('#provFire').checked)list.push('firebase');
-    await api(`/api/projects/${pid}/providers`,{method:'PUT',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({providers:list, sp_forward_url:$('#spForward').value.trim()})});
-    toast('Đã lưu cấu hình providers');
-  };
-  renderSpMaps(pid);
-  $('#smAdd').onclick=async()=>{
-    const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
-    const mode=$('#smMode').value, schema=$('#smSchema').value.trim();
-    if(mode==='self_describing' && !schema){toast('Self-describing cần schema iglu','err');return;}
-    try{
-      await api(`/api/projects/${pid}/sp-maps`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({event_name:name,mode,schema,forward:$('#smFwd').checked})});
-      $('#smName').value='';$('#smSchema').value='';
-      toast('Đã lưu map'); renderSpMaps(pid);
-    }catch(e){toast('Lưu map thất bại: '+e.message,'err');}
-  };
   if(route.tab==='logs') renderLogs(pid);
-  else if(route.tab==='tree') renderTree(pid);
-  else if(route.tab==='config') renderConfig(pid);
-  else renderMapping(pid);
+  else renderTree(pid);
 }
 
-async function renderSpMaps(pid){
-  let maps=[]; try{ maps=await api(`/api/projects/${pid}/sp-maps`); }catch(_){}
-  const tb=$('#spMapRows'); if(!tb)return;
-  tb.innerHTML = maps.length ? maps.map(m=>`
-    <tr>
-      <td class="mono">${esc(m.event_name)}</td>
-      <td><span class="pill">${esc(m.mode)}</span></td>
-      <td class="mono muted" style="word-break:break-all">${esc(m.schema)||'—'}</td>
-      <td>${m.forward?'<span style="color:var(--accent2)">✓ on</span>':'<span class="muted">off</span>'}</td>
-      <td><button class="btn ghost sm smDel" data-n="${esc(m.event_name)}">×</button></td>
-    </tr>`).join('') : '<tr><td colspan="5" class="muted" style="padding:10px">Chưa có map. Event UniTrack sẽ không tự forward sang Snowplow.</td></tr>';
-  tb.querySelectorAll('.smDel').forEach(b=>b.onclick=async()=>{
-    await fetch(`${BASE}/api/projects/${pid}/sp-maps/${encodeURIComponent(b.dataset.n)}`,{method:'DELETE'});
-    toast('Đã xoá map'); renderSpMaps(pid);
-  });
-}
-
-// Colored chip for the event source (which feed it came in on).
-const PROVIDER_COLORS={unitrack:'#2563eb',snowplow:'#16a34a',firebase:'#d97706'};
-function providerBadge(p){
-  const c=PROVIDER_COLORS[p]||'#6b7280';
-  return `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:${c};color:#fff">${esc(p||'unitrack')}</span>`;
-}
-let _logProvider=''; // '' = all
+let _logProvider='';
+let _logScreenFilter='';
+let _logEventFilter='';
+let _logSearchQuery='';
 async function renderLogs(pid){
-  const q=_logProvider?`&provider=${encodeURIComponent(_logProvider)}`:'';
-  const rows=await api(`/api/projects/${pid}/events?limit=200${q}`);
+  const allRows=await api(`/api/projects/${pid}/events?limit=500`);
+
+  let filtered=allRows;
+  if(_logScreenFilter) filtered=filtered.filter(r=>(r.screen_name||r.screen||'')===_logScreenFilter);
+  if(_logEventFilter) filtered=filtered.filter(r=>r.event_name===_logEventFilter);
+  if(_logProvider) filtered=filtered.filter(r=>(r.provider||'unitrack')===_logProvider);
+  if(_logSearchQuery){
+    const q=_logSearchQuery.toLowerCase();
+    filtered=filtered.filter(r=>{
+      const props=typeof r.properties==='string'?JSON.parse(r.properties):r.properties;
+      const propsStr=JSON.stringify(props).toLowerCase();
+      return r.screen_name?.toLowerCase().includes(q)||r.element_key?.toLowerCase().includes(q)||propsStr.includes(q)||r.event_name.toLowerCase().includes(q);
+    });
+  }
+
+  const screens=[...new Set(allRows.map(r=>r.screen_name||r.screen||'').filter(s=>s))].sort();
+  const eventNames=[...new Set(allRows.map(r=>r.event_name))].sort();
+
   const tab=(p,label)=>`<span class="spv ${_logProvider===p?'on':''}" data-p="${p}" style="cursor:pointer;font-size:12px;padding:3px 10px;border-radius:6px;${_logProvider===p?'background:var(--accent);color:#fff':'background:var(--panel2);color:var(--muted)'}">${label}</span>`;
+
   $('#tabBody').innerHTML=`
-    <div class="row" style="gap:6px;padding:10px 4px">
-      <span class="muted" style="font-size:12px">Nguồn:</span>
+    <div class="filter-bar">
+      <span class="muted" style="align-self:center;font-size:12px">Nguồn:</span>
       ${tab('','Tất cả')} ${tab('unitrack','UniTrack')} ${tab('snowplow','Snowplow')} ${tab('firebase','Firebase')}
     </div>
+    <div class="filter-bar" style="flex-direction:column;gap:8px;padding:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div>
+          <label>Screen</label>
+          <select id="filterScreen" style="width:100%">
+            <option value="">Tất cả</option>
+            ${screens.map(s=>`<option value="${esc(s)}" ${_logScreenFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Event name</label>
+          <select id="filterEvent" style="width:100%">
+            <option value="">Tất cả</option>
+            ${eventNames.map(e=>`<option value="${esc(e)}" ${_logEventFilter===e?'selected':''}>${esc(e)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Search (tên/key)</label>
+          <input id="filterSearch" placeholder="element, url..." value="${esc(_logSearchQuery)}" style="width:100%"/>
+        </div>
+      </div>
+      <div class="muted" style="font-size:11px">Hiện ${filtered.length}/${allRows.length} event</div>
+    </div>
     <div style="max-height:58vh;overflow:auto"><table>
-    <thead><tr><th>Event</th><th>Nguồn</th><th>Screen</th><th>Class</th><th>Element</th><th>Plat</th><th>Time</th></tr></thead>
-    <tbody>${rows.length?rows.map((r,i)=>`
-      <tr class="click ev" data-i="${i}">
-        <td><span class="badge ${esc(r.event_name)}">${esc(r.event_name)}</span>${r.mapped_event?` <span style="color:var(--accent2)">→ ${esc(r.mapped_event)}</span>`:''}${evTag(r)}</td>
+    <thead><tr><th>Event</th><th>Nguồn</th><th>Screen</th><th>Element</th><th>Plat</th><th>Time</th></tr></thead>
+    <tbody>${filtered.length?filtered.map((r,i)=>`
+      <tr class="click ev" data-i="${i}" onclick="openDrawer(window._filteredRows[${i}])">
+        <td><span class="badge ${esc(r.event_name)}">${esc(r.event_name)}</span>${evTag(r)}</td>
         <td>${providerBadge(r.provider)}</td>
         <td>${esc(r.screen_name||r.screen)||'<span class=muted>—</span>'}</td>
-        <td class="mono muted">${esc(r.class_name)||'—'}</td>
         <td class="mono">${esc(r.element_key)||'<span class=muted>—</span>'}</td>
         <td class="muted">${esc(r.platform)||'—'}</td>
         <td class="mono muted">${fmtAgo(r.timestamp)}</td>
-      </tr>`).join(''):'<tr><td colspan=7 class=empty>Chưa có event ở nguồn này.</td></tr>'}
+      </tr>`).join(''):'<tr><td colspan=6 class=empty>Không có event phù hợp.</td></tr>'}
     </tbody></table></div>`;
-  window._rows=rows;
+
+  window._filteredRows=filtered;
   document.querySelectorAll('.spv').forEach(s=>s.onclick=()=>{ _logProvider=s.dataset.p; renderLogs(pid); });
-  document.querySelectorAll('tr.ev').forEach(tr=>tr.onclick=()=>openDrawer(rows[tr.dataset.i]));
+  $('#filterScreen').onchange=()=>{ _logScreenFilter=$('#filterScreen').value; renderLogs(pid); };
+  $('#filterEvent').onchange=()=>{ _logEventFilter=$('#filterEvent').value; renderLogs(pid); };
+  $('#filterSearch').oninput=()=>{ _logSearchQuery=$('#filterSearch').value; renderLogs(pid); };
 }
 
-// ---------- mapping (drag-drop) ----------
-async function renderMapping(pid){
-  const [defs,els]=await Promise.all([api(`/api/projects/${pid}/defs`),api(`/api/projects/${pid}/elements`)]);
-  $('#tabBody').innerHTML=`
-    <div class="grid2" style="padding:16px">
-      <div>
-        <div class="row" style="justify-content:space-between;margin-bottom:10px">
-          <b>Convention (event name đã khai báo)</b>
-          <button class="btn sm" id="addDef">+ Thêm</button>
-        </div>
-        <div class="row" id="newDefRow" style="display:none;margin-bottom:10px">
-          <input id="defName" placeholder="vd: purchase_add_to_cart" style="flex:1"/>
-          <button class="btn sm" id="saveDef">Lưu</button>
-        </div>
-        <div class="deflist" id="defs">
-          ${defs.length?defs.map(d=>`
-            <div class="def" draggable="true" data-id="${d.id}" data-name="${esc(d.name)}">
-              <span class="nm">${esc(d.name)}</span>
-              <button class="btn ghost sm deldef" data-id="${d.id}">×</button>
-            </div>`).join(''):'<div class="muted">Chưa có convention. Bấm “+ Thêm”.</div>'}
-        </div>
-        <p class="muted" style="padding:0 2px;font-size:12px">Kéo 1 convention thả vào element ở cột phải để gán.</p>
-      </div>
-      <div>
-        <b>Element chưa định nghĩa (${els.undefined.length})</b>
-        <table style="margin:8px 0 18px"><tbody id="undef">
-          ${els.undefined.length?els.undefined.map(e=>elRow(e,false)).join(''):'<tr><td class="muted" style="padding:10px">— hết —</td></tr>'}
-        </tbody></table>
-        <b style="color:var(--accent2)">Đã định nghĩa (${els.defined.length})</b>
-        <table style="margin-top:8px"><tbody id="def2">
-          ${els.defined.length?els.defined.map(e=>elRow(e,true)).join(''):'<tr><td class="muted" style="padding:10px">— chưa có —</td></tr>'}
-        </tbody></table>
-      </div>
-    </div>`;
-  // add def
-  $('#addDef').onclick=()=>{ const r=$('#newDefRow'); r.style.display=r.style.display==='none'?'flex':'none'; $('#defName').focus(); };
-  $('#saveDef').onclick=async()=>{ const n=$('#defName').value.trim(); if(!n)return; await api(`/api/projects/${pid}/defs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})}); renderMapping(pid); };
-  document.querySelectorAll('.deldef').forEach(b=>b.onclick=async()=>{ if(confirm('Xoá convention?')){await fetch(`${BASE}/api/defs/${b.dataset.id}`,{method:'DELETE'});renderMapping(pid);} });
-  // drag
-  document.querySelectorAll('.def').forEach(d=>d.addEventListener('dragstart',e=>e.dataTransfer.setData('defId',d.dataset.id)));
-  document.querySelectorAll('.elrow').forEach(row=>{
-    row.addEventListener('dragover',e=>{e.preventDefault();row.classList.add('drop');});
-    row.addEventListener('dragleave',()=>row.classList.remove('drop'));
-    row.addEventListener('drop',async e=>{
-      e.preventDefault();row.classList.remove('drop');
-      const defId=e.dataTransfer.getData('defId');
-      if(!defId){ toast('Kéo một convention từ cột trái thả vào đây','err'); return; }
-      const defName=document.querySelector(`.def[data-id="${defId}"]`)?.dataset.name||'';
-      try{
-        await api(`/api/projects/${pid}/mappings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({element_key:row.dataset.key,event_def_id:Number(defId)})});
-        toast(`Đã lưu: ${row.dataset.key} → ${defName}`);
-      }catch(err){ toast('Lưu thất bại: '+err.message,'err'); }
-      renderMapping(pid);
-    });
-  });
-  document.querySelectorAll('.unmap').forEach(b=>b.onclick=async()=>{ await fetch(`${BASE}/api/projects/${pid}/mappings/${encodeURIComponent(b.dataset.key)}`,{method:'DELETE'});toast('Đã gỡ gán');renderMapping(pid); });
-}
-function elRow(e,mapped){
-  return `<tr class="elrow" data-key="${esc(e.element_key)}">
-    <td><div class="mono">${esc(e.element_key)}</div><div class="muted" style="font-size:11px">${esc(e.screen_name||'')} ${e.class_name?'· '+esc(e.class_name):''}</div></td>
-    <td style="white-space:nowrap"><span class="pill">${e.hits} hits</span></td>
-    <td style="text-align:right">${mapped?`<span class="badge">${esc(e.event_def.name)}</span> <button class="btn ghost sm unmap" data-key="${esc(e.element_key)}">×</button>`:'<span class="muted" style="font-size:11px">kéo vào đây</span>'}</td>
-  </tr>`;
-}
-
-// ---------- class → event tree ----------
-// Parent = screen (screen_name); children = events on that screen, grouped by
-// event_name + element_key. Built from received logs. Each leaf can be assigned
-// a business name + schema into the event registry (writes config).
 async function renderTree(pid){
   const [rows, cfg] = await Promise.all([
     api(`/api/projects/${pid}/events?limit=2000`),
     api(`/api/projects/${pid}/config`),
   ]);
   const rules = cfg.rules || [];
-  // Find a rewrite rule matching this exact leaf (event + screen + element).
   const ruleFor = (ev, screen, elem) => rules.find(r =>
     r.match_event===ev &&
     (!r.match_screen || r.match_screen===screen) &&
     (!r.match_element_key || r.match_element_key===elem));
 
-  // Events with no active screen (session_started, app_foreground, notification
-  // permission, …) are fired before/around the UI — group them under one label.
   const LIFECYCLE = '(App lifecycle / pre-UI)';
-  // Strip any Swift module prefix ("MyApp.HomeVC" → "HomeVC") so old logs that
-  // recorded the qualified name group with the new bare-name logs.
   const cleanScreen = (s) => s ? String(s).split('.').pop() : '';
 
-  // Group: screen → leafKey → {event_name, element, type, hits, lastTs}
   const tree = {};
   for(const r of rows){
     const screen = cleanScreen(r.screen_name || r.screen) || LIFECYCLE;
@@ -525,35 +414,32 @@ async function renderTree(pid){
     tree[screen][leafKey]=leaf;
   }
 
-  // Real screens A→Z, with the lifecycle bucket pinned to the bottom.
   const screens = Object.keys(tree).sort((a,b)=>
     a===LIFECYCLE?1 : b===LIFECYCLE?-1 : a.localeCompare(b));
+
   $('#tabBody').innerHTML = `
     <div style="padding:14px 16px">
       <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Cấu trúc tracking dựng từ log: <b>màn hình</b> (cha) → <b>event</b> (con).
-        Bấm “gán” để map 1 event auto-capture (tap/screen/network) → <b>tên nghiệp vụ</b>.
-        SDK đổi tên ngay tại app khi kéo config về — <b>không cần code/build lại</b>.
+        Cấu trúc: <b>màn hình</b> (cha) → <b>event</b> (con). Bấm "gán" → dialog popup để map tên + suggest event từ convention.
       </div>
       ${screens.length? screens.map(s=>{
         const leaves = Object.values(tree[s]).sort((a,b)=>b.hits-a.hits);
         return `<div class="treeScreen" style="margin-bottom:10px">
-          <div class="row" style="gap:8px;padding:8px 10px;background:var(--panel2);border-radius:8px;cursor:pointer" data-screen>
+          <div class="row" style="gap:8px;padding:8px 10px;background:var(--panel2);border-radius:8px;cursor:pointer;user-select:none" data-screen>
             <span style="font-weight:600">▾ ${esc(s)}</span>
             <span class="pill">${leaves.length} event</span>
           </div>
-          <div class="treeKids" style="padding:4px 0 4px 16px">
+          <div class="treeKids" style="padding:4px 0 4px 16px;display:none">
             ${leaves.map((l,i)=>{
               const rule = ruleFor(l.event_name, l.screen, l.element);
               return `<div class="row" style="gap:10px;padding:5px 8px;justify-content:space-between">
-                <div>
+                <div style="flex:1">
                   <span class="badge ${esc(l.event_name)}">${esc(l.event_name)}</span>
                   ${l.element?`<span class="mono muted" style="font-size:11px"> ${esc(l.element)}</span>`:''}
-                  ${l.type?`<span class="muted" style="font-size:11px"> · ${esc(l.type)}</span>`:''}
                   ${rule?` <span style="color:var(--accent2);font-size:11px">→ ${esc(rule.to_name)}</span>`:''}
                 </div>
                 <div class="row" style="gap:8px">
-                  <span class="pill">${l.hits}</span>
+                  <span class="pill">${l.hits} hits</span>
                   <button class="btn ghost sm treeAssign" data-ev="${esc(l.event_name)}" data-screen="${esc(l.screen)}" data-elem="${esc(l.element)}">${rule?'sửa':'gán'}</button>
                   ${rule?`<button class="btn ghost sm treeUnassign" data-to="${esc(rule.to_name)}">×</button>`:''}
                 </div>
@@ -561,33 +447,56 @@ async function renderTree(pid){
             }).join('')}
           </div>
         </div>`;
-      }).join('') : '<div class="empty">Chưa có log để dựng cây. Chạy app để thu event.</div>'}
+      }).join('') : '<div class="empty">Chưa có log. Chạy app để thu event.</div>'}
     </div>`;
 
-  // collapse/expand
-  document.querySelectorAll('[data-screen].row').forEach(()=>{}); // (no-op safety)
   document.querySelectorAll('.treeScreen > [data-screen]').forEach(h=>h.onclick=()=>{
-    const k=h.nextElementSibling; k.style.display = k.style.display==='none'?'block':'none';
-    const sp=h.querySelector('span'); sp.textContent = sp.textContent.replace(/^[▾▸]/, k.style.display==='none'?'▸':'▾');
+    const k=h.nextElementSibling;
+    const show=k.style.display==='none';
+    k.style.display = show?'block':'none';
+    const sp=h.querySelector('span');
+    sp.textContent = sp.textContent.replace(/^[▾▸]/, show?'▾':'▸');
   });
 
-  // assign → write a rewrite RULE (match event+screen+element → business name).
   document.querySelectorAll('.treeAssign').forEach(b=>b.onclick=async()=>{
     const ev=b.dataset.ev, screen=b.dataset.screen, elem=b.dataset.elem;
     const existing=ruleFor(ev,screen,elem);
-    const toName=prompt(`Map "${ev}"${elem?(' ['+elem+']'):''} trên màn "${screen}" → tên nghiệp vụ:`, existing?existing.to_name:'');
-    if(!toName) return;
-    const schema=prompt('Schema iglu (tuỳ chọn, để trống nếu không):', existing?(existing.add_props&&existing.add_props._schema)||'':'')||'';
-    // remove any prior rule for this same match, then add the new one
-    const next = rules.filter(r=>!(r.match_event===ev && (r.match_screen||'')===(screen||'') && (r.match_element_key||'')===(elem||'')));
-    const rule = { match_event:ev, to_name:toName };
-    if(screen && screen!==LIFECYCLE) rule.match_screen=screen;
-    if(elem) rule.match_element_key=elem;
-    if(schema) rule.add_props={ _schema:schema };
-    next.push(rule);
-    await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:next})});
-    toast('Đã lưu rule'); renderTree(pid);
+    const allEventNames=[...new Set(rules.map(r=>r.to_name))].sort();
+
+    window._treeMapInfo={ev,screen,elem,existing,pid,rules,LIFECYCLE};
+    $('#treeMappingInfo').textContent=`Map "${ev}"${elem?' ['+elem+']':''} trên "${screen||LIFECYCLE}"`;
+    $('#treeMapName').value=existing?.to_name||'';
+    $('#treeMapSchema').value=(existing?.add_props?._schema)||'';
+
+    const suggest=$('#treeNameSuggest');
+    $('#treeMapName').oninput=()=>{
+      const val=$('#treeMapName').value.toLowerCase();
+      const matches=allEventNames.filter(n=>n.toLowerCase().includes(val)).slice(0,8);
+      suggest.innerHTML=matches.map(n=>`<div class="item" onclick="$('#treeMapName').value='${esc(n)}';$('#treeNameSuggest').style.display='none'">${esc(n)}</div>`).join('');
+      suggest.style.display=matches.length?'block':'none';
+    };
+
+    $('#treeSaveMap').onclick=async()=>{
+      const toName=$('#treeMapName').value.trim();
+      if(!toName){ toast('Nhập tên sự kiện','err'); return; }
+      const schema=$('#treeMapSchema').value.trim();
+
+      const next = rules.filter(r=>!(r.match_event===ev && (r.match_screen||'')===(screen||'') && (r.match_element_key||'')===(elem||'')));
+      const rule = { match_event:ev, to_name:toName };
+      if(screen && screen!==LIFECYCLE) rule.match_screen=screen;
+      if(elem) rule.match_element_key=elem;
+      if(schema) rule.add_props={ _schema:schema };
+      next.push(rule);
+
+      await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:next})});
+      toast('Đã lưu rule');
+      $('#treeMappingDlg').close();
+      renderTree(pid);
+    };
+
+    $('#treeMappingDlg').showModal();
   });
+
   document.querySelectorAll('.treeUnassign').forEach(b=>b.onclick=async()=>{
     const next=rules.filter(r=>r.to_name!==b.dataset.to);
     await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:next})});
@@ -595,123 +504,6 @@ async function renderTree(pid){
   });
 }
 
-// ---------- remote config editor ----------
-async function renderConfig(pid){
-  const c = await api(`/api/projects/${pid}/config`);
-  const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{});
-  const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
-  $('#tabBody').innerHTML = `
-    <div style="padding:16px;max-width:760px">
-      <div class="muted" style="font-size:12px;margin-bottom:14px">
-        App kéo cấu hình này về lúc khởi tạo (qua <span class="mono">GET /config</span>).
-        Đổi ở đây → app áp dụng lần mở sau, <b>không cần build lại</b>. Phiên bản: <b>v${c.version}</b>
-      </div>
-
-      <h3 style="margin:0 0 8px;font-size:14px">Endpoint & SDK</h3>
-      <label>Ingest endpoint</label>
-      <input id="cfEndpoint" style="width:100%" value="${esc(c.endpoint)}"/>
-      <div class="row" style="gap:10px;margin-top:8px;flex-wrap:wrap">
-        <div><label>batchSize</label><input id="cfBatch" type="number" style="width:90px" value="${s.batchSize??10}"/></div>
-        <div><label>flushIntervalMs</label><input id="cfFlush" type="number" style="width:110px" value="${s.flushIntervalMs??3000}"/></div>
-        <div><label>logLevel</label><select id="cfLog"><option ${s.logLevel==='debug'?'selected':''}>debug</option><option ${s.logLevel!=='debug'?'selected':''}>warn</option></select></div>
-      </div>
-      <div class="row" style="gap:14px;margin-top:8px">
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> screens</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> taps</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> network</label>
-      </div>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}> Snowplow</label></h3>
-      <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
-      <div class="row" style="gap:10px;margin-top:8px">
-        <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
-        <div style="flex:2"><label>userContext schema (iglu)</label><input id="cfSpSchema" style="width:100%" value="${esc(sp.userContextSchema||'')}"/></div>
-      </div>
-      <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
-      <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}> Firebase</label></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Kéo-thả <b>google-services.json</b> hoặc <b>GoogleService-Info.plist</b> vào ô dưới để tự điền:</div>
-      <div id="cfFbDrop" style="border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px">Thả file vào đây</div>
-      <div class="row" style="gap:10px;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px"><label>GOOGLE_APP_ID (appId)</label><input id="cfFbApp" style="width:100%" value="${esc(fbo.appId||'')}"/></div>
-        <div style="flex:1;min-width:160px"><label>GCM_SENDER_ID</label><input id="cfFbSender" style="width:100%" value="${esc(fbo.gcmSenderId||'')}"/></div>
-      </div>
-      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:8px">
-        <div style="flex:1;min-width:160px"><label>API_KEY</label><input id="cfFbKey" style="width:100%" value="${esc(fbo.apiKey||'')}"/></div>
-        <div style="flex:1;min-width:140px"><label>PROJECT_ID</label><input id="cfFbProj" style="width:100%" value="${esc(fbo.projectId||'')}"/></div>
-        <div style="flex:1;min-width:140px"><label>BUNDLE_ID</label><input id="cfFbBundle" style="width:100%" value="${esc(fbo.bundleId||'')}"/></div>
-      </div>
-      <label style="margin-top:8px">superProperties (mọi event)</label>
-      <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
-      <label>userProperties (audience)</label>
-      <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 4px;font-size:14px">Event registry</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Danh sách event hợp lệ + schema. (Gán nhanh ở tab “Cây class → event”.)</div>
-      <pre id="cfReg" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.event_registry||[],null,2))}</pre>
-
-      <h3 style="margin:14px 0 4px;font-size:14px">Rewrite rules (Phase 2)</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">SDK đổi event auto-capture → tên nghiệp vụ ngay tại app. Tạo/sửa ở tab “Cây class → event”.</div>
-      <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.rules||[],null,2))}</pre>
-
-      <div class="row" style="margin-top:16px"><button class="btn" id="cfSave">Lưu config</button></div>
-    </div>`;
-
-  // parse key=value textarea → object
-  const parseKV=(id)=>{const o={};$(id).value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();});return o;};
-
-  // Firebase file drag-drop → parse json/plist, fill inputs.
-  const drop=$('#cfFbDrop');
-  ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
-  drop.addEventListener('dragleave',()=>drop.style.borderColor='var(--line)');
-  drop.addEventListener('drop',e=>{
-    e.preventDefault();drop.style.borderColor='var(--line)';
-    const f=e.dataTransfer.files[0]; if(!f)return;
-    const r=new FileReader();
-    r.onload=()=>{ try{ fillFirebaseFromFile(f.name, r.result); toast('Đã đọc '+f.name);}catch(err){toast('File không hợp lệ','err');} };
-    r.readAsText(f);
-  });
-  function fillFirebaseFromFile(name, text){
-    if(name.endsWith('.json')){
-      const j=JSON.parse(text); const cli=(j.client&&j.client[0])||{};
-      $('#cfFbApp').value   = cli.client_info?.mobilesdk_app_id || '';
-      $('#cfFbSender').value= j.project_info?.project_number || '';
-      $('#cfFbKey').value   = (cli.api_key&&cli.api_key[0]?.current_key) || '';
-      $('#cfFbProj').value  = j.project_info?.project_id || '';
-      $('#cfFbBundle').value= cli.client_info?.android_client_info?.package_name || '';
-    } else { // .plist (XML) — pull values by key
-      const get=(k)=>{const m=text.match(new RegExp('<key>'+k+'</key>\\s*<string>([^<]*)</string>'));return m?m[1]:'';};
-      $('#cfFbApp').value   = get('GOOGLE_APP_ID');
-      $('#cfFbSender').value= get('GCM_SENDER_ID');
-      $('#cfFbKey').value   = get('API_KEY');
-      $('#cfFbProj').value  = get('PROJECT_ID');
-      $('#cfFbBundle').value= get('BUNDLE_ID');
-    }
-  }
-
-  $('#cfSave').onclick=async()=>{
-    const body={
-      endpoint: $('#cfEndpoint').value.trim(),
-      sdk_config:{ batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
-        autoCapture:$('#cfAuto').checked, trackScreens:$('#cfScreens').checked, trackTaps:$('#cfTaps').checked, trackNetwork:$('#cfNet').checked },
-      snowplow:{ enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
-        userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx') },
-      firebase:{ enabled:$('#cfFbOn').checked,
-        options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
-          projectId:$('#cfFbProj').value.trim(), bundleId:$('#cfFbBundle').value.trim() },
-        superProperties:parseKV('#cfFbSuper'), userProperties:parseKV('#cfFbUser') },
-    };
-    const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
-  };
-}
-
-// ---------- drawer ----------
 function openDrawer(r){
   if(!r)return;
   $('#dBadge').textContent=r.event_name;$('#dBadge').className='badge '+r.event_name;$('#dId').textContent=r.event_id;
@@ -724,17 +516,13 @@ function openDrawer(r){
 $('#dClose').onclick=()=>{$('#drawer').classList.remove('open');$('#scrim').classList.remove('open');};
 $('#scrim').onclick=()=>$('#dClose').click();
 
-// live refresh (only the logs tab, when no drawer open)
 setInterval(()=>{ if(me&&route.name==='project'&&route.tab==='logs'&&!$('#drawer').classList.contains('open')) renderLogs(route.pid); },5000);
 
-// ---------- auth gate ----------
 let me=null;
 async function boot(){
-  // Static-form view state from the query string (no JS dependency to switch).
   const isSignup=/[?&]signup=1/.test(location.search);
   const lp=document.getElementById('bootLoginPanel'), sp=document.getElementById('bootSignupPanel');
   if(lp&&sp){ lp.style.display=isSignup?'none':''; sp.style.display=isSignup?'':'none'; }
-  // Show an error left by a failed form-POST.
   if(/[?&]err=/.test(location.search)){
     const panel=isSignup?sp:lp;
     if(panel && !panel.querySelector('.bootErr')){
@@ -748,8 +536,7 @@ async function boot(){
   try{
     const r=await fetch(BASE+'/auth/me');
     if(r.ok){ me=await r.json(); onAuthed(); }
-    // Not authed: leave the static login form as-is (it works without JS).
-  }catch(e){ /* network error — keep the static form visible */ }
+  }catch(e){ }
 }
 function onAuthed(){
   $('#nav').hidden=false;
