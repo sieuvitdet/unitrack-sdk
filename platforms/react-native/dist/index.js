@@ -10,8 +10,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.safeJsonParse = exports.createNavigationTracker = void 0;
+exports.safeJsonParse = exports.createNavigationTracker = exports.tapState = exports.UniTrackTapBoundary = void 0;
+exports.installDeeplinkAutoCapture = installDeeplinkAutoCapture;
 const react_native_1 = require("react-native");
+const tapState_1 = require("./tapState");
+// Strip query strings for privacy — log scheme://host/path only.
+function hostPath(url) {
+    const m = /^([a-z][a-z0-9+.-]*:\/\/[^/?#]+)([^?#]*)/i.exec(url);
+    return m ? m[1] + m[2] : url.split('?')[0];
+}
 const LINK_HINT = `[UniTrack] Native module not found. ` +
     `Ensure '@unitrack/react-native' is properly linked. ` +
     `Run 'pod install' (iOS) and rebuild.`;
@@ -41,6 +48,26 @@ class UniTrackClass {
     setScreen(name) { return native.setScreen(name); }
     flush() { return native.flush(); }
     setEnabled(e) { return native.setEnabled(e); }
+    // --- semantic event helpers (Phase 3) ----------------------------------
+    /** Notification received/opened. state: 'foreground'|'background'|'silent'. */
+    trackNotification(opts) {
+        var _a;
+        return this.track('notification', {
+            state: opts.state, action: (_a = opts.action) !== null && _a !== void 0 ? _a : 'received',
+            ...(opts.title ? { title: opts.title } : {}),
+            ...(opts.body ? { body: opts.body } : {}),
+            ...(opts.data ? { data: opts.data } : {}),
+        });
+    }
+    trackWebViewOpen(url, screen) {
+        return this.track('webview_open', { url: hostPath(url), ...(screen ? { screen } : {}) });
+    }
+    trackDeeplink(url, source) {
+        return this.track('deeplink', { url: hostPath(url), ...(source ? { source } : {}) });
+    }
+    trackThirdPartyOpen(name, screen) {
+        return this.track('third_party_open', { target: name, ...(screen ? { screen } : {}) });
+    }
     /**
      * Install global fetch interceptor for network tracking at the JS layer.
      * Native auto-capture on iOS already covers URLSession, but RN's fetch
@@ -73,6 +100,10 @@ class UniTrackClass {
                 const dur = Date.now() - start;
                 const reqBody = init === null || init === void 0 ? void 0 : init.body;
                 const reqBytes = typeof reqBody === 'string' ? reqBody.length : 0;
+                // Mirror the button/screen that triggered this call (set by the tap
+                // boundary), so an API error can be traced back to its button + screen.
+                const tap = tapState_1.tapState.last;
+                const mirrored = tap && Date.now() - tap.at < 10000;
                 this.track('network_request', {
                     url: url.split('?')[0],
                     method,
@@ -81,6 +112,9 @@ class UniTrackClass {
                     req_bytes: reqBytes,
                     resp_bytes: respBytes,
                     error: errMsg,
+                    ...(mirrored
+                        ? { triggered_by_element: tap.element, triggered_by_screen: tap.screen }
+                        : {}),
                 });
             }
         };
@@ -89,7 +123,28 @@ class UniTrackClass {
     }
 }
 const UniTrack = new UniTrackClass();
+/**
+ * Auto-capture deeplinks via RN's Linking API. Call once at startup. Tracks the
+ * launch URL (cold start) and every subsequent url event as `deeplink`.
+ */
+function installDeeplinkAutoCapture() {
+    var _a, _b;
+    // Lazy require so importing the SDK never hard-depends on Linking being set up.
+    const { Linking } = require('react-native');
+    (_a = Linking.getInitialURL) === null || _a === void 0 ? void 0 : _a.call(Linking).then((url) => {
+        if (url)
+            UniTrack.trackDeeplink(url, 'launch');
+    }).catch(() => { });
+    (_b = Linking.addEventListener) === null || _b === void 0 ? void 0 : _b.call(Linking, 'url', ({ url }) => {
+        if (url)
+            UniTrack.trackDeeplink(url, 'runtime');
+    });
+}
 exports.default = UniTrack;
+var autoTap_1 = require("./autoTap");
+Object.defineProperty(exports, "UniTrackTapBoundary", { enumerable: true, get: function () { return autoTap_1.UniTrackTapBoundary; } });
+var tapState_2 = require("./tapState");
+Object.defineProperty(exports, "tapState", { enumerable: true, get: function () { return tapState_2.tapState; } });
 var navigation_1 = require("./navigation");
 Object.defineProperty(exports, "createNavigationTracker", { enumerable: true, get: function () { return __importDefault(navigation_1).default; } });
 var safeJsonParse_1 = require("./safeJsonParse");

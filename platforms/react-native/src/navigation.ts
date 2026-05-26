@@ -15,8 +15,15 @@
 //   <NavigationContainer ref={ref} {...handlers} />
 
 import UniTrack from './index';
+import { tapState } from './tapState';
 
 let currentRouteName: string | undefined;
+
+function setScreen(name: string) {
+  currentRouteName = name;
+  tapState.currentScreen = name;   // so taps + network events carry the screen
+  UniTrack.setScreen(name);
+}
 
 function getActiveRouteName(state: any): string | undefined {
   if (!state || typeof state.index !== 'number') return undefined;
@@ -32,17 +39,11 @@ export default function createNavigationTracker() {
     ref,
     onReady: () => {
       const name = ref.current?.getCurrentRoute?.()?.name;
-      if (name) {
-        currentRouteName = name;
-        UniTrack.setScreen(name);
-      }
+      if (name) setScreen(name);
     },
     onStateChange: (state: any) => {
       const name = getActiveRouteName(state);
-      if (name && name !== currentRouteName) {
-        currentRouteName = name;
-        UniTrack.setScreen(name);
-      }
+      if (name && name !== currentRouteName) setScreen(name);
     },
   };
 }

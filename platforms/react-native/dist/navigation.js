@@ -20,7 +20,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.default = createNavigationTracker;
 const index_1 = __importDefault(require("./index"));
+const tapState_1 = require("./tapState");
 let currentRouteName;
+function setScreen(name) {
+    currentRouteName = name;
+    tapState_1.tapState.currentScreen = name; // so taps + network events carry the screen
+    index_1.default.setScreen(name);
+}
 function getActiveRouteName(state) {
     if (!state || typeof state.index !== 'number')
         return undefined;
@@ -36,17 +42,13 @@ function createNavigationTracker() {
         onReady: () => {
             var _a, _b, _c;
             const name = (_c = (_b = (_a = ref.current) === null || _a === void 0 ? void 0 : _a.getCurrentRoute) === null || _b === void 0 ? void 0 : _b.call(_a)) === null || _c === void 0 ? void 0 : _c.name;
-            if (name) {
-                currentRouteName = name;
-                index_1.default.setScreen(name);
-            }
+            if (name)
+                setScreen(name);
         },
         onStateChange: (state) => {
             const name = getActiveRouteName(state);
-            if (name && name !== currentRouteName) {
-                currentRouteName = name;
-                index_1.default.setScreen(name);
-            }
+            if (name && name !== currentRouteName)
+                setScreen(name);
         },
     };
 }
