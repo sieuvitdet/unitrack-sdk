@@ -28,7 +28,8 @@ Tracker::Tracker(Config cfg, ut_platform platform)
       session_()
 {
     enabled_.store(config_.enabled);
-    queue_.trim(config_.max_queue_size, config_.max_age_days);
+    init_time_ms_ = current_time_ms();
+    queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
 
     // Install signal-based crash handler.
     // Crash files live in the same directory as the queue DB.
@@ -37,10 +38,13 @@ Tracker::Tracker(Config cfg, ut_platform platform)
     dir = (slash == std::string::npos) ? "." : dir.substr(0, slash);
     CrashHandler::install(dir);
 
-    // Pick up any crash captured on the previous launch.
+    // Pick up any crash captured on the previous launch. A crash recovered at
+    // startup is, by definition, the crash that ended the *previous* session —
+    // we can't time it against this init, so mark it not-on-launch (the SDK was
+    // already up long enough last time to capture and persist it).
     std::string pending = CrashHandler::flush_pending_crash(dir);
     if (!pending.empty()) {
-        track("crash", pending);
+        track("crash", inject_crash_on_launch(pending, false));
     }
 
     worker_ = std::thread(&Tracker::worker_loop, this);
@@ -77,6 +81,7 @@ Event Tracker::build_event(const std::string& name, const std::string& props_jso
     e.user_id          = user_id_;
     e.screen           = current_screen_;
     e.properties_json  = props_json.empty() ? "{}" : props_json;
+    e.device_json      = device_json_;
     return e;
 }
 
@@ -179,8 +184,31 @@ void Tracker::log_memory_warning(long used, long limit, const std::string& scree
     track("memory_warning", o.str());
 }
 
+// Merge a "crash_on_launch" boolean into a crash props JSON object, unless the
+// caller already supplied one (e.g. the Flutter binding computes its own).
+std::string Tracker::inject_crash_on_launch(const std::string& crash_json, bool on_launch) {
+    // If the field is already present, leave the payload untouched.
+    if (crash_json.find("\"crash_on_launch\"") != std::string::npos) return crash_json;
+    const std::string field = std::string("\"crash_on_launch\":") + (on_launch ? "true" : "false");
+    // Empty / non-object payload → wrap it.
+    std::string s = crash_json;
+    auto open = s.find('{');
+    auto close = s.find_last_of('}');
+    if (open == std::string::npos || close == std::string::npos || close <= open) {
+        return "{" + field + "}";
+    }
+    // Insert the field right after the opening brace.
+    bool emptyObj = s.find_first_not_of(" \t\r\n", open + 1) == close;
+    std::string sep = emptyObj ? "" : ",";
+    s.insert(open + 1, field + sep);
+    return s;
+}
+
 void Tracker::log_crash(const std::string& crash_json) {
-    track("crash", crash_json);
+    // A crash within the launch window is flagged so the portal can surface
+    // "crashed right after opening the app".
+    bool on_launch = (current_time_ms() - init_time_ms_) <= kLaunchCrashWindowMs;
+    track("crash", inject_crash_on_launch(crash_json, on_launch));
     // Crashes should hit disk immediately — flush synchronously.
     do_flush();
 }
@@ -241,10 +269,12 @@ void Tracker::do_flush() {
         queue_.remove(ids);
         UT_LOGD("Tracker", "flushed " + std::to_string(ids.size()) + " events");
     } else {
-        queue_.mark_retry(ids);
-        UT_LOGW("Tracker", "flush failed; retry later");
+        // Failed: keep the events, but back off exponentially so a downed
+        // server isn't retried every flush interval.
+        queue_.mark_retry(ids, config_.retry_base_ms, config_.retry_max_ms);
+        UT_LOGW("Tracker", "flush failed; backing off before retry");
     }
-    queue_.trim(config_.max_queue_size, config_.max_age_days);
+    queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
 }
 
 } // namespace unitrack

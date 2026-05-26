@@ -39,6 +39,10 @@ std::string Event::to_json() const {
         o << "\"user_id\":"; escape_json(o, user_id);    o << ',';
     }
     o << "\"screen\":";     escape_json(o, screen);      o << ',';
+    // device_json is set once at init (model, OS, app version, locale, …).
+    if (!device_json.empty()) {
+        o << "\"device\":" << device_json << ',';
+    }
     // properties_json is already valid JSON object string
     o << "\"properties\":" << (properties_json.empty() ? "{}" : properties_json);
     o << '}';

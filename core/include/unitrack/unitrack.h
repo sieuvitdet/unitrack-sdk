@@ -139,6 +139,12 @@ UT_EXPORT void ut_set_log_level(ut_context* ctx, ut_log_level level);
 UT_EXPORT void ut_set_enabled(ut_context* ctx, int enabled);
 UT_EXPORT int  ut_is_enabled(ut_context* ctx);
 
+/* Set device/app metadata (a JSON object string) attached to every event.
+ * Called once by the platform binding right after init. Example:
+ *   {"os":"iOS","os_version":"17.4","model":"iPhone15,2",
+ *    "app_version":"1.0.0","locale":"vi_VN","sdk_version":"1.0.0"} */
+UT_EXPORT void ut_set_device_info(ut_context* ctx, const char* device_json);
+
 /* HTTP transport callback — bindings inject platform HTTP client.
  * If NULL, core uses built-in libcurl. */
 typedef int (*ut_http_send_fn)(const char* url,

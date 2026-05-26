@@ -16,7 +16,8 @@ namespace unitrack {
 //                event_id TEXT UNIQUE,
 //                created_at INTEGER,
 //                payload TEXT,
-//                retry_count INTEGER DEFAULT 0)
+//                retry_count INTEGER DEFAULT 0,
+//                next_retry_at INTEGER DEFAULT 0)   -- exponential backoff gate
 //
 // Operations are designed to be cheap on the hot path (enqueue) and
 // batched on the background flush path (dequeue/remove).
@@ -44,11 +45,14 @@ public:
     // Remove events by row_id after successful upload.
     void remove(const std::vector<int64_t>& row_ids);
 
-    // Increment retry count for events still in flight.
-    void mark_retry(const std::vector<int64_t>& row_ids);
+    // A failed flush: increment retry_count and schedule the next attempt with
+    // exponential backoff — next_retry_at = now + min(base * 2^(retry_count-1),
+    // max) plus a little jitter. Events stay queued but hidden until due.
+    void mark_retry(const std::vector<int64_t>& row_ids,
+                    int retry_base_ms, int retry_max_ms);
 
-    // Trim queue: enforce max size & max age.
-    void trim(int max_size, int max_age_days);
+    // Trim queue: enforce max size, max age, and drop events past max_retries.
+    void trim(int max_size, int max_age_days, int max_retries);
 
     // Total event count currently in queue.
     int count();

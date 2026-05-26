@@ -3,6 +3,8 @@
 #include "util.h"
 #include <sqlite3.h>
 #include <cstring>
+#include <cstdlib>
+#include <cstdio>
 
 namespace unitrack {
 
@@ -35,13 +37,19 @@ bool OfflineQueue::open(const std::string& db_path) {
 }
 
 bool OfflineQueue::ensure_schema() {
+    // 1) Create the table (new installs get next_retry_at directly) + the index
+    //    that only references columns guaranteed to exist on ALL versions.
+    //    IMPORTANT: do NOT create the next_retry_at index here — on a pre-backoff
+    //    database the column doesn't exist yet, so that index would fail and abort
+    //    the whole exec before the migration below runs.
     const char* sql =
         "CREATE TABLE IF NOT EXISTS events ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  event_id TEXT UNIQUE NOT NULL,"
         "  created_at INTEGER NOT NULL,"
         "  payload TEXT NOT NULL,"
-        "  retry_count INTEGER NOT NULL DEFAULT 0"
+        "  retry_count INTEGER NOT NULL DEFAULT 0,"
+        "  next_retry_at INTEGER NOT NULL DEFAULT 0"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);";
     char* err = nullptr;
@@ -51,6 +59,31 @@ bool OfflineQueue::ensure_schema() {
         if (err) sqlite3_free(err);
         return false;
     }
+
+    // 2) Migrate a pre-backoff database (events table created before
+    //    next_retry_at existed). Add the column if missing.
+    bool has_col = false;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "PRAGMA table_info(events);", -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const unsigned char* name = sqlite3_column_text(st, 1);
+            if (name && std::strcmp(reinterpret_cast<const char*>(name), "next_retry_at") == 0) {
+                has_col = true;
+                break;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    if (!has_col) {
+        sqlite3_exec(db_,
+            "ALTER TABLE events ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0;",
+            nullptr, nullptr, nullptr);
+    }
+
+    // 3) Now the column is guaranteed to exist — create its index.
+    sqlite3_exec(db_,
+        "CREATE INDEX IF NOT EXISTS idx_events_next_retry ON events(next_retry_at);",
+        nullptr, nullptr, nullptr);
     return true;
 }
 
@@ -79,12 +112,16 @@ std::vector<OfflineQueue::DequeuedEvent> OfflineQueue::peek(int max) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!db_) return out;
 
+    // Only events whose backoff gate has passed are due. New events have
+    // next_retry_at = 0, so they are sent immediately; failed events wait until
+    // their scheduled retry time. Still FIFO among due events.
     const char* sql =
         "SELECT id, event_id, created_at, payload, retry_count "
-        "FROM events ORDER BY id ASC LIMIT ?;";
+        "FROM events WHERE next_retry_at <= ? ORDER BY id ASC LIMIT ?;";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) return out;
-    sqlite3_bind_int(stmt, 1, max);
+    sqlite3_bind_int64(stmt, 1, current_time_ms());
+    sqlite3_bind_int(stmt, 2, max);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         DequeuedEvent d;
@@ -119,36 +156,71 @@ void OfflineQueue::remove(const std::vector<int64_t>& row_ids) {
     sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
 }
 
-void OfflineQueue::mark_retry(const std::vector<int64_t>& row_ids) {
+void OfflineQueue::mark_retry(const std::vector<int64_t>& row_ids,
+                             int retry_base_ms, int retry_max_ms) {
     if (row_ids.empty()) return;
     std::lock_guard<std::mutex> lock(mu_);
     if (!db_) return;
 
+    const int64_t now = current_time_ms();
+    if (retry_base_ms <= 0) retry_base_ms = 5000;
+    if (retry_max_ms  <= 0) retry_max_ms  = 300000;
+
+    // Increment retry_count, then schedule next_retry_at using the NEW count:
+    //   delay = min(base * 2^(retry_count-1), max), plus up to 20% jitter, so a
+    //   fleet of devices doesn't retry a recovering server in lockstep.
     sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
-    const char* sql = "UPDATE events SET retry_count = retry_count + 1 WHERE id = ?;";
-    sqlite3_stmt* stmt = nullptr;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+
+    // Read current retry_count per row, then update count + next_retry_at.
+    sqlite3_stmt* sel = nullptr;
+    sqlite3_prepare_v2(db_, "SELECT retry_count FROM events WHERE id = ?;", -1, &sel, nullptr);
+    sqlite3_stmt* upd = nullptr;
+    sqlite3_prepare_v2(db_,
+        "UPDATE events SET retry_count = ?, next_retry_at = ? WHERE id = ?;",
+        -1, &upd, nullptr);
+
     for (auto id : row_ids) {
-        sqlite3_bind_int64(stmt, 1, id);
-        sqlite3_step(stmt);
-        sqlite3_reset(stmt);
+        int rc = 0;
+        sqlite3_bind_int64(sel, 1, id);
+        if (sqlite3_step(sel) == SQLITE_ROW) rc = sqlite3_column_int(sel, 0);
+        sqlite3_reset(sel);
+
+        int new_count = rc + 1;
+        // Exponential delay, capped. Shift on a 64-bit value, guard the exponent
+        // so it never overflows (cap kicks in well before that anyway).
+        int shift = new_count - 1;
+        if (shift > 30) shift = 30;
+        int64_t delay = (int64_t)retry_base_ms * ((int64_t)1 << shift);
+        if (delay > retry_max_ms) delay = retry_max_ms;
+        // +0..20% jitter.
+        int64_t jitter = (delay / 5 > 0) ? (int64_t)(std::rand() % (int)(delay / 5 + 1)) : 0;
+        int64_t next = now + delay + jitter;
+
+        sqlite3_bind_int  (upd, 1, new_count);
+        sqlite3_bind_int64(upd, 2, next);
+        sqlite3_bind_int64(upd, 3, id);
+        sqlite3_step(upd);
+        sqlite3_reset(upd);
     }
-    sqlite3_finalize(stmt);
+    sqlite3_finalize(sel);
+    sqlite3_finalize(upd);
     sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
 }
 
-void OfflineQueue::trim(int max_size, int max_age_days) {
+void OfflineQueue::trim(int max_size, int max_age_days, int max_retries) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!db_) return;
 
     int64_t cutoff = current_time_ms() - (int64_t)max_age_days * 86400LL * 1000LL;
-    sqlite3_stmt* stmt = nullptr;
+    if (max_retries <= 0) max_retries = 10;
 
-    // Delete events older than cutoff or with retry_count > 10.
+    // Delete events older than cutoff or that have exhausted their retries.
+    sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
-        "DELETE FROM events WHERE created_at < ? OR retry_count > 10;",
+        "DELETE FROM events WHERE created_at < ? OR retry_count > ?;",
         -1, &stmt, nullptr);
     sqlite3_bind_int64(stmt, 1, cutoff);
+    sqlite3_bind_int  (stmt, 2, max_retries);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 

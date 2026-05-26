@@ -17,6 +17,13 @@ struct Config {
     bool        auto_capture    = true;
     int         http_timeout_ms = 15000;
 
+    // Exponential backoff for failed flushes. After a failed send, an event is
+    // not retried until now + min(retry_base_ms * 2^(retry_count-1), retry_max_ms),
+    // with jitter, so a downed server is not hammered every flush interval.
+    int         retry_base_ms   = 5000;     // first retry delay
+    int         retry_max_ms    = 300000;   // cap (5 minutes)
+    int         max_retries     = 10;       // drop the event after this many failures
+
     // Parses a JSON config string. Unknown / missing keys keep defaults.
     // Robust against malformed JSON — returns defaults on parse failure.
     static Config from_json(const std::string& api_key,

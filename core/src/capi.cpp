@@ -125,6 +125,10 @@ void ut_set_enabled(ut_context* ctx, int enabled) {
     if (ctx && ctx->tracker) ctx->tracker->set_enabled(enabled != 0);
 }
 
+void ut_set_device_info(ut_context* ctx, const char* device_json) {
+    if (ctx && ctx->tracker) ctx->tracker->set_device_info(safe(device_json));
+}
+
 int ut_is_enabled(ut_context* ctx) {
     return (ctx && ctx->tracker && ctx->tracker->is_enabled()) ? 1 : 0;
 }

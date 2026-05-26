@@ -9,6 +9,7 @@
 #include "../core/src/config.h"
 #include "../core/src/crash_handler.h"
 
+#include <sqlite3.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -117,6 +118,77 @@ static void test_offline_queue() {
     std::remove("/tmp/ut_test_queue.db-wal");
 }
 
+// Migration: opening a PRE-backoff database (events table without next_retry_at)
+// must add the column and let peek() work — not crash with "no such column".
+static void test_schema_migration() {
+    printf("test_schema_migration\n");
+    const char* db = "/tmp/ut_test_oldschema.db";
+    std::remove(db);
+    // 1) Create an old-schema events table (no next_retry_at) + a row.
+    sqlite3* h = nullptr;
+    sqlite3_open(db, &h);
+    sqlite3_exec(h, "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    " event_id TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL,"
+                    " payload TEXT NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0);",
+                 nullptr, nullptr, nullptr);
+    sqlite3_exec(h, "INSERT INTO events (event_id,created_at,payload) VALUES ('old1',100,'{}');",
+                 nullptr, nullptr, nullptr);
+    sqlite3_close(h);
+    // 2) Open via OfflineQueue → should migrate; peek() must not error.
+    {
+        unitrack::OfflineQueue q(db);
+        auto rows = q.peek(10);
+        CHECK(rows.size() == 1, "migration: peek works on migrated old DB");
+        CHECK(q.count() == 1,   "migration: old row preserved");
+    }
+    std::remove(db);
+    std::remove("/tmp/ut_test_oldschema.db-shm");
+    std::remove("/tmp/ut_test_oldschema.db-wal");
+}
+
+// Exponential backoff: a failed event is kept (count unchanged) but hidden from
+// peek() until its backoff window elapses; once due it becomes visible again.
+static void test_backoff() {
+    printf("test_backoff\n");
+    std::remove("/tmp/ut_test_backoff.db");
+    {
+        unitrack::OfflineQueue q("/tmp/ut_test_backoff.db");
+        // Use a real "now" timestamp so the age-based trim (7 days) doesn't
+        // sweep these events away during the max_retries check below.
+        const int64_t now = unitrack::current_time_ms();
+        unitrack::Event e;
+        e.event_id = "evt-b1"; e.event_name = "tap"; e.timestamp_ms = now;
+        e.properties_json = "{}";
+        q.enqueue(e);
+
+        auto due = q.peek(10);
+        CHECK(due.size() == 1,                    "backoff: due before failure");
+
+        // Fail it with a long base delay → should be hidden from peek but kept.
+        q.mark_retry({due[0].row_id}, /*base*/100000, /*max*/300000);
+        CHECK(q.count() == 1,                     "backoff: event kept after fail");
+        CHECK(q.peek(10).empty(),                 "backoff: hidden until next_retry_at");
+
+        // A freshly enqueued event is due immediately (next_retry_at = 0).
+        unitrack::Event e2;
+        e2.event_id = "evt-b2"; e2.event_name = "tap"; e2.timestamp_ms = now;
+        e2.properties_json = "{}";
+        q.enqueue(e2);
+        auto due2 = q.peek(10);
+        bool sawB2 = false;
+        for (auto& d : due2) if (d.event.event_id == "evt-b2") sawB2 = true;
+        CHECK(sawB2,                              "backoff: new event still due");
+
+        // After max_retries, evt-b1 is dropped by trim; evt-b2 (0 retries) stays.
+        for (int i = 0; i < 12; ++i) q.mark_retry({due[0].row_id}, 1, 1);
+        q.trim(/*max_size*/10000, /*max_age_days*/7, /*max_retries*/10);
+        CHECK(q.count() == 1,                     "backoff: dropped after max_retries");
+    }
+    std::remove("/tmp/ut_test_backoff.db");
+    std::remove("/tmp/ut_test_backoff.db-shm");
+    std::remove("/tmp/ut_test_backoff.db-wal");
+}
+
 // Counts HTTP calls received by mock transport.
 static std::atomic<int> g_http_calls{0};
 static std::string      g_last_payload;
@@ -199,6 +271,8 @@ int main() {
     test_event_json_escape();
     test_config_parse();
     test_offline_queue();
+    test_schema_migration();
+    test_backoff();
     test_crash_handler_flush();
     test_c_api_end_to_end();
 

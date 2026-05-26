@@ -56,6 +56,13 @@ public:
     void set_enabled(bool e) { enabled_.store(e); }
     bool is_enabled() const  { return enabled_.load(); }
 
+    // Device/app metadata (model, OS, app version, locale, …) attached to
+    // every event. Set once by the platform binding right after init.
+    void set_device_info(const std::string& device_json) {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        device_json_ = device_json.empty() ? "" : device_json;
+    }
+
     void set_http_transport(ut_http_send_fn fn, void* ud) {
         transport_.set_callback(fn, ud);
     }
@@ -74,6 +81,11 @@ private:
     std::string      current_screen_;
     std::string      user_id_;
     std::string      user_traits_json_ = "{}";
+    std::string      device_json_;        // device/app metadata, attached to every event
+    long long        init_time_ms_ = 0;   // when the tracker initialized (for crash_on_launch)
+
+    // Window after init within which a crash counts as a "launch crash".
+    static constexpr long long kLaunchCrashWindowMs = 5000;
 
     // Background flush thread
     std::thread              worker_;
@@ -87,6 +99,7 @@ private:
 
     Event build_event(const std::string& name, const std::string& props_json);
     void  enqueue(Event&& e);
+    static std::string inject_crash_on_launch(const std::string& crash_json, bool on_launch);
 };
 
 } // namespace unitrack

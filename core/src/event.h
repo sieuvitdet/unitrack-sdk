@@ -14,6 +14,7 @@ struct Event {
     std::string user_id;        // empty if anonymous
     std::string screen;
     std::string properties_json; // raw JSON object string, may be "{}"
+    std::string device_json;     // device/app metadata JSON object, may be empty
 
     // Serialized to JSON for transport.
     std::string to_json() const;

@@ -67,6 +67,9 @@ Config Config::from_json(const std::string& api_key, const std::string& json) {
     if (find_number(json, "max_age_days", n))      c.max_age_days      = (int)n;
     if (find_number(json, "sampling_rate", n))     c.sampling_rate     = n;
     if (find_number(json, "http_timeout_ms", n))   c.http_timeout_ms   = (int)n;
+    if (find_number(json, "retry_base_ms", n))     c.retry_base_ms     = (int)n;
+    if (find_number(json, "retry_max_ms", n))      c.retry_max_ms      = (int)n;
+    if (find_number(json, "max_retries", n))       c.max_retries       = (int)n;
 
     bool b = true;
     if (find_bool(json, "enabled", b))      c.enabled      = b;
