@@ -94,19 +94,8 @@
   <div class="live" id="userBox" hidden><span class="muted" id="userEmail"></span> · <a id="logout">Đăng xuất</a></div>
 </header>
 <div class="wrap" id="view">
-  <div id="bootLogin" style="max-width:380px;margin:8vh auto">
-    <div class="panel" style="padding:0">
-      <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v19</span></h2>
-      <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
-        <div><label>Email</label><input id="aEmail" type="email" placeholder="ban@email.com" style="width:100%"/></div>
-        <div><label>Mật khẩu</label><input id="aPass" type="password" placeholder="••••••" style="width:100%"/></div>
-        <div id="aErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
-        <button class="btn" id="aSubmit">Đăng nhập</button>
-        <div class="muted" style="font-size:13px;text-align:center">
-          Chưa có tài khoản? <a id="toSignup" style="cursor:pointer">Đăng ký</a>
-        </div>
-      </div>
-    </div>
+  <div style="max-width:380px;margin:8vh auto;display:none" id="bootSplash">
+    <div class="panel" style="padding:20px;text-align:center;color:var(--muted)">Đang tải...</div>
   </div>
 </div>
 
@@ -510,14 +499,13 @@ setInterval(()=>{ if(me&&route.name==='project'&&route.tab==='logs'&&!$('#drawer
 
 let me=null;
 async function boot(){
-  // Wire up the static boot login form immediately (before /auth/me check)
-  bindAuthForm('login');
-  if(/[?&]signup=1/.test(location.search)) bindAuthForm('signup');
   try{
     const r=await fetch(BASE+'/auth/me');
-    if(r.ok){ me=await r.json(); onAuthed(); }
-    // Not authed: leave form visible, already bound above
-  }catch(e){ }
+    if(r.ok){ me=await r.json(); onAuthed(); return; }
+  }catch(e){}
+  // Not authed — show login form
+  const isSignup=/[?&]signup=1/.test(location.search);
+  renderAuth(isSignup?'signup':'login');
 }
 function onAuthed(){
   $('#nav').hidden=false;
