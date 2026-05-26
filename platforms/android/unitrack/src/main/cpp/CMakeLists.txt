@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Path to the shared C++ core relative to this file.
-set(UT_CORE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../core)
+set(UT_CORE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../core)
 
 # Build the core static library into our shared lib.
 set(UT_CORE_SOURCES

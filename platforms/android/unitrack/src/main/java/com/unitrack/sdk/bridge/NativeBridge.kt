@@ -22,6 +22,7 @@ object NativeBridge {
     fun setScreen(name: String)                             = nativeSetScreen(ctxPtr, name)
     fun flush()                                             = nativeFlush(ctxPtr)
     fun setEnabled(enabled: Boolean)                        = nativeSetEnabled(ctxPtr, enabled)
+    fun setDeviceInfo(deviceJson: String)                   = nativeSetDeviceInfo(ctxPtr, deviceJson)
 
     fun logTap(elementKey: String, screen: String, extraJson: String) =
         nativeLogTap(ctxPtr, elementKey, screen, extraJson)
@@ -57,6 +58,7 @@ object NativeBridge {
     private external fun nativeTrack(ctx: Long, event: String, propsJson: String)
     private external fun nativeSetScreen(ctx: Long, name: String)
     private external fun nativeSetEnabled(ctx: Long, enabled: Boolean)
+    private external fun nativeSetDeviceInfo(ctx: Long, deviceJson: String)
     private external fun nativeLogTap(ctx: Long, key: String, screen: String, extra: String)
     private external fun nativeLogNetwork(ctx: Long, url: String, method: String,
                                           status: Int, durationMs: Long,

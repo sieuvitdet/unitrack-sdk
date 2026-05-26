@@ -85,6 +85,14 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetEnabled(
 }
 
 JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetDeviceInfo(
+    JNIEnv* env, jobject, jlong p, jstring deviceJson)
+{
+    JStr d(env, deviceJson);
+    ut_set_device_info(ctx_of(p), d.c());
+}
+
+JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogTap(
     JNIEnv* env, jobject, jlong p, jstring key, jstring scr, jstring extra)
 {
