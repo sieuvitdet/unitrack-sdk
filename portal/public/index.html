@@ -95,29 +95,17 @@
 </header>
 <div class="wrap" id="view">
   <div id="bootLogin" style="max-width:380px;margin:8vh auto">
-    <div class="panel" id="bootLoginPanel" style="padding:0">
-      <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v18</span></h2>
-      <form id="formLogin" style="padding:18px;display:flex;flex-direction:column;gap:12px">
-        <div><label>Email</label><input id="bootEmail" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
-        <div><label>Mật khẩu</label><input id="bootPass" type="password" required placeholder="••••••" style="width:100%"/></div>
-        <div id="bootErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
-        <button class="btn" type="submit">Đăng nhập</button>
+    <div class="panel" style="padding:0">
+      <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v19</span></h2>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <div><label>Email</label><input id="aEmail" type="email" placeholder="ban@email.com" style="width:100%"/></div>
+        <div><label>Mật khẩu</label><input id="aPass" type="password" placeholder="••••••" style="width:100%"/></div>
+        <div id="aErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
+        <button class="btn" id="aSubmit">Đăng nhập</button>
         <div class="muted" style="font-size:13px;text-align:center">
-          Chưa có tài khoản? <a href="?signup=1">Đăng ký</a>
+          Chưa có tài khoản? <a id="toSignup" style="cursor:pointer">Đăng ký</a>
         </div>
-      </form>
-    </div>
-    <div class="panel" id="bootSignupPanel" style="padding:0;display:none">
-      <h2>Đăng ký tài khoản</h2>
-      <form id="formSignup" style="padding:18px;display:flex;flex-direction:column;gap:12px">
-        <div><label>Email</label><input id="signupEmail" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
-        <div><label>Mật khẩu</label><input id="signupPass" type="password" required minlength="6" placeholder="tối thiểu 6 ký tự" style="width:100%"/></div>
-        <div id="signupErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
-        <button class="btn" type="submit">Đăng ký</button>
-        <div class="muted" style="font-size:13px;text-align:center">
-          Đã có tài khoản? <a href="?">Đăng nhập</a>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
 </div>
@@ -522,31 +510,13 @@ setInterval(()=>{ if(me&&route.name==='project'&&route.tab==='logs'&&!$('#drawer
 
 let me=null;
 async function boot(){
-  const isSignup=/[?&]signup=1/.test(location.search);
-  const lp=document.getElementById('bootLoginPanel'), sp=document.getElementById('bootSignupPanel');
-  if(lp&&sp){ lp.style.display=isSignup?'none':''; sp.style.display=isSignup?'':'none'; }
-
-  $('#formLogin').onsubmit=async(e)=>{
-    e.preventDefault();
-    const email=$('#bootEmail').value.trim(), password=$('#bootPass').value;
-    const r=await fetch(BASE+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok){ me=d; onAuthed(); }
-    else $('#bootErr').textContent={invalid_credentials:'Sai email hoặc mật khẩu'}[d.error]||'Lỗi, thử lại';
-  };
-
-  $('#formSignup').onsubmit=async(e)=>{
-    e.preventDefault();
-    const email=$('#signupEmail').value.trim(), password=$('#signupPass').value;
-    const r=await fetch(BASE+'/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok){ me=d; onAuthed(); }
-    else $('#signupErr').textContent={invalid_email:'Email không hợp lệ',weak_password:'Mật khẩu tối thiểu 6 ký tự',email_taken:'Email đã tồn tại'}[d.error]||'Lỗi, thử lại';
-  };
-
+  // Wire up the static boot login form immediately (before /auth/me check)
+  bindAuthForm('login');
+  if(/[?&]signup=1/.test(location.search)) bindAuthForm('signup');
   try{
     const r=await fetch(BASE+'/auth/me');
     if(r.ok){ me=await r.json(); onAuthed(); }
+    // Not authed: leave form visible, already bound above
   }catch(e){ }
 }
 function onAuthed(){
@@ -575,23 +545,32 @@ function renderAuth(mode){
           <button class="btn" id="aSubmit">${mode==='login'?'Đăng nhập':'Đăng ký'}</button>
           <div class="muted" style="font-size:13px;text-align:center">
             ${mode==='login'
-              ? 'Chưa có tài khoản? <a id="toSignup">Đăng ký</a>'
-              : 'Đã có tài khoản? <a id="toLogin">Đăng nhập</a>'}
+              ? 'Chưa có tài khoản? <a id="toSignup" style="cursor:pointer">Đăng ký</a>'
+              : 'Đã có tài khoản? <a id="toLogin" style="cursor:pointer">Đăng nhập</a>'}
           </div>
         </div>
       </div>
     </div>`;
+  bindAuthForm(mode);
+}
+
+function bindAuthForm(mode){
   const submit=async()=>{
     const email=$('#aEmail').value.trim(), password=$('#aPass').value;
+    if(!email||!password) return;
+    const btn=$('#aSubmit'); if(btn) btn.disabled=true;
     const r=await fetch(`${BASE}/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const d=await r.json().catch(()=>({}));
     if(r.ok){ me=d; onAuthed(); }
-    else $('#aErr').textContent={invalid_credentials:'Sai email hoặc mật khẩu',email_taken:'Email đã tồn tại',weak_password:'Mật khẩu tối thiểu 6 ký tự',invalid_email:'Email không hợp lệ'}[d.error]||'Lỗi, thử lại';
+    else{
+      const errEl=$('#aErr'); if(errEl) errEl.textContent={invalid_credentials:'Sai email hoặc mật khẩu',email_taken:'Email đã tồn tại',weak_password:'Mật khẩu tối thiểu 6 ký tự',invalid_email:'Email không hợp lệ'}[d.error]||'Lỗi, thử lại';
+      if(btn) btn.disabled=false;
+    }
   };
-  $('#aSubmit').onclick=submit;
-  $('#aPass').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
-  $('#toSignup')&&($('#toSignup').onclick=()=>renderAuth('signup'));
-  $('#toLogin')&&($('#toLogin').onclick=()=>renderAuth('login'));
+  const btn=$('#aSubmit'); if(btn) btn.onclick=submit;
+  const passEl=$('#aPass'); if(passEl) passEl.onkeydown=(e)=>{if(e.key==='Enter')submit();};
+  const toSignup=$('#toSignup'); if(toSignup) toSignup.onclick=()=>renderAuth('signup');
+  const toLogin=$('#toLogin'); if(toLogin) toLogin.onclick=()=>renderAuth('login');
 }
 
 boot();
