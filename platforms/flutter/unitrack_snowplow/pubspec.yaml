@@ -1,0 +1,20 @@
+name: unitrack_snowplow
+description: Snowplow analytics provider for UniTrack — forwards UniTrack events to a Snowplow collector.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The UniTrack core (provides the AnalyticsProvider interface).
+  unitrack:
+    path: ../
+  # The real Snowplow tracker SDK — same major as MobiX uses.
+  snowplow_tracker: ^0.7.1
+
+dev_dependencies:
+  flutter_lints: ^3.0.0

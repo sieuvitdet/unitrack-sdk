@@ -1,0 +1,23 @@
+name: unitrack_firebase
+description: Firebase Analytics provider for UniTrack — forwards UniTrack events to Firebase Analytics.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The UniTrack core (provides the AnalyticsProvider interface).
+  unitrack:
+    path: ../
+  # Firebase. The app must add google-services.json (android/app) and
+  # GoogleService-Info.plist (ios/Runner) and apply the google-services gradle
+  # plugin — this package only calls Firebase.initializeApp() + logEvent.
+  firebase_core: ^3.0.0
+  firebase_analytics: ^11.0.0
+
+dev_dependencies:
+  flutter_lints: ^3.0.0

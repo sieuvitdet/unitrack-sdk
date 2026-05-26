@@ -12,9 +12,6 @@ buildscript {
     }
 }
 
-apply plugin: 'com.android.library'
-apply plugin: 'org.jetbrains.kotlin.android'
-
 rootProject.allprojects {
     repositories {
         google()
@@ -22,12 +19,46 @@ rootProject.allprojects {
     }
 }
 
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// The native Android SDK lives outside this plugin. Rather than depend on a
+// published Maven artifact (io.unitrack:sdk), we compile its Kotlin sources and
+// build its JNI/C++ core directly here, so the demo always uses the LOCAL SDK.
+def sdkRoot = file("${projectDir}/../../android/unitrack")
+
 android {
     namespace 'com.unitrack.flutter'
     compileSdk 34
+    ndkVersion '26.1.10909125'
 
     defaultConfig {
         minSdk 21
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17', '-fvisibility=hidden', '-fno-exceptions'
+                arguments '-DCMAKE_BUILD_TYPE=Release'
+            }
+        }
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
+    }
+
+    // Build the SDK's JNI shared library (libunitrack_jni) from its CMakeLists.
+    externalNativeBuild {
+        cmake {
+            path "${sdkRoot}/src/main/cpp/CMakeLists.txt"
+            version '3.22.1'
+        }
+    }
+
+    // Compile the SDK's Kotlin/Java sources directly into the plugin. The
+    // SDK's permissions are declared in this plugin's own AndroidManifest.
+    sourceSets {
+        main {
+            java.srcDirs += "${sdkRoot}/src/main/java"
+        }
     }
 
     compileOptions {
@@ -38,5 +69,7 @@ android {
 }
 
 dependencies {
-    implementation 'io.unitrack:sdk:1.0.0'
+    // Mirror the SDK module's own dependencies (it is compiled into us now).
+    implementation 'androidx.fragment:fragment:1.6.2'
+    compileOnly    'com.squareup.okhttp3:okhttp:4.12.0'
 }

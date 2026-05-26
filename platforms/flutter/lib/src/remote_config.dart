@@ -1,0 +1,89 @@
+// UniTrackRemoteConfig — fetches the app's tracking config from the portal at
+// startup (GET {portal}/config, auth = api_key), so endpoints, providers,
+// schemas and event-rewrite rules can change WITHOUT rebuilding the app.
+//
+// Resilient: on success caches in-memory (and the app may persist it); on
+// failure/timeout returns the last value or a built-in default — launch never
+// blocks. Dependency-free (uses dart:io HttpClient).
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import '../unitrack.dart';
+
+class UniTrackRemoteConfig {
+  UniTrackRemoteConfig(this.raw);
+
+  /// The decoded JSON the portal returned (or default/cached).
+  final Map<String, dynamic> raw;
+
+  int get version => (raw['version'] as num?)?.toInt() ?? 0;
+  String? get endpoint => raw['endpoint'] as String?;
+  Map<String, dynamic> get sdkConfig => _obj(raw['sdk_config']);
+  Map<String, dynamic> get snowplow => _obj(raw['snowplow']);
+  Map<String, dynamic> get firebase => _obj(raw['firebase']);
+  List<dynamic> get eventRegistry => (raw['event_registry'] as List?) ?? const [];
+  List<dynamic> get rules => (raw['rules'] as List?) ?? const [];
+
+  static Map<String, dynamic> _obj(dynamic v) =>
+      v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  /// Map config rules → SDK rules and install them on UniTrack.
+  List<UniTrackEventRule> toEventRules() => rules.map((r) {
+        final m = Map<String, dynamic>.from(r as Map);
+        return UniTrackEventRule(
+          matchEvent: m['match_event'] as String,
+          matchScreen: m['match_screen'] as String?,
+          matchElementKey: m['match_element_key'] as String?,
+          toName: m['to_name'] as String,
+          addProps: (m['add_props'] is Map)
+              ? Map<String, Object?>.from(m['add_props'] as Map)
+              : const {},
+        );
+      }).toList();
+
+  // In-memory cache (per api_key). The app can persist `raw` itself if desired.
+  static final Map<String, Map<String, dynamic>> _cache = {};
+
+  /// Fetch config from the portal. Always completes with a usable config
+  /// (fresh, cached, or [fallback]/default). Never throws.
+  static Future<UniTrackRemoteConfig> fetch({
+    required String apiKey,
+    required String configURL,
+    Duration timeout = const Duration(seconds: 3),
+    Map<String, dynamic>? fallback,
+  }) async {
+    try {
+      final client = HttpClient()..connectionTimeout = timeout;
+      final req = await client.getUrl(Uri.parse(configURL)).timeout(timeout);
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
+      final resp = await req.close().timeout(timeout);
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final json = Map<String, dynamic>.from(jsonDecode(body) as Map);
+        _cache[apiKey] = json;
+        client.close();
+        return UniTrackRemoteConfig(json);
+      }
+      client.close();
+    } catch (_) {
+      // fall through to cached / fallback / default
+    }
+    return UniTrackRemoteConfig(
+        _cache[apiKey] ?? fallback ?? _builtinDefault());
+  }
+
+  static Map<String, dynamic> _builtinDefault() => {
+        'version': 0,
+        'endpoint': 'https://mobix.asia/event-tracking-mobile/v1/events',
+        'sdk_config': {
+          'batchSize': 10, 'flushIntervalMs': 3000, 'autoCapture': true,
+          'trackScreens': true, 'trackTaps': true, 'trackNetwork': true,
+        },
+        'snowplow': {'enabled': false},
+        'firebase': {'enabled': false},
+        'event_registry': [],
+        'rules': [],
+      };
+}
