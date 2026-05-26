@@ -1,0 +1,30 @@
+name: mobix_tracking_demo
+description: Demo Flutter app integrating the UniTrack SDK. Exercises every event
+  type the SDK can capture and ships them to mobix.asia/event-tracking-mobile.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'   # Semantics(identifier:) — used as the SDK tap element-key
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  http: ^1.2.0
+
+  # The UniTrack SDK plugin, pulled from this same repo by relative path.
+  # This brings in the native iOS/Android auto-capture layer (screen swizzle,
+  # tap tracking, network interception, lifecycle + memory warnings) plus the
+  # Dart API (track / setScreen / NavigatorObserver / safeJsonParse).
+  unitrack:
+    path: ../platforms/flutter
+
+dev_dependencies:
+  flutter_lints: ^3.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
