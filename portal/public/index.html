@@ -97,9 +97,10 @@
   <div id="bootLogin" style="max-width:380px;margin:8vh auto">
     <div class="panel" id="bootLoginPanel" style="padding:0">
       <h2>Đăng nhập <span style="font-size:11px;color:var(--muted);font-weight:400">v18</span></h2>
-      <form method="POST" action="auth/login-form" style="padding:18px;display:flex;flex-direction:column;gap:12px">
-        <div><label>Email</label><input name="email" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
-        <div><label>Mật khẩu</label><input name="password" type="password" required placeholder="••••••" style="width:100%"/></div>
+      <form id="formLogin" style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <div><label>Email</label><input id="bootEmail" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
+        <div><label>Mật khẩu</label><input id="bootPass" type="password" required placeholder="••••••" style="width:100%"/></div>
+        <div id="bootErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
         <button class="btn" type="submit">Đăng nhập</button>
         <div class="muted" style="font-size:13px;text-align:center">
           Chưa có tài khoản? <a href="?signup=1">Đăng ký</a>
@@ -108,9 +109,10 @@
     </div>
     <div class="panel" id="bootSignupPanel" style="padding:0;display:none">
       <h2>Đăng ký tài khoản</h2>
-      <form method="POST" action="auth/signup-form" style="padding:18px;display:flex;flex-direction:column;gap:12px">
-        <div><label>Email</label><input name="email" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
-        <div><label>Mật khẩu</label><input name="password" type="password" required minlength="6" placeholder="tối thiểu 6 ký tự" style="width:100%"/></div>
+      <form id="formSignup" style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <div><label>Email</label><input id="signupEmail" type="email" required placeholder="ban@email.com" style="width:100%"/></div>
+        <div><label>Mật khẩu</label><input id="signupPass" type="password" required minlength="6" placeholder="tối thiểu 6 ký tự" style="width:100%"/></div>
+        <div id="signupErr" style="color:var(--danger);font-size:13px;min-height:16px"></div>
         <button class="btn" type="submit">Đăng ký</button>
         <div class="muted" style="font-size:13px;text-align:center">
           Đã có tài khoản? <a href="?">Đăng nhập</a>
@@ -523,16 +525,25 @@ async function boot(){
   const isSignup=/[?&]signup=1/.test(location.search);
   const lp=document.getElementById('bootLoginPanel'), sp=document.getElementById('bootSignupPanel');
   if(lp&&sp){ lp.style.display=isSignup?'none':''; sp.style.display=isSignup?'':'none'; }
-  if(/[?&]err=/.test(location.search)){
-    const panel=isSignup?sp:lp;
-    if(panel && !panel.querySelector('.bootErr')){
-      const taken=/[?&]err=taken/.test(location.search);
-      const d=document.createElement('div');
-      d.className='bootErr'; d.style.cssText='color:var(--danger);font-size:13px;padding:0 18px 14px;text-align:center';
-      d.textContent=isSignup?(taken?'Email đã tồn tại':'Email không hợp lệ hoặc mật khẩu quá ngắn'):'Sai email hoặc mật khẩu';
-      panel.appendChild(d);
-    }
-  }
+
+  $('#formLogin').onsubmit=async(e)=>{
+    e.preventDefault();
+    const email=$('#bootEmail').value.trim(), password=$('#bootPass').value;
+    const r=await fetch(BASE+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){ me=d; onAuthed(); }
+    else $('#bootErr').textContent={invalid_credentials:'Sai email hoặc mật khẩu'}[d.error]||'Lỗi, thử lại';
+  };
+
+  $('#formSignup').onsubmit=async(e)=>{
+    e.preventDefault();
+    const email=$('#signupEmail').value.trim(), password=$('#signupPass').value;
+    const r=await fetch(BASE+'/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){ me=d; onAuthed(); }
+    else $('#signupErr').textContent={invalid_email:'Email không hợp lệ',weak_password:'Mật khẩu tối thiểu 6 ký tự',email_taken:'Email đã tồn tại'}[d.error]||'Lỗi, thử lại';
+  };
+
   try{
     const r=await fetch(BASE+'/auth/me');
     if(r.ok){ me=await r.json(); onAuthed(); }
