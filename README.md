@@ -102,6 +102,30 @@ import 'package:unitrack/unitrack.dart';
 await UniTrack.instance.initialize('YOUR_KEY');
 ```
 
+On Flutter, the UI is drawn into a single native view, so the native tap/network
+swizzlers can't see which Flutter widget was tapped. The SDK ships Dart-layer
+auto-capture for this — declare it once and tap/screen/network are captured with
+no per-widget code:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await UniTrack.instance.initialize('YOUR_KEY',
+      config: const UniTrackConfig(endpoint: '…'));
+
+  UniTrack.installHttpAutoCapture();            // every API call/error + the tap that caused it
+
+  runApp(UniTrackTapObserver(child: MyApp()));  // every tap (button name + screen) + screen_view
+}
+
+// In MaterialApp:
+//   navigatorObservers: [UniTrackTapObserver.routeObserver],
+```
+
+The tapped button's name is resolved from `Semantics(identifier:)` → `ValueKey`
+→ the button's text label → widget type — so even un-annotated buttons get a
+meaningful name.
+
 ## What the SDK captures automatically
 
 | Event | iOS | Android | RN | Flutter | How |

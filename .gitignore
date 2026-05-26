@@ -1,0 +1,65 @@
+# Build outputs
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.aar
+
+# C++
+core/third_party/sqlite3/sqlite3.c
+core/third_party/sqlite3/sqlite3.h
+
+# Auto-generated copy of the native SDK + C core for the iOS Flutter pod
+# (produced by platforms/flutter/ios/sync_native.sh — never commit; regenerate).
+platforms/flutter/ios/Native/
+platforms/flutter/ios/Classes/include/unitrack.h
+
+# iOS
+*.xcframework
+DerivedData/
+*.xcuserstate
+xcuserdata/
+# Generated Xcode projects + dependency artifacts in the demos (regenerate with
+# `ruby gen_project.rb`). CocoaPods (legacy) + Swift Package local state.
+Pods/
+*.xcworkspace/
+Podfile.lock
+.swiftpm/
+ios-camera-demo/UniTrackCameraDemo.xcodeproj/
+ios-uikit-demo/UniTrackUIKitDemo.xcodeproj/
+
+# Android
+.gradle/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Node / RN
+node_modules/
+*.tgz
+dist/
+*.log
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+pubspec.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/ingest.db*
+
+# Vendored C core copy for the CocoaPods build (regenerate with platforms/ios/sync_core.sh)
+platforms/ios/CoreVendor/
