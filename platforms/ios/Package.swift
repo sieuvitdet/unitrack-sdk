@@ -17,9 +17,20 @@ let package = Package(
         .target(
             name: "UniTrackCore",
             path: "Sources/UniTrackCore",
+            // The C++ implementation (src/, symlinked to the repo core/src) is
+            // compiled here; only include/ is exposed publicly (the C header).
             publicHeadersPath: "include",
             cSettings: [
-                .headerSearchPath("include")
+                .headerSearchPath("include"),
+                .headerSearchPath("src")
+            ],
+            cxxSettings: [
+                .headerSearchPath("include"),
+                .headerSearchPath("src")
+            ],
+            linkerSettings: [
+                // The offline queue persists events to SQLite.
+                .linkedLibrary("sqlite3")
             ]
         ),
         .target(
@@ -27,11 +38,8 @@ let package = Package(
             dependencies: ["UniTrackCore"],
             path: "Sources/UniTrack"
         ),
-        .testTarget(
-            name: "UniTrackTests",
-            dependencies: ["UniTrack"],
-            path: "Tests/UniTrackTests"
-        ),
+        // Note: the test target was removed — Tests/UniTrackTests does not
+        // exist in this checkout and its presence broke SPM resolution.
     ],
     cxxLanguageStandard: .cxx17
 )

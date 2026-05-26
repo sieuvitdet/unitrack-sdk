@@ -4,6 +4,10 @@
 // hands us URL, method, headers (JSON), and body — we POST via URLSession.
 
 import Foundation
+// See UniTrack.swift for why this import is guarded.
+#if canImport(UniTrackCore)
+import UniTrackCore
+#endif
 
 private struct HTTPSender {
     static let session: URLSession = {
