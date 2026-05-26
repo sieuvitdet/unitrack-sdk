@@ -1,0 +1,14 @@
+{
+  "name": "event-tracking-mobile-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobix event tracking portal — ingest endpoint + dashboard for UniTrack SDK events",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

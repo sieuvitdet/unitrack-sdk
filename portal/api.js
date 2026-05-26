@@ -1,0 +1,371 @@
+// Portal JSON API: projects, events, event conventions, drag-drop mappings,
+// stats, and Excel export. Mounted under {BASE}/api.
+
+const express = require('express');
+const { db, newApiKey } = require('./db');
+const { buildWorkbook } = require('./export');
+const { namingIssues, isValidName, healthScore } = require('./scoring');
+const { requireAdmin } = require('./auth');
+const { configForProject, saveConfig } = require('./config');
+
+// Ownership guard for project routes: admin can touch any project; a normal
+// user only their own. Attaches req.project. Use as middleware on /projects/:id*.
+function ownProject(req, res, next) {
+  const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'not_found' });
+  if (req.user.role !== 'admin' && p.owner_id !== req.user.id) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  req.project = p;
+  next();
+}
+
+const router = express.Router();
+const now = () => Date.now();
+const parse = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
+
+// Reusable: compute the aggregates a project's health needs, then score it.
+function projectHealth(pid) {
+  const g = (sql, ...a) => db.prepare(sql).get(pid, ...a);
+  const total = g('SELECT COUNT(*) n FROM events WHERE project_id=?').n;
+  const sessions = g('SELECT COUNT(DISTINCT session_id) n FROM events WHERE project_id=?').n;
+  const crashes = g("SELECT COUNT(*) n FROM events WHERE project_id=? AND event_name='crash'").n;
+  const last = g('SELECT MAX(received_at) t FROM events WHERE project_id=?').t;
+  const byEvent = db.prepare('SELECT event_name, COUNT(*) count FROM events WHERE project_id=? GROUP BY event_name').all(pid);
+  const elementsTotal = g("SELECT COUNT(DISTINCT element_key) n FROM events WHERE project_id=? AND element_key IS NOT NULL AND element_key<>''").n;
+  const elementsDefined = g('SELECT COUNT(DISTINCT element_key) n FROM event_mappings WHERE project_id=?').n;
+  return healthScore({
+    total, sessions, crashes, byEvent,
+    elementsTotal, elementsDefined, lastReceivedAt: last,
+  });
+}
+
+// ---------------------------------------------------------------- projects
+// A user sees only their projects; an admin sees all.
+router.get('/projects', (req, res) => {
+  const admin = req.user.role === 'admin';
+  const rows = db.prepare(`
+    SELECT p.*, (SELECT COUNT(*) FROM events e WHERE e.project_id = p.id) AS event_count
+    FROM projects p ${admin ? '' : 'WHERE p.owner_id = ?'} ORDER BY p.created_at DESC
+  `).all(...(admin ? [] : [req.user.id]));
+  res.json(rows);
+});
+
+router.post('/projects', (req, res) => {
+  const { name, app_bundle, source_type } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  const info = db.prepare(`
+    INSERT INTO projects (owner_id, name, app_bundle, source_type, api_key, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(req.user.id, name, app_bundle ?? null, source_type ?? null, newApiKey(), now());
+  res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid));
+});
+
+router.get('/projects/:id', ownProject, (req, res) => {
+  res.json(req.project);
+});
+
+router.delete('/projects/:id', ownProject, (req, res) => {
+  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/projects/:id/rotate-key', ownProject, (req, res) => {
+  const key = newApiKey();
+  db.prepare('UPDATE projects SET api_key = ? WHERE id = ?').run(key, req.params.id);
+  res.json({ api_key: key });
+});
+
+// Provider settings: which providers this project forwards to, and (for the
+// Snowplow proxy) the real collector URL to relay events to. Blank URL = the
+// portal is the only sink (collect-only).
+router.put('/projects/:id/providers', ownProject, (req, res) => {
+  const { providers, sp_forward_url } = req.body || {};
+  const list = Array.isArray(providers)
+    ? providers.filter((p) => ['snowplow', 'firebase'].includes(p))
+    : [];
+  db.prepare('UPDATE projects SET providers = ?, sp_forward_url = ? WHERE id = ?')
+    .run(JSON.stringify(list), sp_forward_url || null, req.params.id);
+  res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id));
+});
+
+// Remote config: the editor reads the full resolved config; PUT saves any subset
+// of sections and bumps the version (the app re-downloads when version changes).
+router.get('/projects/:id/config', ownProject, (req, res) => {
+  res.json(configForProject(req.project));
+});
+
+router.put('/projects/:id/config', ownProject, (req, res) => {
+  const version = saveConfig(Number(req.params.id), req.body || {});
+  res.json({ ...configForProject(req.project), version });
+});
+
+// Snowplow event mappings: raw event name → Snowplow schema/mode + forward flag.
+// Lets you onboard a NEW Snowplow event by adding a row here (no app rebuild).
+router.get('/projects/:id/sp-maps', ownProject, (req, res) => {
+  res.json(db.prepare('SELECT * FROM sp_event_maps WHERE project_id = ? ORDER BY event_name')
+    .all(req.params.id));
+});
+
+router.post('/projects/:id/sp-maps', ownProject, (req, res) => {
+  const { event_name, mode, schema, forward } = req.body || {};
+  if (!event_name) return res.status(400).json({ error: 'event_name_required' });
+  const m = (mode === 'structured') ? 'structured' : 'self_describing';
+  if (m === 'self_describing' && !schema) return res.status(400).json({ error: 'schema_required' });
+  try {
+    db.prepare(`
+      INSERT INTO sp_event_maps (project_id, event_name, mode, schema, forward, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, event_name) DO UPDATE SET
+        mode = excluded.mode, schema = excluded.schema, forward = excluded.forward
+    `).run(req.params.id, event_name, m, schema || null, forward === false ? 0 : 1, now());
+    res.json(db.prepare('SELECT * FROM sp_event_maps WHERE project_id = ? AND event_name = ?')
+      .get(req.params.id, event_name));
+  } catch (e) {
+    res.status(500).json({ error: 'save_failed' });
+  }
+});
+
+router.delete('/projects/:id/sp-maps/:name', ownProject, (req, res) => {
+  db.prepare('DELETE FROM sp_event_maps WHERE project_id = ? AND event_name = ?')
+    .run(req.params.id, req.params.name);
+  res.json({ ok: true });
+});
+
+// ----------------------------------------------------------------- events
+router.get('/projects/:id/events', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 200, 2000);
+  const where = ['project_id = ?'];
+  const args = [pid];
+  if (req.query.name)     { where.push('event_name = ?'); args.push(req.query.name); }
+  if (req.query.session)  { where.push('session_id = ?'); args.push(req.query.session); }
+  if (req.query.provider) { where.push('provider = ?');   args.push(req.query.provider); }
+  if (req.query.q) {
+    where.push('(event_name LIKE ? OR screen_name LIKE ? OR class_name LIKE ? OR element_key LIKE ?)');
+    const k = `%${req.query.q}%`; args.push(k, k, k, k);
+  }
+  args.push(limit);
+  const rows = db.prepare(`
+    SELECT * FROM events WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?
+  `).all(...args);
+
+  // Resolve the convention each event's element maps to (drag-and-drop), so the
+  // log can show "tap → product_add_to_card". One lookup for the whole page.
+  const maps = db.prepare(`
+    SELECT m.element_key, d.name AS def_name
+    FROM event_mappings m JOIN event_defs d ON d.id = m.event_def_id
+    WHERE m.project_id = ?
+  `).all(pid);
+  const mappedName = Object.fromEntries(maps.map((m) => [m.element_key, m.def_name]));
+
+  res.json(rows.map((r) => ({
+    ...r,
+    properties: parse(r.properties),
+    device: r.device ? parse(r.device) : null,
+    mapped_event: r.element_key ? (mappedName[r.element_key] || null) : null,
+  })));
+});
+
+// Tap elements grouped, split into defined (mapped to a convention) vs not.
+router.get('/projects/:id/elements', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const rows = db.prepare(`
+    SELECT element_key,
+           MAX(screen_name) AS screen_name,
+           MAX(class_name)  AS class_name,
+           COUNT(*)         AS hits,
+           MAX(timestamp)   AS last_seen
+    FROM events
+    WHERE project_id = ? AND element_key IS NOT NULL AND element_key <> ''
+    GROUP BY element_key
+    ORDER BY hits DESC
+  `).all(pid);
+
+  const maps = db.prepare(`
+    SELECT m.element_key, d.id AS def_id, d.name AS def_name
+    FROM event_mappings m JOIN event_defs d ON d.id = m.event_def_id
+    WHERE m.project_id = ?
+  `).all(pid);
+  const byKey = Object.fromEntries(maps.map((m) => [m.element_key, m]));
+
+  const defined = [], undefined_ = [];
+  for (const r of rows) {
+    const map = byKey[r.element_key];
+    if (map) defined.push({ ...r, event_def: { id: map.def_id, name: map.def_name } });
+    else undefined_.push(r);
+  }
+  res.json({ defined, undefined: undefined_ });
+});
+
+// ----------------------------------------------------- event conventions
+router.get('/projects/:id/defs', ownProject, (req, res) => {
+  res.json(db.prepare('SELECT * FROM event_defs WHERE project_id = ? ORDER BY name').all(req.params.id));
+});
+
+router.post('/projects/:id/defs', ownProject, (req, res) => {
+  const { name, description } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  try {
+    const info = db.prepare(`
+      INSERT INTO event_defs (project_id, name, description, created_at) VALUES (?, ?, ?, ?)
+    `).run(req.params.id, name, description ?? null, now());
+    res.json(db.prepare('SELECT * FROM event_defs WHERE id = ?').get(info.lastInsertRowid));
+  } catch (e) {
+    res.status(409).json({ error: 'duplicate' });
+  }
+});
+
+router.delete('/defs/:defId', (req, res) => {
+  // Verify the def belongs to a project the user owns (or user is admin).
+  const def = db.prepare('SELECT d.id, p.owner_id FROM event_defs d JOIN projects p ON p.id = d.project_id WHERE d.id = ?').get(req.params.defId);
+  if (!def) return res.status(404).json({ error: 'not_found' });
+  if (req.user.role !== 'admin' && def.owner_id !== req.user.id) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  db.prepare('DELETE FROM event_mappings WHERE event_def_id = ?').run(req.params.defId);
+  db.prepare('DELETE FROM event_defs WHERE id = ?').run(req.params.defId);
+  res.json({ ok: true });
+});
+
+// --------------------------------------------- drag-and-drop mappings
+router.post('/projects/:id/mappings', ownProject, (req, res) => {
+  const { element_key, event_def_id } = req.body || {};
+  if (!element_key || !event_def_id) return res.status(400).json({ error: 'bad_request' });
+  db.prepare(`
+    INSERT INTO event_mappings (project_id, element_key, event_def_id, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(project_id, element_key)
+    DO UPDATE SET event_def_id = excluded.event_def_id
+  `).run(req.params.id, element_key, event_def_id, now());
+  res.json({ ok: true });
+});
+
+router.delete('/projects/:id/mappings/:elementKey', ownProject, (req, res) => {
+  db.prepare('DELETE FROM event_mappings WHERE project_id = ? AND element_key = ?')
+    .run(req.params.id, req.params.elementKey);
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------------------ stats
+router.get('/projects/:id/stats', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const one = (sql, ...a) => db.prepare(sql).get(pid, ...a);
+  const all = (sql, ...a) => db.prepare(sql).all(pid, ...a);
+
+  // Detect the REAL app bundle(s) from the device payload of recent events.
+  // This is what the SDK actually reported (e.g. com.example.app), as opposed
+  // to the project's app_bundle label which is typed in by hand at creation.
+  const counts = new Map();
+  for (const r of all(
+    'SELECT device FROM events WHERE project_id = ? AND device IS NOT NULL ORDER BY received_at DESC LIMIT 500'
+  )) {
+    let b = null;
+    try { const d = JSON.parse(r.device); b = d.bundle_id || d.bundle || d.package || d.app_id || null; }
+    catch (_) { /* malformed device json — skip */ }
+    if (b) counts.set(b, (counts.get(b) || 0) + 1);
+  }
+  const detected_bundles = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([bundle, count]) => ({ bundle, count }));
+
+  res.json({
+    detected_bundles,
+    total:    one('SELECT COUNT(*) n FROM events WHERE project_id = ?').n,
+    sessions: one('SELECT COUNT(DISTINCT session_id) n FROM events WHERE project_id = ?').n,
+    users:    one('SELECT COUNT(DISTINCT user_id) n FROM events WHERE project_id = ? AND user_id IS NOT NULL').n,
+    last_hour: one('SELECT COUNT(*) n FROM events WHERE project_id = ? AND received_at > ?', now() - 3600_000).n,
+    by_event:    all('SELECT event_name, COUNT(*) count FROM events WHERE project_id = ? GROUP BY event_name ORDER BY count DESC'),
+    by_platform: all("SELECT COALESCE(platform,'unknown') platform, COUNT(*) count FROM events WHERE project_id = ? GROUP BY platform ORDER BY count DESC"),
+    by_screen:   all("SELECT COALESCE(screen_name,'unknown') screen, COUNT(*) count FROM events WHERE project_id = ? GROUP BY screen_name ORDER BY count DESC LIMIT 20"),
+    crashes:     one("SELECT COUNT(*) n FROM events WHERE project_id = ? AND event_name = 'crash'").n,
+  });
+});
+
+// ----------------------------------------------------------- excel export
+router.get('/projects/:id/export', ownProject, async (req, res) => {
+  const pid = req.params.id;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(pid);
+  if (!project) return res.status(404).json({ error: 'not_found' });
+  const events = db.prepare('SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT 50000').all(pid);
+  const defs = db.prepare('SELECT * FROM event_defs WHERE project_id = ?').all(pid);
+  const mappings = db.prepare(`
+    SELECT m.element_key, d.name def_name FROM event_mappings m
+    JOIN event_defs d ON d.id = m.event_def_id WHERE m.project_id = ?
+  `).all(pid);
+
+  const buf = await buildWorkbook({ project, events, defs, mappings });
+  const safe = (project.name || 'project').replace(/[^a-z0-9_-]+/gi, '_');
+  res.setHeader('Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${safe}.xlsx"`);
+  res.send(buf);
+});
+
+// ---------------------------------------------------------- health (1 project)
+router.get('/projects/:id/health', ownProject, (req, res) => {
+  res.json(projectHealth(req.params.id));
+});
+
+// Naming warnings: declared conventions + actually-logged event names that
+// don't follow the convention.
+router.get('/projects/:id/naming', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const defNames = db.prepare('SELECT name FROM event_defs WHERE project_id=?').all(pid).map((r) => r.name);
+  const logged = db.prepare('SELECT DISTINCT event_name FROM events WHERE project_id=?').all(pid).map((r) => r.event_name);
+  const seen = new Set();
+  const out = [];
+  for (const name of [...defNames, ...logged]) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const issues = namingIssues(name);
+    out.push({
+      name,
+      declared: defNames.includes(name),
+      logged: logged.includes(name),
+      ok: issues.length === 0,
+      issues,
+    });
+  }
+  out.sort((a, b) => (a.ok === b.ok ? 0 : a.ok ? 1 : -1)); // problems first
+  res.json({
+    total: out.length,
+    warnings: out.filter((x) => !x.ok).length,
+    items: out,
+  });
+});
+
+// ----------------------------------------------------- CMS: all projects
+router.get('/cms/overview', requireAdmin, (_req, res) => {
+  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
+  const rows = projects.map((p) => {
+    const g = (sql) => db.prepare(sql).get(p.id).n;
+    const total = g('SELECT COUNT(*) n FROM events WHERE project_id=?');
+    const elementsTotal = db.prepare("SELECT COUNT(DISTINCT element_key) n FROM events WHERE project_id=? AND element_key IS NOT NULL AND element_key<>''").get(p.id).n;
+    const elementsDefined = db.prepare('SELECT COUNT(DISTINCT element_key) n FROM event_mappings WHERE project_id=?').get(p.id).n;
+    const names = db.prepare('SELECT DISTINCT event_name FROM events WHERE project_id=?').all(p.id).map((r) => r.event_name)
+      .concat(db.prepare('SELECT name FROM event_defs WHERE project_id=?').all(p.id).map((r) => r.name));
+    const uniqueNames = [...new Set(names)];
+    const namingWarnings = uniqueNames.filter((n) => !isValidName(n)).length;
+    const health = projectHealth(p.id);
+    return {
+      id: p.id, name: p.name, app_bundle: p.app_bundle, source_type: p.source_type,
+      created_at: p.created_at,
+      total_events: total,
+      elements_total: elementsTotal,
+      elements_defined: elementsDefined,
+      definition_rate: elementsTotal ? Math.round((elementsDefined / elementsTotal) * 100) : 0,
+      naming_warnings: namingWarnings,
+      health,
+    };
+  });
+  const totals = {
+    projects: rows.length,
+    events: rows.reduce((s, r) => s + r.total_events, 0),
+    needs_attention: rows.filter((r) => r.health.grade === 'C' || r.health.grade === 'D').length,
+    naming_warnings: rows.reduce((s, r) => s + r.naming_warnings, 0),
+  };
+  res.json({ totals, projects: rows });
+});
+
+module.exports = router;
