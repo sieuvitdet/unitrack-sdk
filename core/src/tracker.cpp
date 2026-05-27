@@ -29,6 +29,7 @@ Tracker::Tracker(Config cfg, ut_platform platform)
 {
     enabled_.store(config_.enabled);
     init_time_ms_ = current_time_ms();
+    session_.set_timeout_ms(config_.session_timeout_ms);
     queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
 
     // Install signal-based crash handler.
@@ -130,7 +131,9 @@ void Tracker::reset() {
         user_id_.clear();
         user_traits_json_ = "{}";
     }
-    session_.rotate();
+    session_.rotate(SessionEndReason::manual_reset);
+    // Surface session_end(manual_reset) + session_start for the new session.
+    emit_session_boundary(SessionEndReason::manual_reset);
 }
 
 void Tracker::log_tap(const std::string& element_key,
@@ -213,12 +216,59 @@ void Tracker::log_crash(const std::string& crash_json) {
     do_flush();
 }
 
-void Tracker::log_foreground() { track("app_foreground", "{}"); }
+const char* Tracker::session_end_reason_str(SessionEndReason r) {
+    switch (r) {
+        case SessionEndReason::timeout:       return "timeout";
+        case SessionEndReason::manual_reset:  return "manual_reset";
+        case SessionEndReason::none:          return "none";
+    }
+    return "none";
+}
+
+// Resolve the session and, if it just rotated, emit a session_end for the
+// closed session followed by a session_start for the new one. The session_end
+// carries the *closed* session id + duration in its properties (its own
+// envelope session_id is the new session, which the portal ignores for this
+// event). session_start marks the new session opening.
+void Tracker::emit_session_boundary(SessionEndReason on_rotate) {
+    if (!config_.journey_capture) return;
+
+    SessionResolution s = session_.resolve(on_rotate);
+    if (s.rotated) {
+        std::ostringstream end;
+        end << "{\"session_id\":\"" << s.prev_id << "\","
+            << "\"reason\":\""      << session_end_reason_str(s.prev_reason) << "\","
+            << "\"duration_ms\":"   << (s.prev_ended_ms - s.prev_started_ms) << ","
+            << "\"started_at\":"    << s.prev_started_ms << ","
+            << "\"ended_at\":"      << s.prev_ended_ms << "}";
+        track("session_end", end.str());
+    }
+    // Emit session_start the first time we see this session id (rotation, or the
+    // process's very first session at app_start). We dedupe via started_session_.
+    {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        if (started_session_ == s.id) return;
+        started_session_ = s.id;
+    }
+    std::ostringstream start;
+    start << "{\"session_id\":\"" << s.id << "\","
+          << "\"started_at\":"    << s.started_at_ms << "}";
+    track("session_start", start.str());
+}
+
+void Tracker::log_foreground() {
+    // A long background may have elapsed the session timeout — surface the
+    // boundary before recording the foreground event.
+    emit_session_boundary(SessionEndReason::timeout);
+    track("app_foreground", "{}");
+}
 void Tracker::log_background() {
     track("app_background", "{}");
     flush_now();
 }
 void Tracker::log_app_start(long cold_start_ms) {
+    // Open the process's first session boundary (session_start) on launch.
+    emit_session_boundary(SessionEndReason::timeout);
     std::ostringstream o;
     o << "{\"cold_start_ms\":" << cold_start_ms << "}";
     track("app_start", o.str());

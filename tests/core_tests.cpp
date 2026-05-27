@@ -8,6 +8,7 @@
 #include "../core/src/offline_queue.h"
 #include "../core/src/config.h"
 #include "../core/src/crash_handler.h"
+#include "../core/src/session_manager.h"
 
 #include <sqlite3.h>
 #include <sys/stat.h>
@@ -83,6 +84,13 @@ static void test_config_parse() {
     CHECK(d.api_key   == "K",               "defaults: api_key");
     CHECK(d.batch_size == 50,               "defaults: batch_size");
     CHECK(d.enabled    == true,             "defaults: enabled");
+    CHECK(d.journey_capture == true,        "defaults: journey_capture on");
+    CHECK(d.session_timeout_ms == 30*60*1000, "defaults: session_timeout 30m");
+
+    auto j = unitrack::Config::from_json("K",
+        "{\"journey_capture\":false,\"session_timeout_ms\":60000}");
+    CHECK(j.journey_capture == false,       "journey_capture parsed false");
+    CHECK(j.session_timeout_ms == 60000,    "session_timeout_ms parsed");
 }
 
 static void test_offline_queue() {
@@ -263,6 +271,47 @@ static void test_crash_handler_flush() {
     rmdir(dir);
 }
 
+static void test_session_boundary() {
+    printf("test_session_boundary\n");
+    using namespace unitrack;
+
+    // Short timeout so we can force a rotation without sleeping 30 min.
+    SessionManager sm;
+    sm.set_timeout_ms(50);
+
+    // First resolve: current session, no rotation reported (it's the initial
+    // session the manager created in its constructor).
+    SessionResolution a = sm.resolve();
+    CHECK(!a.id.empty(), "session: initial id present");
+    CHECK(!a.rotated, "session: first resolve is not a rotation");
+    std::string first_id = a.id;
+
+    // Activity within the window keeps the same session.
+    SessionResolution b = sm.resolve();
+    CHECK(b.id == first_id, "session: stays same within timeout");
+    CHECK(!b.rotated, "session: no rotation within timeout");
+
+    // Let the timeout elapse → next resolve rotates and reports the boundary.
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    SessionResolution c = sm.resolve(SessionEndReason::timeout);
+    CHECK(c.rotated, "session: rotated after timeout");
+    CHECK(c.id != first_id, "session: new id after rotation");
+    CHECK(c.prev_id == first_id, "session: prev_id is the closed session");
+    CHECK(c.prev_reason == SessionEndReason::timeout, "session: end reason timeout");
+    CHECK(c.prev_ended_ms >= c.prev_started_ms, "session: end >= start");
+
+    // Boundary is consumed — the following resolve reports no rotation.
+    SessionResolution d = sm.resolve();
+    CHECK(!d.rotated, "session: boundary consumed once");
+    CHECK(d.id == c.id, "session: id stable after consuming boundary");
+
+    // Manual rotate (reset) reports manual_reset on the next resolve.
+    sm.rotate(SessionEndReason::manual_reset);
+    SessionResolution e = sm.resolve(SessionEndReason::timeout);
+    CHECK(e.rotated, "session: manual rotate reported");
+    CHECK(e.prev_reason == SessionEndReason::manual_reset, "session: manual_reset reason preserved");
+}
+
 int main() {
     printf("UniTrack core tests\n");
     printf("===================\n");
@@ -274,6 +323,7 @@ int main() {
     test_schema_migration();
     test_backoff();
     test_crash_handler_flush();
+    test_session_boundary();
     test_c_api_end_to_end();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);

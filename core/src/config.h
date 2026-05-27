@@ -17,6 +17,13 @@ struct Config {
     bool        auto_capture    = true;
     int         http_timeout_ms = 15000;
 
+    // Session journey tracking. When journey_capture is on, the Tracker emits
+    // explicit session_start / session_end boundary events so the portal can
+    // reconstruct each session's flow. session_timeout_ms is the inactivity /
+    // background window after which a session is considered closed.
+    bool        journey_capture   = true;
+    int         session_timeout_ms = 30 * 60 * 1000;  // 30 min
+
     // Exponential backoff for failed flushes. After a failed send, an event is
     // not retried until now + min(retry_base_ms * 2^(retry_count-1), retry_max_ms),
     // with jitter, so a downed server is not hammered every flush interval.

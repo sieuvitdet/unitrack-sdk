@@ -70,10 +70,12 @@ Config Config::from_json(const std::string& api_key, const std::string& json) {
     if (find_number(json, "retry_base_ms", n))     c.retry_base_ms     = (int)n;
     if (find_number(json, "retry_max_ms", n))      c.retry_max_ms      = (int)n;
     if (find_number(json, "max_retries", n))       c.max_retries       = (int)n;
+    if (find_number(json, "session_timeout_ms", n)) c.session_timeout_ms = (int)n;
 
     bool b = true;
-    if (find_bool(json, "enabled", b))      c.enabled      = b;
-    if (find_bool(json, "auto_capture", b)) c.auto_capture = b;
+    if (find_bool(json, "enabled", b))         c.enabled         = b;
+    if (find_bool(json, "auto_capture", b))    c.auto_capture    = b;
+    if (find_bool(json, "journey_capture", b)) c.journey_capture = b;
 
     return c;
 }

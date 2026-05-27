@@ -83,6 +83,7 @@ private:
     std::string      user_traits_json_ = "{}";
     std::string      device_json_;        // device/app metadata, attached to every event
     long long        init_time_ms_ = 0;   // when the tracker initialized (for crash_on_launch)
+    std::string      started_session_;    // last session id we emitted session_start for (dedupe)
 
     // Window after init within which a crash counts as a "launch crash".
     static constexpr long long kLaunchCrashWindowMs = 5000;
@@ -100,6 +101,13 @@ private:
     Event build_event(const std::string& name, const std::string& props_json);
     void  enqueue(Event&& e);
     static std::string inject_crash_on_launch(const std::string& crash_json, bool on_launch);
+
+    // Session journey boundaries. Resolves the current session and, if it just
+    // rotated, emits session_end(prev) + session_start(current). Called at
+    // lifecycle edges (app_start, foreground, reset). No-op when journey_capture
+    // is off. `on_rotate` attributes a rotation triggered by this call.
+    void emit_session_boundary(SessionEndReason on_rotate);
+    static const char* session_end_reason_str(SessionEndReason r);
 };
 
 } // namespace unitrack
