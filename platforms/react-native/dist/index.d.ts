@@ -7,13 +7,38 @@ export interface UniTrackConfig {
     trackScreens?: boolean;
     trackTaps?: boolean;
     trackNetwork?: boolean;
+    /** Emit session_start/session_end boundaries so the portal can reconstruct
+     *  each session's journey. */
+    journeyCapture?: boolean;
+    /** Inactivity/background window (ms) after which a session is closed. */
+    sessionTimeoutMs?: number;
 }
 export type EventProperties = Record<string, unknown>;
+/** A config-driven rewrite rule: when an auto-captured event matches, the SDK
+ *  renames it to `toName` and merges `addProps`. Built from the remote config. */
+export interface EventRule {
+    matchEvent: string;
+    matchScreen?: string;
+    matchElementKey?: string;
+    toName: string;
+    addProps?: EventProperties;
+}
+import type { AnalyticsProvider } from './analyticsProvider';
+export { UniTrackRemoteConfig } from './remoteConfig';
+export type { AnalyticsProvider } from './analyticsProvider';
 declare class UniTrackClass {
     private initialized;
+    private providers;
+    /** Register a provider to also receive every event. Call BEFORE initialize();
+     *  if called afterwards, the provider is initialized immediately. */
+    addProvider(provider: AnalyticsProvider): void;
+    private forEachProvider;
     initialize(apiKey: string, config?: UniTrackConfig): Promise<void>;
     identify(userId: string, traits?: EventProperties): Promise<void>;
     reset(): Promise<void>;
+    private eventRules;
+    setEventRules(rules: EventRule[]): void;
+    private applyRules;
     track(event: string, properties?: EventProperties): Promise<void>;
     setScreen(name: string): Promise<void>;
     flush(): Promise<void>;

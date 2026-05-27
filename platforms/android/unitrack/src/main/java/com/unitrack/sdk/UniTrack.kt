@@ -174,6 +174,8 @@ object UniTrack {
         obj.put("flush_interval_ms", c.flushIntervalMs)
         obj.put("sampling_rate",     c.samplingRate)
         obj.put("auto_capture",      c.autoCapture)
+        obj.put("journey_capture",   c.journeyCapture)
+        obj.put("session_timeout_ms", c.sessionTimeoutMs)
         obj.put("db_path",
                 ctx.filesDir.absolutePath + "/unitrack_queue.db")
         return obj.toString()

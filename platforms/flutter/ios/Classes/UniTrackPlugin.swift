@@ -43,6 +43,8 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
             if let v = c["trackScreens"] as? Bool { cfg.trackScreens = v }
             if let v = c["trackTaps"] as? Bool { cfg.trackTaps = v }
             if let v = c["trackNetwork"] as? Bool { cfg.trackNetwork = v }
+            if let v = c["journeyCapture"] as? Bool { cfg.journeyCapture = v }
+            if let v = c["sessionTimeoutMs"] as? Int { cfg.sessionTimeoutMs = v }
             UniTrack.initialize(apiKey: apiKey, config: cfg)
             result(nil)
 

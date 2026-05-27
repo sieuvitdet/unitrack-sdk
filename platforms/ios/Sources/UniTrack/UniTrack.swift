@@ -27,6 +27,12 @@ public final class UniTrack {
         public var trackMemoryWarnings: Bool    = true
         public var logLevel: LogLevel           = .warn
 
+        /// Emit session_start / session_end boundary events so the portal can
+        /// reconstruct each session's journey. sessionTimeoutMs is the
+        /// inactivity/background window after which a session is closed.
+        public var journeyCapture: Bool         = true
+        public var sessionTimeoutMs: Int        = 1_800_000  // 30 min
+
         public init() {}
     }
 
@@ -264,6 +270,8 @@ public final class UniTrack {
         parts.append("\"flush_interval_ms\":\(c.flushIntervalMs)")
         parts.append("\"sampling_rate\":\(c.samplingRate)")
         parts.append("\"auto_capture\":\(c.autoCapture)")
+        parts.append("\"journey_capture\":\(c.journeyCapture)")
+        parts.append("\"session_timeout_ms\":\(c.sessionTimeoutMs)")
         if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask).first {
             let dbPath = docs.appendingPathComponent("unitrack.db").path

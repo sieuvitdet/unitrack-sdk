@@ -33,6 +33,13 @@ class UniTrackConfig {
   final bool trackTaps;
   final bool trackNetwork;
 
+  /// Emit session_start/session_end boundaries so the portal can reconstruct
+  /// each session's journey.
+  final bool journeyCapture;
+
+  /// Inactivity/background window (ms) after which a session is closed.
+  final int sessionTimeoutMs;
+
   const UniTrackConfig({
     this.endpoint,
     this.batchSize = 50,
@@ -42,6 +49,8 @@ class UniTrackConfig {
     this.trackScreens = true,
     this.trackTaps = true,
     this.trackNetwork = true,
+    this.journeyCapture = true,
+    this.sessionTimeoutMs = 1800000,
   });
 
   Map<String, dynamic> toMap() => {
@@ -53,6 +62,8 @@ class UniTrackConfig {
         'trackScreens': trackScreens,
         'trackTaps': trackTaps,
         'trackNetwork': trackNetwork,
+        'journeyCapture': journeyCapture,
+        'sessionTimeoutMs': sessionTimeoutMs,
       };
 }
 

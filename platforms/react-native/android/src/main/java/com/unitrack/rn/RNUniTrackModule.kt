@@ -32,6 +32,8 @@ class RNUniTrackModule(reactContext: ReactApplicationContext)
                 trackScreens      = c.optBoolean("trackScreens", true),
                 trackTaps         = c.optBoolean("trackTaps", true),
                 trackNetwork      = c.optBoolean("trackNetwork", true),
+                journeyCapture    = c.optBoolean("journeyCapture", true),
+                sessionTimeoutMs  = c.optInt("sessionTimeoutMs", 1_800_000),
             )
             UniTrack.initialize(reactApplicationContext.applicationContext as Application, cfg)
             promise.resolve(null)

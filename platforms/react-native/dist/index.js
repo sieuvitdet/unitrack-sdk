@@ -10,7 +10,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.safeJsonParse = exports.createNavigationTracker = exports.tapState = exports.UniTrackTapBoundary = void 0;
+exports.safeJsonParse = exports.createNavigationTracker = exports.tapState = exports.UniTrackTapBoundary = exports.UniTrackRemoteConfig = void 0;
 exports.installDeeplinkAutoCapture = installDeeplinkAutoCapture;
 const react_native_1 = require("react-native");
 const tapState_1 = require("./tapState");
@@ -27,9 +27,36 @@ const native = (_a = react_native_1.NativeModules.UniTrack) !== null && _a !== v
         throw new Error(LINK_HINT);
     },
 });
+var remoteConfig_1 = require("./remoteConfig");
+Object.defineProperty(exports, "UniTrackRemoteConfig", { enumerable: true, get: function () { return remoteConfig_1.UniTrackRemoteConfig; } });
 class UniTrackClass {
     constructor() {
         this.initialized = false;
+        // Registered third-party providers (Snowplow, Firebase, …). Every event is
+        // forwarded to each one. Empty by default — core has zero such dependencies.
+        this.providers = [];
+        // Event rewrite rules (Phase 2 — config-driven). A matching rule renames an
+        // auto-captured event into a business event + merges props at this chokepoint.
+        this.eventRules = [];
+    }
+    /** Register a provider to also receive every event. Call BEFORE initialize();
+     *  if called afterwards, the provider is initialized immediately. */
+    addProvider(provider) {
+        this.providers.push(provider);
+        if (this.initialized) {
+            Promise.resolve(provider.initialize()).catch((e) => console.warn('[UniTrack] provider init failed', e));
+        }
+    }
+    // Run an action against every provider, isolating failures.
+    forEachProvider(action) {
+        for (const p of this.providers) {
+            try {
+                action(p);
+            }
+            catch (e) {
+                console.warn('[UniTrack] provider forward failed', e);
+            }
+        }
     }
     async initialize(apiKey, config = {}) {
         if (this.initialized)
@@ -37,15 +64,54 @@ class UniTrackClass {
         await native.initialize(apiKey, JSON.stringify(config));
         this.initialized = true;
         this.installFetchInterceptor();
+        // Bring up any providers registered before initialize().
+        for (const p of this.providers) {
+            try {
+                await p.initialize();
+            }
+            catch (e) {
+                console.warn('[UniTrack] provider init failed', e);
+            }
+        }
     }
     identify(userId, traits = {}) {
+        this.forEachProvider((p) => p.setUser(userId, traits));
         return native.identify(userId, JSON.stringify(traits));
     }
-    reset() { return native.reset(); }
-    track(event, properties = {}) {
-        return native.track(event, JSON.stringify(properties));
+    reset() {
+        this.forEachProvider((p) => p.setUser(null, {}));
+        return native.reset();
     }
-    setScreen(name) { return native.setScreen(name); }
+    setEventRules(rules) { this.eventRules = rules; }
+    applyRules(event, props) {
+        var _a;
+        const screen = ((_a = props['screen']) !== null && _a !== void 0 ? _a : props['screen_name']);
+        const elem = props['element_key'];
+        for (const r of this.eventRules) {
+            if (r.matchEvent !== event)
+                continue;
+            if (r.matchScreen && r.matchScreen !== screen)
+                continue;
+            if (r.matchElementKey && r.matchElementKey !== elem)
+                continue;
+            return [r.toName, { ...props, ...r.addProps }];
+        }
+        return null;
+    }
+    track(event, properties = {}) {
+        let name = event;
+        let props = properties;
+        const rewritten = this.applyRules(event, properties);
+        if (rewritten) {
+            [name, props] = rewritten;
+        }
+        this.forEachProvider((p) => p.track(name, props));
+        return native.track(name, JSON.stringify(props));
+    }
+    setScreen(name) {
+        this.forEachProvider((p) => p.setScreen(name));
+        return native.setScreen(name);
+    }
     flush() { return native.flush(); }
     setEnabled(e) { return native.setEnabled(e); }
     // --- semantic event helpers (Phase 3) ----------------------------------

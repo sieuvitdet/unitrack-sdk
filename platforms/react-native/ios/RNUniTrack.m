@@ -34,6 +34,8 @@ RCT_EXPORT_METHOD(initialize:(NSString *)apiKey
     if (c[@"flushIntervalMs"]) cfg.flushIntervalMs = [c[@"flushIntervalMs"] intValue];
     if (c[@"samplingRate"])    cfg.samplingRate    = [c[@"samplingRate"] doubleValue];
     if (c[@"autoCapture"])     cfg.autoCapture     = [c[@"autoCapture"] boolValue];
+    if (c[@"journeyCapture"])   cfg.journeyCapture   = [c[@"journeyCapture"] boolValue];
+    if (c[@"sessionTimeoutMs"]) cfg.sessionTimeoutMs = [c[@"sessionTimeoutMs"] intValue];
 
     [UniTrack initializeWithApiKey:apiKey config:cfg];
     resolve(nil);

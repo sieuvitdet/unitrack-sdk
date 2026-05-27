@@ -46,6 +46,11 @@ export interface UniTrackConfig {
   trackScreens?: boolean;
   trackTaps?: boolean;
   trackNetwork?: boolean;
+  /** Emit session_start/session_end boundaries so the portal can reconstruct
+   *  each session's journey. */
+  journeyCapture?: boolean;
+  /** Inactivity/background window (ms) after which a session is closed. */
+  sessionTimeoutMs?: number;
 }
 
 export type EventProperties = Record<string, unknown>;

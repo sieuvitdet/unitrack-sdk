@@ -99,6 +99,7 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
             put("sdk_config", JSONObject().apply {
                 put("batchSize", 10); put("flushIntervalMs", 3000); put("autoCapture", true)
                 put("trackScreens", true); put("trackTaps", true); put("trackNetwork", true)
+                put("journeyCapture", true); put("sessionTimeoutMs", 1_800_000)
             })
             put("snowplow", JSONObject().put("enabled", false))
             put("firebase", JSONObject().put("enabled", false))

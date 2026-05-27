@@ -54,6 +54,8 @@ public struct UniTrackRemoteConfig: Codable {
         public var trackTaps: Bool?
         public var trackNetwork: Bool?
         public var logLevel: String?
+        public var journeyCapture: Bool?
+        public var sessionTimeoutMs: Int?
     }
 
     public struct SnowplowConfig: Codable {
