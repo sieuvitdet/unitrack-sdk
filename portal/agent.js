@@ -30,6 +30,17 @@ const parseJSON = (s, fallback) => {
   try { return JSON.parse(s); } catch (_) { return fallback; }
 };
 
+// LLMs often wrap JSON answers in a ```json ... ``` markdown code fence. Strip
+// it (and any leading prose) so parseJSON can read the object.
+function stripCodeFence(s) {
+  if (typeof s !== 'string') return s;
+  let t = s.trim();
+  // ```json\n...\n```  or  ```\n...\n```
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence) return fence[1].trim();
+  return t;
+}
+
 // Strip any module/package prefix from a screen/class name so old qualified
 // names ("MyApp.HomeVC") group with bare ones ("HomeVC"). Mirrors the portal
 // SPA's cleanScreen() in the tree view.
@@ -346,12 +357,13 @@ async function runCycle(projectId, deliverFn) {
   let analysis_json = null, report_text = null, category = 'app';
   try {
     if (!cfg.llm_endpoint) throw new Error('no_llm_endpoint');
-    // Agent #1: analysis.
-    const analysisRaw = await callLLM(cfg, cfg.analysis_prompt || DEFAULT_ANALYSIS_PROMPT,
-      JSON.stringify(input));
+    // Agent #1: analysis. Strip any ```json fence the model wraps around it.
+    const analysisRaw = stripCodeFence(await callLLM(cfg,
+      cfg.analysis_prompt || DEFAULT_ANALYSIS_PROMPT, JSON.stringify(input)));
     analysis_json = analysisRaw;
     // Agent #2: report (input = analysis output).
-    const reportRaw = await callLLM(cfg, cfg.report_prompt || DEFAULT_REPORT_PROMPT, analysisRaw);
+    const reportRaw = stripCodeFence(await callLLM(cfg,
+      cfg.report_prompt || DEFAULT_REPORT_PROMPT, analysisRaw));
     // Report agent returns JSON {overall_category, body_markdown, ...}; tolerate plain text.
     const parsed = parseJSON(reportRaw, null);
     if (parsed && (parsed.body_markdown || parsed.overall_category)) {
