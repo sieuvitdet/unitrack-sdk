@@ -354,12 +354,13 @@ router.put('/projects/:id/agent', ownProject, (req, res) => {
 
   db.prepare(`
     INSERT INTO agent_config
-      (project_id, enabled, llm_endpoint, llm_api_key, analysis_prompt, report_prompt,
+      (project_id, enabled, llm_endpoint, llm_api_key, llm_model, analysis_prompt, report_prompt,
        schedule_cron, telegram_token, telegram_chat_id, email_app_dev, email_backend_dev, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id) DO UPDATE SET
       enabled = excluded.enabled, llm_endpoint = excluded.llm_endpoint,
-      llm_api_key = excluded.llm_api_key, analysis_prompt = excluded.analysis_prompt,
+      llm_api_key = excluded.llm_api_key, llm_model = excluded.llm_model,
+      analysis_prompt = excluded.analysis_prompt,
       report_prompt = excluded.report_prompt, schedule_cron = excluded.schedule_cron,
       telegram_token = excluded.telegram_token, telegram_chat_id = excluded.telegram_chat_id,
       email_app_dev = excluded.email_app_dev, email_backend_dev = excluded.email_backend_dev
@@ -368,6 +369,7 @@ router.put('/projects/:id/agent', ownProject, (req, res) => {
     b.enabled !== undefined ? (b.enabled ? 1 : 0) : (cur.enabled ?? 1),
     b.llm_endpoint    ?? cur.llm_endpoint ?? null,
     keepSecret(b.llm_api_key, cur.llm_api_key ?? null),
+    b.llm_model       ?? cur.llm_model ?? null,
     b.analysis_prompt ?? cur.analysis_prompt ?? DEFAULT_ANALYSIS_PROMPT,
     b.report_prompt   ?? cur.report_prompt ?? DEFAULT_REPORT_PROMPT,
     b.schedule_cron   ?? cur.schedule_cron ?? '0 7 * * *',

@@ -234,12 +234,16 @@ function computeFlows(projectId, { refresh = true } = {}) {
 
 // ── Phase 4: LLM analyze → report pipeline ───────────────────────────────────
 
-const LLM_TIMEOUT_MS = 30_000;
+const LLM_TIMEOUT_MS = 60_000;
 
-// Call the team-trained LLM endpoint with a system + user message. The endpoint
-// is whatever the project configured (a curl-able POST). We keep the contract
-// minimal: POST {system, user} with optional Bearer key; expect a text/JSON
-// reply. Returns the raw string reply, or throws on failure/timeout.
+// Default model when agent_config.llm_model is unset. The team's proxy is
+// OpenAI-compatible (POST /v1/chat/completions).
+const DEFAULT_LLM_MODEL = 'hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8';
+
+// Call the LLM endpoint (OpenAI-compatible /v1/chat/completions) with a system
+// prompt + user payload. Sends {model, messages, temperature, max_tokens,
+// extra_body} and reads choices[0].message.content. Returns the reply string,
+// or throws on failure/timeout.
 async function callLLM(cfg, system, user) {
   if (!cfg.llm_endpoint) throw new Error('no_llm_endpoint');
   const ctrl = new AbortController();
@@ -249,16 +253,29 @@ async function callLLM(cfg, system, user) {
     if (cfg.llm_api_key) headers['Authorization'] = 'Bearer ' + cfg.llm_api_key;
     const r = await fetch(cfg.llm_endpoint, {
       method: 'POST', headers, signal: ctrl.signal,
-      body: JSON.stringify({ system, user }),
+      body: JSON.stringify({
+        model: cfg.llm_model || DEFAULT_LLM_MODEL,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user',   content: user },
+        ],
+        temperature: 0.3,        // analysis should be stable, not creative
+        max_tokens: 2048,
+        // Disable the model's chain-of-thought so we get the JSON answer
+        // directly (faster, cheaper, easier to parse in an automated pipeline).
+        extra_body: { chat_template_kwargs: { enable_thinking: false } },
+      }),
     });
-    if (!r.ok) throw new Error('llm_http_' + r.status);
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error('llm_http_' + r.status + (body ? ': ' + body.slice(0, 200) : ''));
+    }
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('json')) {
       const j = await r.json();
-      // Accept a few common shapes: {text}, {output}, {choices:[{message:{content}}]}.
-      return j.text || j.output
-        || (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content)
-        || JSON.stringify(j);
+      // OpenAI-compatible: choices[0].message.content. Tolerate {text}/{output}.
+      return (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content)
+        || j.text || j.output || JSON.stringify(j);
     }
     return await r.text();
   } finally { clearTimeout(timer); }

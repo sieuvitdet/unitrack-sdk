@@ -316,9 +316,11 @@ async function renderAgent(pid){
         <input type="checkbox" id="agEnabled" ${cfg.enabled?'checked':''}> Bật agent
       </label>
 
-      <h3 style="margin:8px 0 8px;font-size:14px">LLM (team tự train)</h3>
-      <label>Endpoint (curl POST tới đây)</label>
-      <input id="agEndpoint" style="width:100%" value="${v(cfg.llm_endpoint)}" placeholder="https://llm.team.com/v1/chat"/>
+      <h3 style="margin:8px 0 8px;font-size:14px">LLM (OpenAI-compatible /v1/chat/completions)</h3>
+      <label>Endpoint</label>
+      <input id="agEndpoint" style="width:100%" value="${v(cfg.llm_endpoint)}" placeholder="https://proxy.onebot.meobeo.ai/v1/chat/completions"/>
+      <label style="margin-top:8px">Model</label>
+      <input id="agModel" style="width:100%" value="${v(cfg.llm_model)}" placeholder="hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"/>
       <label style="margin-top:8px">API key ${cfg.has_llm_api_key?'<span style="color:var(--accent2)">(đã đặt)</span>':''}</label>
       <input id="agApiKey" style="width:100%" value="${v(cfg.llm_api_key)}" placeholder="để trống = giữ nguyên"/>
 
@@ -362,6 +364,7 @@ async function renderAgent(pid){
     const body={
       enabled:$('#agEnabled').checked,
       llm_endpoint:$('#agEndpoint').value.trim(),
+      llm_model:$('#agModel').value.trim(),
       llm_api_key:$('#agApiKey').value.trim(),
       analysis_prompt:$('#agAnalysis').value,
       report_prompt:$('#agReport').value,

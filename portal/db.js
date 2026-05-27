@@ -144,6 +144,7 @@ db.exec(`
     enabled         INTEGER DEFAULT 1,
     llm_endpoint    TEXT,
     llm_api_key     TEXT,
+    llm_model       TEXT,
     analysis_prompt TEXT,
     report_prompt   TEXT,
     schedule_cron   TEXT DEFAULT '0 7 * * *',   -- ~once a day at 07:00
@@ -206,6 +207,9 @@ ensureColumn('projects', 'owner_id', 'INTEGER');
 ensureColumn('projects', 'sp_forward_url', 'TEXT');
 ensureColumn('projects', 'providers', 'TEXT');
 ensureColumn('project_config', 'rules', 'TEXT');
+// agent_config may predate the llm_model column (added when wiring the
+// OpenAI-compatible endpoint). Add it to existing databases.
+ensureColumn('agent_config', 'llm_model', 'TEXT');
 
 // 3) Now the columns exist on every database — create the indexes.
 db.exec(`
