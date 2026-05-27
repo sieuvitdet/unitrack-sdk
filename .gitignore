@@ -63,3 +63,9 @@ backend/ingest.db*
 
 # Vendored C core copy for the CocoaPods build (regenerate with platforms/ios/sync_core.sh)
 platforms/ios/CoreVendor/
+
+# SPM build cache (regenerated)
+platforms/ios/.build/
+
+# Portal local database (runtime data, not source)
+portal/data/
