@@ -22,6 +22,7 @@ const { handleConfig } = require('./config');
 const apiRouter = require('./api');
 const { buildAuthRouter, requireAuth } = require('./auth');
 const scheduler = require('./agent_scheduler');
+const telegramBot = require('./telegram_bot');
 
 const PORT      = process.env.PORT      || 4010;
 const HOST      = process.env.HOST      || '127.0.0.1';
@@ -82,5 +83,8 @@ app.listen(PORT, HOST, () => {
   console.log(`[portal] db ${DB_PATH}`);
   // Start the agent scheduler (daily analyze→report cycles). Opt out with
   // AGENT_SCHEDULER=off (e.g. for tests / one-off runs).
-  if (process.env.AGENT_SCHEDULER !== 'off') scheduler.start();
+  if (process.env.AGENT_SCHEDULER !== 'off') {
+    scheduler.start();
+    telegramBot.start();   // command bot (/report, /flows, ...) via long-poll
+  }
 });
