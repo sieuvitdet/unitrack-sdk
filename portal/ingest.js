@@ -13,10 +13,16 @@ const insertStmt = db.prepare(`
 `);
 
 function isValid(e) {
-  return e
-    && (typeof e.event_id === 'string' || typeof e.event_id === 'number')
-    && typeof e.event_name === 'string'
-    && (typeof e.timestamp === 'number' || typeof e.timestamp === 'string');
+  if (!e
+    || !(typeof e.event_id === 'string' || typeof e.event_id === 'number')
+    || typeof e.event_name !== 'string'
+    || !(typeof e.timestamp === 'number' || typeof e.timestamp === 'string')) {
+    return false;
+  }
+  // Reject unusable timestamps (NaN / 0 / negative / far-future) so session
+  // reconstruction never computes a NaN duration. Allow 60s of clock skew.
+  const ts = Number(e.timestamp);
+  return Number.isFinite(ts) && ts > 0 && ts <= Date.now() + 60_000;
 }
 
 // Map an SDK event payload onto our row shape. Device metadata arrives as a

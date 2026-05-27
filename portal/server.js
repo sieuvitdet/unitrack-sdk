@@ -21,6 +21,7 @@ const { handleSnowplow } = require('./snowplow');
 const { handleConfig } = require('./config');
 const apiRouter = require('./api');
 const { buildAuthRouter, requireAuth } = require('./auth');
+const scheduler = require('./agent_scheduler');
 
 const PORT      = process.env.PORT      || 4010;
 const HOST      = process.env.HOST      || '127.0.0.1';
@@ -79,4 +80,7 @@ app.get('/', (_req, res) => res.redirect(BASE_PATH + '/'));
 app.listen(PORT, HOST, () => {
   console.log(`[portal] listening on http://${HOST}:${PORT}${BASE_PATH}`);
   console.log(`[portal] db ${DB_PATH}`);
+  // Start the agent scheduler (daily analyze→report cycles). Opt out with
+  // AGENT_SCHEDULER=off (e.g. for tests / one-off runs).
+  if (process.env.AGENT_SCHEDULER !== 'off') scheduler.start();
 });

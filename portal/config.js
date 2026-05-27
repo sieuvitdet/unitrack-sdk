@@ -25,6 +25,10 @@ function defaults(project) {
       batchSize: 10, flushIntervalMs: 3000, samplingRate: 1.0,
       autoCapture: true, trackScreens: true, trackTaps: true,
       trackNetwork: true, logLevel: 'warn',
+      // Session journey tracking: emit session_start/session_end boundaries so
+      // the portal can reconstruct each session's flow. sessionTimeoutMs is the
+      // inactivity/background window after which a session is considered closed.
+      journeyCapture: true, sessionTimeoutMs: 1800000,
     },
     snowplow: { enabled: false },
     firebase: { enabled: false },

@@ -109,6 +109,66 @@ db.exec(`
     UNIQUE(project_id, event_name)
   );
 
+  -- App sessions: a materialized view of each tracking session, reconstructed
+  -- from the raw events stream (grouped by session_id) by the agent module.
+  -- One row per (project, session). Refreshed incrementally on a schedule and
+  -- on demand. journey is the ordered step list; flow_signature is the
+  -- distinct-screen path used to group sessions into flows.
+  CREATE TABLE IF NOT EXISTS app_sessions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL,
+    session_id     TEXT NOT NULL,
+    user_id        TEXT,
+    platform       TEXT,
+    app_version    TEXT,
+    started_at     INTEGER,
+    ended_at       INTEGER,
+    ended_reason   TEXT,                  -- timeout | background_timeout | manual_reset | inferred_terminate | active
+    duration_ms    INTEGER,
+    event_count    INTEGER,
+    screen_count   INTEGER,
+    crashed        INTEGER DEFAULT 0,
+    journey        TEXT,                  -- JSON: [{screen, event_name, element_key, ts}]
+    flow_signature TEXT,                  -- "Home>List>Detail>Checkout"
+    updated_at     INTEGER NOT NULL,
+    UNIQUE(project_id, session_id)
+  );
+
+  -- Agent config: one row per project = the project's "root agent". Created
+  -- automatically when a project is created. Holds the LLM endpoint + the two
+  -- agent system prompts (analysis, report), the report schedule, and the
+  -- delivery channels (Telegram, email). Secrets (llm_api_key, telegram_token)
+  -- are masked when read back through the API.
+  CREATE TABLE IF NOT EXISTS agent_config (
+    project_id      INTEGER PRIMARY KEY,
+    enabled         INTEGER DEFAULT 1,
+    llm_endpoint    TEXT,
+    llm_api_key     TEXT,
+    analysis_prompt TEXT,
+    report_prompt   TEXT,
+    schedule_cron   TEXT DEFAULT '0 7 * * *',   -- ~once a day at 07:00
+    telegram_token  TEXT,
+    telegram_chat_id TEXT,
+    email_app_dev    TEXT,                       -- recipient for app-category issues
+    email_backend_dev TEXT,                      -- recipient for network/data/parse issues
+    last_run_at     INTEGER,
+    created_at      INTEGER NOT NULL
+  );
+
+  -- Agent reports: one row per analyze→report cycle the root agent runs.
+  CREATE TABLE IF NOT EXISTS agent_reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id    INTEGER NOT NULL,
+    created_at    INTEGER NOT NULL,
+    period_start  INTEGER,
+    period_end    INTEGER,
+    analysis_json TEXT,                  -- raw output of the Analysis agent
+    report_text   TEXT,                  -- formatted output of the Report agent
+    category      TEXT,                  -- app | network | data | parse | mixed
+    delivered     INTEGER DEFAULT 0,
+    delivery_log  TEXT                   -- JSON: per-channel send result
+  );
+
   -- Remote config: the app fetches this at startup instead of hardcoding its
   -- tracking setup. One row per project; each column is a JSON blob for a
   -- section of the config. version bumps on every save so the app/ETag can tell
@@ -155,6 +215,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_session  ON events(session_id);
   CREATE INDEX IF NOT EXISTS idx_events_element  ON events(element_key);
   CREATE INDEX IF NOT EXISTS idx_events_provider ON events(provider);
+  CREATE INDEX IF NOT EXISTS idx_app_sessions_project ON app_sessions(project_id);
+  CREATE INDEX IF NOT EXISTS idx_app_sessions_flow    ON app_sessions(flow_signature);
+  CREATE INDEX IF NOT EXISTS idx_agent_reports_project ON agent_reports(project_id);
 `);
 
 function newApiKey() {

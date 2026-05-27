@@ -7,6 +7,9 @@ const { buildWorkbook } = require('./export');
 const { namingIssues, isValidName, healthScore } = require('./scoring');
 const { requireAdmin } = require('./auth');
 const { configForProject, saveConfig } = require('./config');
+const { reconstructSessions, computeFlows, runCycle,
+        DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT } = require('./agent');
+const { deliver } = require('./deliver');
 
 // Ownership guard for project routes: admin can touch any project; a normal
 // user only their own. Attaches req.project. Use as middleware on /projects/:id*.
@@ -58,6 +61,14 @@ router.post('/projects', (req, res) => {
     INSERT INTO projects (owner_id, name, app_bundle, source_type, api_key, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(req.user.id, name, app_bundle ?? null, source_type ?? null, newApiKey(), now());
+  // Auto-create the project's "root agent": one agent_config row with the two
+  // default system prompts, disabled delivery until the user fills in the LLM
+  // endpoint + Telegram/email. enabled=1 so the schedule picks it up once
+  // configured. This is requirement #1 ("tạo project → sinh root agent").
+  db.prepare(`
+    INSERT INTO agent_config (project_id, enabled, analysis_prompt, report_prompt, schedule_cron, created_at)
+    VALUES (?, 1, ?, ?, '0 7 * * *', ?)
+  `).run(info.lastInsertRowid, DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT, now());
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid));
 });
 
@@ -280,6 +291,121 @@ router.get('/projects/:id/stats', ownProject, (req, res) => {
     by_screen:   all("SELECT COALESCE(screen_name,'unknown') screen, COUNT(*) count FROM events WHERE project_id = ? GROUP BY screen_name ORDER BY count DESC LIMIT 20"),
     crashes:     one("SELECT COUNT(*) n FROM events WHERE project_id = ? AND event_name = 'crash'").n,
   });
+});
+
+// --------------------------------------------------------------- sessions
+// List reconstructed sessions (newest first). Refreshes the materialized
+// app_sessions view from the raw events stream before returning, so the
+// timeline reflects events that arrived since the last view.
+router.get('/projects/:id/sessions', ownProject, (req, res) => {
+  const pid = req.params.id;
+  let reconstruct_failed = false;
+  try { reconstructSessions(pid); }
+  catch (err) { reconstruct_failed = true; console.error('[sessions] reconstruct failed', err); }
+  const rows = db.prepare(`
+    SELECT id, session_id, user_id, platform, app_version, started_at, ended_at,
+           ended_reason, duration_ms, event_count, screen_count, crashed,
+           flow_signature
+    FROM app_sessions WHERE project_id = ?
+    ORDER BY started_at DESC LIMIT 500
+  `).all(pid);
+  // Surface reconstruction failure so the client knows the list may be stale,
+  // rather than silently returning old data with a 200.
+  res.json({ reconstructed_at: Date.now(), reconstruct_failed, sessions: rows });
+});
+
+// Flow analytics: usage + crash/stuck rate per flow (Phase 2, heuristic).
+router.get('/projects/:id/flows', ownProject, (req, res) => {
+  try { res.json(computeFlows(req.params.id)); }
+  catch (err) { console.error('[flows] failed', err); res.status(500).json({ error: 'flows_failed' }); }
+});
+
+// ---------------------------------------------------------------- agent
+// Mask a secret for read-back: show only that it's set, never the value.
+const maskSecret = (v) => (v ? '••••••' + String(v).slice(-4) : '');
+
+// Read the project's root-agent config. Secrets are masked.
+router.get('/projects/:id/agent', ownProject, (req, res) => {
+  let cfg = db.prepare('SELECT * FROM agent_config WHERE project_id = ?').get(req.params.id);
+  if (!cfg) {
+    // Self-heal for projects created before agent_config existed.
+    db.prepare(`INSERT INTO agent_config (project_id, enabled, analysis_prompt, report_prompt, schedule_cron, created_at)
+                VALUES (?, 1, ?, ?, '0 7 * * *', ?)`)
+      .run(req.params.id, DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT, now());
+    cfg = db.prepare('SELECT * FROM agent_config WHERE project_id = ?').get(req.params.id);
+  }
+  res.json({
+    ...cfg,
+    llm_api_key:    maskSecret(cfg.llm_api_key),
+    telegram_token: maskSecret(cfg.telegram_token),
+    has_llm_api_key:    !!cfg.llm_api_key,
+    has_telegram_token: !!cfg.telegram_token,
+  });
+});
+
+// Update the root-agent config. A masked/blank secret means "keep existing" so
+// editing other fields doesn't wipe the stored token.
+router.put('/projects/:id/agent', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const cur = db.prepare('SELECT * FROM agent_config WHERE project_id = ?').get(pid) || {};
+  const b = req.body || {};
+  const keepSecret = (incoming, existing) =>
+    (incoming === undefined || incoming === '' || /^••••••/.test(incoming)) ? existing : incoming;
+
+  db.prepare(`
+    INSERT INTO agent_config
+      (project_id, enabled, llm_endpoint, llm_api_key, analysis_prompt, report_prompt,
+       schedule_cron, telegram_token, telegram_chat_id, email_app_dev, email_backend_dev, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id) DO UPDATE SET
+      enabled = excluded.enabled, llm_endpoint = excluded.llm_endpoint,
+      llm_api_key = excluded.llm_api_key, analysis_prompt = excluded.analysis_prompt,
+      report_prompt = excluded.report_prompt, schedule_cron = excluded.schedule_cron,
+      telegram_token = excluded.telegram_token, telegram_chat_id = excluded.telegram_chat_id,
+      email_app_dev = excluded.email_app_dev, email_backend_dev = excluded.email_backend_dev
+  `).run(
+    pid,
+    b.enabled !== undefined ? (b.enabled ? 1 : 0) : (cur.enabled ?? 1),
+    b.llm_endpoint    ?? cur.llm_endpoint ?? null,
+    keepSecret(b.llm_api_key, cur.llm_api_key ?? null),
+    b.analysis_prompt ?? cur.analysis_prompt ?? DEFAULT_ANALYSIS_PROMPT,
+    b.report_prompt   ?? cur.report_prompt ?? DEFAULT_REPORT_PROMPT,
+    b.schedule_cron   ?? cur.schedule_cron ?? '0 7 * * *',
+    keepSecret(b.telegram_token, cur.telegram_token ?? null),
+    b.telegram_chat_id  ?? cur.telegram_chat_id ?? null,
+    b.email_app_dev     ?? cur.email_app_dev ?? null,
+    b.email_backend_dev ?? cur.email_backend_dev ?? null,
+    cur.created_at ?? now()
+  );
+  res.json({ ok: true });
+});
+
+// Run one analyze→report cycle now (manual trigger / test). Delivers via the
+// configured channels (Telegram/email) when set.
+router.post('/projects/:id/agent/run', ownProject, async (req, res) => {
+  try {
+    const out = await runCycle(req.params.id, deliver);
+    res.json(out);
+  } catch (err) {
+    console.error('[agent] run failed', err);
+    res.status(500).json({ error: 'run_failed', detail: err.message });
+  }
+});
+
+// List past agent reports (newest first).
+router.get('/projects/:id/reports', ownProject, (req, res) => {
+  res.json(db.prepare(
+    'SELECT id, created_at, period_start, period_end, report_text, category, delivered FROM agent_reports WHERE project_id = ? ORDER BY created_at DESC LIMIT 100'
+  ).all(req.params.id));
+});
+
+// One session's full journey (the ordered step list).
+router.get('/projects/:id/sessions/:sid', ownProject, (req, res) => {
+  const row = db.prepare(
+    'SELECT * FROM app_sessions WHERE project_id = ? AND session_id = ?'
+  ).get(req.params.id, req.params.sid);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  res.json({ ...row, journey: JSON.parse(row.journey || '[]') });
 });
 
 // ----------------------------------------------------------- excel export
