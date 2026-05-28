@@ -1039,52 +1039,93 @@ async function openSessionDrawer(pid,sid){
     return `<span class="tree-net" data-gid="${gid}" style="display:inline-block;cursor:pointer;background:${c}22;border:1px solid ${c}66;color:${c};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600">🌐 network [${networks.length}]${hasErr?' ⚠':''}</span>`;
   };
 
-  const segHtml = segs.map(seg=>{
-    // Network calls NOT attached to a tap (standalone) → one chip at screen level.
-    const screenNets = [];
-    const actHtml = seg.actions.map(a=>{
-      if(a.standaloneNet){ screenNets.push(...a.networks); return ''; }
-      const isTap = a.event_name==='tap';
-      const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
-      let label, icon, color;
-      if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
-      else { icon=danger?'⚠':'•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
-      const hasDetail = danger || (a.props && Object.keys(a.props).length);
-      const aid = _treeActions.length; if(hasDetail) _treeActions.push(a);
-      // Networks triggered BY this tap → nested chip under the action.
-      const childNet = a.networks.length
-        ? `<div style="padding:3px 0 1px 22px">${netChip(a.networks, label)}</div>` : '';
-      return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
-        <div style="display:flex;gap:8px;align-items:center;font-size:12px">
-          <span class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'xem chi tiết'} ⓘ</span>`:''}</span>
-          <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
+  // Does an action match the search query? (label / event name / element key /
+  // properties / "crash" keyword / any of its network calls' url+status+method)
+  const netMatch = (n, q)=> [n.url, n.method, n.status, n.net_error].some(v=>v!=null && String(v).toLowerCase().includes(q));
+  const actMatch = (a, q)=>{
+    if(!q) return true;
+    const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+    if(q==='crash' && danger) return true;
+    if((a.element_key||'').toLowerCase().includes(q)) return true;
+    if((a.event_name||'').toLowerCase().includes(q)) return true;
+    if(a.props && JSON.stringify(a.props).toLowerCase().includes(q)) return true;
+    if(a.networks.some(n=>netMatch(n,q))) return true;
+    return false;
+  };
+
+  // Render the tree, filtered by [query]. A screen shows when its name matches
+  // OR it has any matching action/network. Within a matching screen, if the
+  // match was on the SCREEN NAME we keep all actions; otherwise only matching ones.
+  const renderTree = (query)=>{
+    const q = (query||'').trim().toLowerCase();
+    _treeActions.length = 0; _treeNetGroups.length = 0;
+    let shown = 0;
+    const segHtml = segs.map(seg=>{
+      const screenHit = !q || (seg.screen||'').toLowerCase().includes(q);
+      const standaloneNetActs = seg.actions.filter(a=>a.standaloneNet);
+      const realActs = seg.actions.filter(a=>!a.standaloneNet);
+      // Filter actions unless the screen name itself matched.
+      const acts = (q && !screenHit) ? realActs.filter(a=>actMatch(a,q)) : realActs;
+      // Standalone networks: keep if screen hit, no query, or a call matches.
+      const screenNets = [];
+      for(const a of standaloneNetActs){
+        if(!q || screenHit) screenNets.push(...a.networks);
+        else screenNets.push(...a.networks.filter(n=>netMatch(n,q)));
+      }
+      if(q && !screenHit && acts.length===0 && screenNets.length===0) return ''; // screen filtered out
+      shown++;
+
+      const actHtml = acts.map(a=>{
+        const isTap = a.event_name==='tap';
+        const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+        let label, icon, color;
+        if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
+        else { icon=danger?'⚠':'•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
+        const hasDetail = danger || (a.props && Object.keys(a.props).length);
+        const aid = _treeActions.length; if(hasDetail) _treeActions.push(a);
+        const childNet = a.networks.length
+          ? `<div style="padding:3px 0 1px 22px">${netChip(a.networks, label)}</div>` : '';
+        return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+            <span class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'xem chi tiết'} ⓘ</span>`:''}</span>
+            <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
+          </div>
+          ${childNet}
+        </div>`;
+      }).join('');
+      const screenNetHtml = screenNets.length
+        ? `<div style="padding:4px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:12px"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>` : '';
+      return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden">
+        <div style="background:var(--panel2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:13px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</b>
+          <span class="muted" style="font-size:11px">${acts.length} hành động${screenNets.length?` · ${screenNets.length} network`:''}</span>
         </div>
-        ${childNet}
+        <div style="padding:6px 12px">${screenNetHtml}${actHtml || (screenNetHtml?'':'<span class="muted" style="font-size:12px">— không có hành động —</span>')}</div>
       </div>`;
     }).join('');
-    // Screen-level network chip (calls fired on this screen without a tap).
-    const screenNetHtml = screenNets.length
-      ? `<div style="padding:4px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:12px"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>` : '';
-    return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden">
-      <div style="background:var(--panel2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
-        <b style="font-size:13px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</b>
-        <span class="muted" style="font-size:11px">${seg.actions.filter(a=>!a.standaloneNet).length} hành động${screenNets.length?` · ${screenNets.length} network`:''}</span>
-      </div>
-      <div style="padding:6px 12px">${screenNetHtml}${actHtml || (screenNetHtml?'':'<span class="muted" style="font-size:12px">— không có hành động —</span>')}</div>
-    </div>`;
-  }).join('');
+
+    const block=$('#dTree');
+    block.innerHTML = segHtml || `<div class="empty" style="font-size:12px">${q?'Không có kết quả cho “'+esc(query)+'”':'— (không có bước nào)'}</div>`;
+    // Wire clicks each render (DOM is rebuilt).
+    block.querySelectorAll('.tree-act').forEach(el=>{
+      el.onclick = (e)=>{ e.stopPropagation(); showActionDetail(_treeActions[+el.dataset.aid]); };
+    });
+    block.querySelectorAll('.tree-net').forEach(el=>{
+      el.onclick = (e)=>{ e.stopPropagation(); showSwfNetGroup(_treeNetGroups[+el.dataset.gid]); };
+    });
+  };
 
   const block=$('#dDevice');
   block.style.whiteSpace='normal'; block.style.background='transparent'; block.style.border='none'; block.style.padding='0';
-  block.innerHTML = segHtml || '<span class="muted">— (không có bước nào)</span>';
-
-  // Click an action → properties / error popup. Click a network chip → list drawer.
-  block.querySelectorAll('.tree-act').forEach(el=>{
-    el.onclick = (e)=>{ e.stopPropagation(); showActionDetail(_treeActions[+el.dataset.aid]); };
-  });
-  block.querySelectorAll('.tree-net').forEach(el=>{
-    el.onclick = (e)=>{ e.stopPropagation(); showSwfNetGroup(_treeNetGroups[+el.dataset.gid]); };
-  });
+  // Search box + tree container.
+  block.innerHTML = `
+    <input id="dTreeSearch" placeholder="🔎 Tìm class, button, api, status, crash…"
+      style="width:100%;margin-bottom:10px;font-size:12px" />
+    <div id="dTree"></div>`;
+  renderTree('');
+  const searchEl = $('#dTreeSearch');
+  let _searchTimer;
+  searchEl.oninput = ()=>{ clearTimeout(_searchTimer); _searchTimer = setTimeout(()=>renderTree(searchEl.value), 120); };
 
   // "Generate wireframe session" button in the drawer header.
   let genBtn = document.getElementById('dGenWf');
