@@ -1369,8 +1369,8 @@ function showSwfNetGroup(group){
     const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
     const path = n.url ? (()=>{ try{ return new URL(n.url).pathname; }catch(_){ return n.url; } })() : (n.url||'(no url)');
     const statusTxt = n.net_error ? '✕' : (n.status!=null?n.status:'—');
-    return `<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden">
-      <div class="swf-netrow" data-i="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;font-size:12px">
+    return `<div style="flex:0 0 auto;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden">
+      <div class="swf-netrow" data-i="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;font-size:12px;min-height:20px">
         <span style="color:#79c0ff">${esc(n.method||'')}</span>
         <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path)}</span>
         <span style="color:${c};font-weight:700">${statusTxt}</span>
@@ -1391,7 +1391,9 @@ function showSwfNetGroup(group){
       </div>
     </div>`;
   }).join('');
-  const inner = `<div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}`;
+  // Wrap rows in a plain block so the parent flex-column (.dlg-b) can't shrink
+  // each row to a sliver (the bug: 40 rows collapsed to ~2px tall each).
+  const inner = `<div style="display:block"><div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}</div>`;
 
   // If the wireframe side panel exists (we're in the wireframe overlay), render
   // there. Otherwise (called from the session drawer tree) use a modal dialog.
