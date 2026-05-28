@@ -51,15 +51,25 @@ private extension UIViewController {
         set { objc_setAssociatedObject(self, &utLoadReportedKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
 
-    // Framework containers create noise — skip them for both events.
+    // Framework containers + system/private VCs create noise — skip them.
     var ut_isSkippedContainer: Bool {
+        let name = String(describing: type(of: self))
         let skipped: Set<String> = [
             "UINavigationController", "UITabBarController",
             "UISplitViewController", "UIPageViewController",
             "UIInputWindowController", "UICompatibilityInputViewController",
             "UIAlertController",
+            // System / framework chrome that isn't a real app screen.
+            "UISceneHostingViewController", "_UISceneHostingViewController",
+            "UITrackingElementWindowController", "UIEditingOverlayViewController",
+            "UIPredictionViewController", "UISystemInputAssistantViewController",
+            "FlutterViewController",   // the Flutter host — Dart routes name screens
+            "HUD",
         ]
-        return skipped.contains(String(describing: type(of: self)))
+        if skipped.contains(name) { return true }
+        // Private/framework VCs typically start with "_" — not app screens.
+        if name.hasPrefix("_") { return true }
+        return false
     }
 
 

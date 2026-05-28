@@ -96,13 +96,18 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     _lastKey = resolved.key;
     _lastAt = now;
 
-    final screen = UniTrackTapObserver.routeObserver.currentScreen;
-    UniTrackTapObserver.lastTap = LastTap(resolved.key, screen, now);
+    final flutterScreen = UniTrackTapObserver.routeObserver.currentScreen;
+    // When the Flutter route observer doesn't know the screen (the user is on a
+    // NATIVE / webview screen — my_pt, mobimap, STWebController…), don't send a
+    // bogus 'unknown'. Omit `screen` so the core uses its current_screen_, which
+    // the native iOS/Android view-controller swizzler keeps up to date.
+    final known = flutterScreen.isNotEmpty && flutterScreen != 'unknown';
+    UniTrackTapObserver.lastTap = LastTap(resolved.key, known ? flutterScreen : '', now);
 
     UniTrack.instance.track('tap', properties: {
       'element': resolved.key,
       'element_type': resolved.type,
-      'screen': screen,
+      if (known) 'screen': flutterScreen,
       if (resolved.text != null) 'label': resolved.text,
     });
   }
@@ -194,6 +199,22 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     // layout key ("main").
     final key = semantic ?? text ?? tooltip ?? keyLabel
         ?? (iconName != null ? 'icon:$iconName' : null) ?? interactiveType!;
+
+    // Noise filter: a GestureDetector is a WEAK interactive signal — apps wrap
+    // whole rows / text blocks / avatars in one. When the only interactive
+    // widget is a GestureDetector AND there's no explicit name (Semantics/Key/
+    // Tooltip/Icon), the resolved key is just whatever text sat under the
+    // finger — a user name, a long content string, a lone emoji. Skip those so
+    // the data isn't polluted. Real buttons (InkWell/ElevatedButton/IconButton/
+    // ListTile/...) are always kept.
+    final weakOnly = interactiveType == 'GestureDetector'
+        && semantic == null && keyLabel == null && tooltip == null && iconName == null;
+    if (weakOnly) {
+      final t = (text ?? '').trim();
+      // long content string, empty, or pure emoji/symbol → not a button label
+      final wordish = RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(t);
+      if (t.isEmpty || t.length > 40 || !wordish) return null;
+    }
     return _ResolvedTap(key: key, type: interactiveType ?? 'unknown', text: text ?? tooltip);
   }
 
