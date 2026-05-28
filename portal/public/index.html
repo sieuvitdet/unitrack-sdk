@@ -953,21 +953,61 @@ async function openSessionDrawer(pid,sid){
   $('#dBadge').textContent='session'; $('#dBadge').className='badge'; $('#dId').textContent=shortSid(sid);
   $('#dKv').innerHTML=[['session id',sid],['flow',s.flow_signature],['bắt đầu',s.started_at?fmtTime(s.started_at):'—'],['kết thúc',s.ended_at?fmtTime(s.ended_at):'—'],['lý do',s.ended_reason],['thời lượng',fmtDur(s.duration_ms)],['platform',s.platform],['app version',s.app_version],['user',s.user_id]]
     .map(([k,v])=>`<div class="key">${k}</div><div class="mono">${esc(v)||'<span class=muted>—</span>'}</div>`).join('');
-  // Show a journey timeline in the first block; hide the second.
-  $('#dDeviceH').textContent='HÀNH TRÌNH';
+  // Show the journey GROUPED BY SCREEN so it's clear, within each class/screen,
+  // which buttons were hit and what happened. Lifecycle steps with no screen are
+  // bucketed under "(trước khi vào màn)".
+  $('#dDeviceH').textContent='HÀNH TRÌNH THEO MÀN';
   $('#dPropsH').style.display='none'; $('#dProps').style.display='none';
-  const steps=(s.journey||[]).map((j,i)=>`
-    <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
-      <span class="muted mono" style="width:28px">${i+1}</span>
-      <span class="badge ${esc(j.event_name)}" style="flex-shrink:0">${esc(j.event_name)}</span>
-      <span style="flex:1">${esc(j.screen)||'<span class=muted>—</span>'}${j.element_key?` <span class="mono muted" style="font-size:11px">· ${esc(j.element_key)}</span>`:''}</span>
-      <span class="muted mono" style="font-size:11px">${j.ts?new Date(j.ts).toLocaleTimeString('vi-VN',{hour12:false}):''}</span>
-    </div>`).join('');
-  // The DEVICE block is a <pre> (monospace, pre-wrap) — swap to normal flow for
-  // the timeline by setting innerHTML and relaxing whitespace.
+
+  // Build screen segments (merge consecutive same-screen steps).
+  const journey = (s.journey||[]);
+  const segs = [];
+  for(const j of journey){
+    const screen = j.screen || '(trước khi vào màn)';
+    const last = segs[segs.length-1];
+    if(last && last.screen===screen) last.steps.push(j);
+    else segs.push({ screen, steps:[j] });
+  }
+
+  // A step is a "tap/action" the user did (vs. passive screen_view/load). Taps
+  // carry an element_key (button name); custom events are user actions too.
+  const isTap = (n)=> n==='tap';
+  const isPassive = (n)=> n==='screen_view'||n==='screen_load_completed'||n==='screen_end';
+  const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
+
+  const segHtml = segs.map(seg=>{
+    // Buttons hit on this screen (taps with element_key), de-duplicated with count.
+    const taps = seg.steps.filter(x=>isTap(x.event_name));
+    const tapCounts = {};
+    for(const t of taps){ const k=t.element_key||'(button)'; tapCounts[k]=(tapCounts[k]||0)+1; }
+    const tapChips = Object.entries(tapCounts).map(([k,c])=>
+      `<span style="display:inline-block;background:#2563eb22;border:1px solid #2563eb66;color:#5b8cff;border-radius:6px;padding:2px 9px;font-size:12px;margin:2px 4px 2px 0">👆 ${esc(k)}${c>1?` ×${c}`:''}</span>`
+    ).join('');
+    // Other actions on this screen (custom events, errors, crashes) — not passive views.
+    const actions = seg.steps.filter(x=>!isTap(x.event_name) && !isPassive(x.event_name));
+    const actHtml = actions.map(a=>{
+      const danger = a.event_name==='crash'||a.event_name==='application_error';
+      const c = danger?'var(--danger)':'var(--muted)';
+      return `<div style="font-size:12px;color:${c};padding:1px 0">• ${esc(a.event_name)} <span class="muted mono" style="font-size:10px">${a.ts?tEvt(a.ts):''}</span></div>`;
+    }).join('');
+    const crashed = seg.steps.some(x=>x.event_name==='crash'||x.event_name==='application_error');
+
+    return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:var(--panel2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:13px">${crashed?'⚠ ':''}${esc(seg.screen)}</b>
+        <span class="muted" style="font-size:11px">${taps.length} tap · ${seg.steps.length} event</span>
+      </div>
+      <div style="padding:8px 12px">
+        ${tapChips ? `<div style="margin-bottom:${actHtml?'8px':'0'}"><span class="muted" style="font-size:11px">Button đã bấm:</span><br>${tapChips}</div>`
+                   : '<div class="muted" style="font-size:12px">— không có tap nào trên màn này —</div>'}
+        ${actHtml ? `<div style="border-top:1px solid var(--line);padding-top:6px;margin-top:6px"><span class="muted" style="font-size:11px">Hành động khác:</span>${actHtml}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
   const block=$('#dDevice');
   block.style.whiteSpace='normal'; block.style.background='transparent'; block.style.border='none'; block.style.padding='0';
-  block.innerHTML = steps || '<span class="muted">— (không có bước nào)</span>';
+  block.innerHTML = segHtml || '<span class="muted">— (không có bước nào)</span>';
   $('#drawer').classList.add('open');$('#scrim').classList.add('open');
 }
 
