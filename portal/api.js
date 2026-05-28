@@ -416,6 +416,36 @@ router.get('/projects/:id/sessions/:sid', ownProject, (req, res) => {
   res.json({ ...row, journey: JSON.parse(row.journey || '[]') });
 });
 
+// Detail of one journey event across providers: the same event is stored once
+// per provider (unitrack / snowplow / firebase) when forwarding is on. Match by
+// session + event_name nearest the given timestamp, and return each provider's
+// stored payload so the UI can show "what was sent to Snowplow / Firebase".
+router.get('/projects/:id/event-detail', ownProject, (req, res) => {
+  const { session, name, ts } = req.query;
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  const t = Number(ts) || 0;
+  const rows = db.prepare(`
+    SELECT provider, properties, timestamp, screen_name, element_key
+    FROM events
+    WHERE project_id = ? AND event_name = ?
+      ${session ? 'AND session_id = ?' : ''}
+    ORDER BY ABS(timestamp - ?) ASC
+    LIMIT 12
+  `).all(...(session ? [req.params.id, name, session, t] : [req.params.id, name, t]));
+
+  // Pick the closest event per provider.
+  const byProvider = {};
+  for (const r of rows) {
+    const p = r.provider || 'unitrack';
+    if (!byProvider[p]) {
+      let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
+      byProvider[p] = { properties: props, timestamp: r.timestamp,
+                        screen_name: r.screen_name, element_key: r.element_key };
+    }
+  }
+  res.json({ event_name: name, providers: byProvider });
+});
+
 // ----------------------------------------------------------- excel export
 router.get('/projects/:id/export', ownProject, async (req, res) => {
   const pid = req.params.id;

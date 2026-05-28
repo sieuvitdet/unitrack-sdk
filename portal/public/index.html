@@ -1155,52 +1155,67 @@ function showActionDetail(a){
 // network children hanging under their triggering action. Clicking a network
 // node shows its URL + status. Rendered in a full-screen overlay.
 let _swfNets = [];   // network details indexed by node id, for click lookup
+let _swfActions = [];   // action nodes (clickable) for the per-session wireframe
 function openSessionWireframe(segs, sid){
-  _swfNets = [];
-  const LANE_PAD=16, NODE_H=40, NODE_W=170, NET_W=150, V_GAP=14, LANE_GAP=22;
+  _swfNets = []; _swfActions = [];
+  const LANE_PAD=16, NODE_H=38, NODE_X=60, V_GAP=12, LANE_GAP=24, NET_X=420;
+  // Approx pixel width of a label (full text, no ellipsis) → node width.
+  const nodeWidth = (label)=> Math.max(150, Math.min(360, label.length*7.4 + 28));
   let y = 50;
+  let laneW = 980;   // grows to fit the widest node + its network child
   const laneSvgs = [];
   segs.forEach((seg, si)=>{
     const actions = seg.actions;
-    // Lane height: one row per action; networks add sub-rows.
     let rows = 0; for(const a of actions) rows += 1 + a.networks.length;
     rows = Math.max(rows, 1);
-    const laneH = LANE_PAD*2 + rows*(NODE_H+V_GAP);
+    const laneH = LANE_PAD*2 + 28 + rows*(NODE_H+V_GAP);
     const laneY = y;
-    // Lane header.
-    let inner = `<rect x="20" y="${laneY}" width="900" height="${laneH}" rx="12" fill="${seg.crashed?'#dc262611':'var(--panel2)'}" stroke="${seg.crashed?'var(--danger)':'var(--line)'}" stroke-width="1.5"/>
-      <text x="36" y="${laneY+24}" fill="var(--text)" font-size="14" font-weight="700">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</text>`;
-    let ry = laneY + 40;
+    let body = '';
+    let ry = laneY + 46;
     actions.forEach(a=>{
+      const aid = _swfActions.length; _swfActions.push({ ...a, sid });
       const isTap = a.event_name==='tap';
-      const fill = isTap ? '#5b8cff' : (a.standaloneNet ? '#79c0ff' : (seg.crashed&&(a.event_name==='crash'||a.event_name==='application_error')?'#dc2626':'#8b94a7'));
-      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':('• '+a.event_name));
-      inner += `<rect x="60" y="${ry}" width="${NODE_W}" height="${NODE_H}" rx="8" fill="${fill}22" stroke="${fill}" stroke-width="1.5"/>
-        <text x="${60+NODE_W/2}" y="${ry+NODE_H/2+4}" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="600">${esc(label.length>22?label.slice(0,21)+'…':label)}</text>`;
-      const ax = 60+NODE_W, ay = ry+NODE_H/2;
+      const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+      const fill = danger ? '#dc2626' : (isTap ? '#5b8cff' : (a.standaloneNet ? '#79c0ff' : '#8b94a7'));
+      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':((danger?'⚠ ':'• ')+a.event_name));
+      const w = nodeWidth(label);
+      if(NODE_X+w+20 > laneW) laneW = NODE_X+w+20;
+      body += `<g class="swf-act" data-aid="${aid}" style="cursor:pointer">
+        <rect x="${NODE_X}" y="${ry}" width="${w}" height="${NODE_H}" rx="8" fill="${fill}22" stroke="${fill}" stroke-width="1.5"/>
+        <text x="${NODE_X+12}" y="${ry+NODE_H/2+4}" fill="var(--text)" font-size="12" font-weight="600">${esc(label)}</text>
+        <text x="${NODE_X+w-10}" y="${ry+NODE_H/2+4}" text-anchor="end" fill="var(--muted)" font-size="10">ⓘ</text>
+      </g>`;
+      const ax = NODE_X+w, ay = ry+NODE_H/2;
       ry += NODE_H + V_GAP;
-      // network children
       a.networks.forEach(n=>{
         const id = _swfNets.length; _swfNets.push(n);
         const c = n.net_error ? '#dc2626' : (n.status>=400?'#f59e0b':(n.status>=200&&n.status<300?'#27d796':'#8b94a7'));
-        const nx=300, ny=ry;
-        // connector from action to this network
-        inner += `<path d="M${ax},${ay} C${ax+30},${ay} ${nx-30},${ny+NODE_H/2} ${nx},${ny+NODE_H/2}" fill="none" stroke="${c}" stroke-width="1.5" stroke-opacity="0.6"/>`;
-        const statusTxt = n.net_error ? '✕' : (n.status!=null?n.status:'—');
-        inner += `<g class="swf-net" data-id="${id}" style="cursor:pointer">
-          <rect x="${nx}" y="${ny}" width="${NET_W}" height="${NODE_H}" rx="8" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
-          <text x="${nx+12}" y="${ny+NODE_H/2+4}" fill="var(--text)" font-size="11">🌐 ${esc(n.method||'')} <tspan fill="${c}" font-weight="700">${statusTxt}</tspan></text>
+        const netLabel = `🌐 ${n.method||''} ${n.net_error?'✕':(n.status!=null?n.status:'—')}`;
+        const nw = nodeWidth(netLabel);
+        const nx=NET_X, ny=ry;
+        if(nx+nw+20 > laneW) laneW = nx+nw+20;
+        body += `<path d="M${ax},${ay} C${ax+30},${ay} ${nx-30},${ny+NODE_H/2} ${nx},${ny+NODE_H/2}" fill="none" stroke="${c}" stroke-width="1.5" stroke-opacity="0.6"/>`;
+        body += `<g class="swf-net" data-id="${id}" style="cursor:pointer">
+          <rect x="${nx}" y="${ny}" width="${nw}" height="${NODE_H}" rx="8" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
+          <text x="${nx+12}" y="${ny+NODE_H/2+4}" fill="var(--text)" font-size="11">🌐 ${esc(n.method||'')} <tspan fill="${c}" font-weight="700">${n.net_error?'✕':(n.status!=null?n.status:'—')}</tspan></text>
         </g>`;
         ry += NODE_H + V_GAP;
       });
     });
-    laneSvgs.push(inner);
+    // header drawn last using laneW (kept simple: full-width band)
+    laneSvgs.push({ laneY, laneH, crashed:seg.crashed, screen:seg.screen, body });
     y = laneY + laneH + LANE_GAP;
-    // arrow to next lane
-    if(si<segs.length-1){
-      laneSvgs.push(`<path d="M470,${laneY+laneH} L470,${laneY+laneH+LANE_GAP}" stroke="#5b8cff" stroke-width="2" marker-end="url(#swfArrow)"/>`);
-    }
   });
+  // Now we know laneW — render lane rects + headers + connectors.
+  const rendered = laneSvgs.map((L,i)=>{
+    const arrow = i<laneSvgs.length-1
+      ? `<path d="M${NODE_X+40},${L.laneY+L.laneH} L${NODE_X+40},${L.laneY+L.laneH+LANE_GAP}" stroke="#5b8cff" stroke-width="2" marker-end="url(#swfArrow)"/>`
+      : '';
+    return `<rect x="20" y="${L.laneY}" width="${laneW-40}" height="${L.laneH}" rx="12" fill="${L.crashed?'#dc262611':'var(--panel2)'}" stroke="${L.crashed?'var(--danger)':'var(--line)'}" stroke-width="1.5"/>
+      <text x="36" y="${L.laneY+26}" fill="var(--text)" font-size="14" font-weight="700">${L.crashed?'⚠ ':''}📱 ${esc(L.screen)}</text>
+      ${L.body}${arrow}`;
+  });
+  laneSvgs.length = 0; laneSvgs.push(...rendered);
 
   const totalH = y + 30;
   let ov = document.getElementById('swfOverlay');
@@ -1213,18 +1228,18 @@ function openSessionWireframe(segs, sid){
   ov.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)">
       <b>Wireframe session ${shortSid(sid)}</b>
-      <span class="muted" style="font-size:12px">${segs.length} màn · click node 🌐 để xem URL + status</span>
+      <span class="muted" style="font-size:12px">${segs.length} màn · click node để xem chi tiết (event / network)</span>
       <button class="btn ghost sm" id="swfClose" style="margin-left:auto">✕ Đóng</button>
     </div>
     <div style="flex:1;display:flex;overflow:hidden">
       <div style="flex:1;overflow:auto;padding:10px">
-        <svg width="960" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
+        <svg width="${laneW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="swfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" fill="#5b8cff"/></marker></defs>
           ${laneSvgs.join('')}
         </svg>
       </div>
-      <div id="swfDetail" style="width:320px;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto">
-        <div class="muted" style="font-size:12px">Click một node network (🌐) để xem chi tiết URL + status code.</div>
+      <div id="swfDetail" style="width:380px;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto">
+        <div class="muted" style="font-size:12px">Click một node:<br>• 🌐 network → URL + status<br>• event → properties + payload Snowplow/Firebase</div>
       </div>
     </div>`;
   document.getElementById('swfClose').onclick = ()=>{ ov.style.display='none'; };
@@ -1242,6 +1257,49 @@ function openSessionWireframe(segs, sid){
         </div>
         <div class="key" style="margin-top:10px">URL</div>
         <div class="mono" style="word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:4px;font-size:12px">${esc(n.url||'—')}</div>`;
+    };
+  });
+  // Click an event node → load its detail across providers (unitrack / snowplow / firebase).
+  ov.querySelectorAll('.swf-act').forEach(g=>{
+    g.onclick = ()=> showSwfEventDetail(_swfActions[+g.dataset.aid]);
+  });
+}
+
+// Render an event node's detail into the wireframe side panel: unitrack
+// properties + the exact JSON payload forwarded to Snowplow / Firebase.
+async function showSwfEventDetail(a){
+  const panel = document.getElementById('swfDetail');
+  panel.innerHTML = '<div class="muted" style="font-size:12px">Đang tải...</div>';
+  let detail = { providers:{} };
+  try {
+    detail = await api(`/api/projects/${route.pid}/event-detail?session=${encodeURIComponent(a.sid||'')}&name=${encodeURIComponent(a.event_name)}&ts=${a.ts||0}`);
+  } catch(e){ panel.innerHTML='<div style="color:var(--danger)">Không tải được chi tiết</div>'; return; }
+  const provs = detail.providers || {};
+  const order = ['unitrack','snowplow','firebase'];
+  const colors = { unitrack:'#2563eb', snowplow:'#16a34a', firebase:'#d97706' };
+  const present = order.filter(p=>provs[p]);
+  const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+
+  let head = `<h3 style="margin:0 0 4px;font-size:14px;color:${danger?'var(--danger)':'var(--text)'}">${danger?'⚠ ':''}${esc(a.event_name)}</h3>`;
+  if(a.element_key) head += `<div class="muted mono" style="font-size:11px;margin-bottom:4px">${esc(a.element_key)}</div>`;
+  if(a.triggeredBy) head += `<div style="font-size:11px;margin-bottom:6px">Do bấm: <b>${esc(a.triggeredBy)}</b></div>`;
+
+  // Provider tabs.
+  const tabs = present.map((p,i)=>`<span class="swfP" data-p="${p}" style="cursor:pointer;font-size:11px;padding:3px 10px;border-radius:6px;margin-right:4px;background:${i===0?colors[p]:'var(--panel2)'};color:${i===0?'#fff':'var(--muted)'}">${p}</span>`).join('');
+
+  const renderProv = (p)=>{
+    const d = provs[p]; if(!d) return '<div class="muted">— không gửi tới nguồn này —</div>';
+    return `<pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto">${esc(JSON.stringify(d.properties,null,2))}</pre>`;
+  };
+
+  panel.innerHTML = head
+    + (present.length?`<div style="margin:8px 0">${tabs}</div><div id="swfProvBody">${renderProv(present[0])}</div>`
+                     :'<div class="muted">Không có dữ liệu provider.</div>');
+  panel.querySelectorAll('.swfP').forEach(t=>{
+    t.onclick = ()=>{
+      panel.querySelectorAll('.swfP').forEach(x=>{ x.style.background='var(--panel2)'; x.style.color='var(--muted)'; });
+      t.style.background=colors[t.dataset.p]; t.style.color='#fff';
+      document.getElementById('swfProvBody').innerHTML = renderProv(t.dataset.p);
     };
   });
 }
