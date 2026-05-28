@@ -175,7 +175,7 @@ function evTag(r){
   return out;
 }
 
-let route = {name:'projects', pid:null, tab:'logs'};
+let route = {name:'projects', pid:null, tab:'sessions'};
 function go(r){route={...route,...r};render();}
 
 $('#navProjects').onclick=()=>go({name:'projects'});
@@ -213,7 +213,7 @@ async function renderCMS(){
       <thead><tr><th>Dự án</th><th>Source</th><th>Events</th><th>Định nghĩa</th><th>Health Score</th><th></th></tr></thead>
       <tbody>${data.projects.length?data.projects.map(p=>`
         <tr class="click">
-          <td onclick="go({name:'project',pid:${p.id},tab:'logs'})"><b>${esc(p.name)}</b><div class="muted mono" style="font-size:11px">${esc(p.app_bundle)||''}</div></td>
+          <td onclick="go({name:'project',pid:${p.id},tab:'sessions'})"><b>${esc(p.name)}</b><div class="muted mono" style="font-size:11px">${esc(p.app_bundle)||''}</div></td>
           <td><span class="badge ${esc(p.source_type)}">${esc(p.source_type)||'—'}</span></td>
           <td>${p.total_events}</td>
           <td>${p.elements_defined}/${p.elements_total}</td>
@@ -286,9 +286,7 @@ async function renderProject(){
     <div class="panel">
       <div class="tabs">
         <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
-        <div class="tab ${route.tab==='sessions'?'active':''}" data-tab="sessions">Sessions</div>
-        <div class="tab ${route.tab==='flows'?'active':''}" data-tab="flows">Flows</div>
-        <div class="tab ${route.tab==='wireframe'?'active':''}" data-tab="wireframe">Wireframe</div>
+        <div class="tab ${(!route.tab||route.tab==='sessions')?'active':''}" data-tab="sessions">Sessions</div>
         <div class="tab ${route.tab==='agent'?'active':''}" data-tab="agent">Agent</div>
         <div class="tab ${route.tab==='tree'?'active':''}" data-tab="tree">Cây class → event</div>
       </div>
@@ -296,11 +294,9 @@ async function renderProject(){
     </div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>go({tab:t.dataset.tab}));
   if(route.tab==='logs') renderLogs(pid);
-  else if(route.tab==='sessions') renderSessions(pid);
-  else if(route.tab==='flows') renderFlows(pid);
-  else if(route.tab==='wireframe') renderWireframe(pid);
   else if(route.tab==='agent') renderAgent(pid);
-  else renderTree(pid);
+  else if(route.tab==='tree') renderTree(pid);
+  else renderSessions(pid);   // default tab = Sessions
 }
 
 // ── Agent tab: root-agent config + reports (Phase 3/4/5) ───────────────────
@@ -948,67 +944,225 @@ async function renderSessions(pid){
   document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionDrawer(pid,tr.dataset.sid));
 }
 
+// Build a structured tree from a session journey:
+//   screen segment → actions (tap / custom event) each with child network calls.
+// A network_request is attached to the most recent action on the same screen
+// within NET_WINDOW_MS (it was "triggered by" that tap); otherwise it sits as a
+// standalone action on the screen. Network steps carry no screen, so they
+// inherit the screen that was active when they fired.
+const NET_WINDOW_MS = 6000;
+function buildSessionTree(journey){
+  const PASSIVE = new Set(['screen_view','screen_load_completed','screen_end']);
+  // First pass: assign every step an effective screen (network inherits current).
+  let curScreen = null;
+  const steps = journey.map(j=>{
+    if(j.screen) curScreen = j.screen;
+    return { ...j, _screen: j.screen || curScreen || '(trước khi vào màn)' };
+  });
+  // Group into consecutive screen segments.
+  const segs = [];
+  for(const st of steps){
+    const last = segs[segs.length-1];
+    if(last && last.screen===st._screen) last.steps.push(st);
+    else segs.push({ screen: st._screen, steps:[st] });
+  }
+  // Within each segment, turn steps into actions + attach networks to the
+  // nearest preceding action.
+  for(const seg of segs){
+    seg.actions = [];
+    seg.crashed = false;
+    let lastAction = null;
+    for(const st of seg.steps){
+      if(PASSIVE.has(st.event_name)) continue;
+      if(st.event_name==='crash'||st.event_name==='application_error') seg.crashed = true;
+      if(st.event_name==='network_request'){
+        const net = { url:st.url, method:st.method, status:st.status, duration_ms:st.duration_ms, net_error:st.net_error, ts:st.ts };
+        if(lastAction && (st.ts - lastAction.ts) <= NET_WINDOW_MS){
+          lastAction.networks.push(net);
+        } else {
+          seg.actions.push({ event_name:'network_request', element_key:null, ts:st.ts, networks:[net], standaloneNet:true });
+        }
+      } else {
+        lastAction = { event_name:st.event_name, element_key:st.element_key, ts:st.ts, networks:[] };
+        seg.actions.push(lastAction);
+      }
+    }
+  }
+  return segs;
+}
+
+// HTTP status → color.
+function statusColor(s){
+  if(s==null) return 'var(--muted)';
+  if(s>=500) return 'var(--danger)';
+  if(s>=400) return 'var(--warn)';
+  if(s>=200&&s<300) return 'var(--accent2)';
+  return 'var(--muted)';
+}
+function netLine(n){
+  const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
+  const path = n.url ? (()=>{ try{ const u=new URL(n.url); return u.pathname; }catch(_){ return n.url; } })() : '(no url)';
+  return `<div style="display:flex;gap:8px;align-items:center;padding:2px 0 2px 20px;font-size:12px" title="${esc(n.url||'')}">
+    <span style="color:#79c0ff">🌐 ${esc(n.method||'')}</span>
+    <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path)}</span>
+    <span style="color:${c};font-weight:600">${n.net_error?('✕ '+esc(n.net_error)):(n.status!=null?n.status:'—')}</span>
+    <span class="muted">${n.duration_ms!=null?n.duration_ms+'ms':''}</span>
+  </div>`;
+}
+
 async function openSessionDrawer(pid,sid){
   const s=await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`);
+  window._curSession = { sid, data:s };   // for "Generate wireframe session"
   $('#dBadge').textContent='session'; $('#dBadge').className='badge'; $('#dId').textContent=shortSid(sid);
   $('#dKv').innerHTML=[['session id',sid],['flow',s.flow_signature],['bắt đầu',s.started_at?fmtTime(s.started_at):'—'],['kết thúc',s.ended_at?fmtTime(s.ended_at):'—'],['lý do',s.ended_reason],['thời lượng',fmtDur(s.duration_ms)],['platform',s.platform],['app version',s.app_version],['user',s.user_id]]
     .map(([k,v])=>`<div class="key">${k}</div><div class="mono">${esc(v)||'<span class=muted>—</span>'}</div>`).join('');
-  // Show the journey GROUPED BY SCREEN so it's clear, within each class/screen,
-  // which buttons were hit and what happened. Lifecycle steps with no screen are
-  // bucketed under "(trước khi vào màn)".
-  $('#dDeviceH').textContent='HÀNH TRÌNH THEO MÀN';
+
+  $('#dDeviceH').textContent='HÀNH TRÌNH THEO MÀN (cây)';
   $('#dPropsH').style.display='none'; $('#dProps').style.display='none';
 
-  // Build screen segments (merge consecutive same-screen steps).
-  const journey = (s.journey||[]);
-  const segs = [];
-  for(const j of journey){
-    const screen = j.screen || '(trước khi vào màn)';
-    const last = segs[segs.length-1];
-    if(last && last.screen===screen) last.steps.push(j);
-    else segs.push({ screen, steps:[j] });
-  }
-
-  // A step is a "tap/action" the user did (vs. passive screen_view/load). Taps
-  // carry an element_key (button name); custom events are user actions too.
-  const isTap = (n)=> n==='tap';
-  const isPassive = (n)=> n==='screen_view'||n==='screen_load_completed'||n==='screen_end';
+  const segs = buildSessionTree(s.journey||[]);
   const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
 
   const segHtml = segs.map(seg=>{
-    // Buttons hit on this screen (taps with element_key), de-duplicated with count.
-    const taps = seg.steps.filter(x=>isTap(x.event_name));
-    const tapCounts = {};
-    for(const t of taps){ const k=t.element_key||'(button)'; tapCounts[k]=(tapCounts[k]||0)+1; }
-    const tapChips = Object.entries(tapCounts).map(([k,c])=>
-      `<span style="display:inline-block;background:#2563eb22;border:1px solid #2563eb66;color:#5b8cff;border-radius:6px;padding:2px 9px;font-size:12px;margin:2px 4px 2px 0">👆 ${esc(k)}${c>1?` ×${c}`:''}</span>`
-    ).join('');
-    // Other actions on this screen (custom events, errors, crashes) — not passive views.
-    const actions = seg.steps.filter(x=>!isTap(x.event_name) && !isPassive(x.event_name));
-    const actHtml = actions.map(a=>{
+    const actHtml = seg.actions.map(a=>{
+      const isTap = a.event_name==='tap';
       const danger = a.event_name==='crash'||a.event_name==='application_error';
-      const c = danger?'var(--danger)':'var(--muted)';
-      return `<div style="font-size:12px;color:${c};padding:1px 0">• ${esc(a.event_name)} <span class="muted mono" style="font-size:10px">${a.ts?tEvt(a.ts):''}</span></div>`;
+      let label, icon, color;
+      if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
+      else if(a.standaloneNet){ icon='🌐'; label='network'; color='#79c0ff'; }
+      else { icon='•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
+      const nets = a.networks.map(netLine).join('');
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+          <span style="color:${color};font-weight:600">${icon} ${esc(label)}</span>
+          ${a.networks.length?`<span class="muted" style="font-size:10px">↳ ${a.networks.length} call</span>`:''}
+          <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
+        </div>
+        ${nets}
+      </div>`;
     }).join('');
-    const crashed = seg.steps.some(x=>x.event_name==='crash'||x.event_name==='application_error');
-
     return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden">
       <div style="background:var(--panel2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
-        <b style="font-size:13px">${crashed?'⚠ ':''}${esc(seg.screen)}</b>
-        <span class="muted" style="font-size:11px">${taps.length} tap · ${seg.steps.length} event</span>
+        <b style="font-size:13px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</b>
+        <span class="muted" style="font-size:11px">${seg.actions.length} hành động</span>
       </div>
-      <div style="padding:8px 12px">
-        ${tapChips ? `<div style="margin-bottom:${actHtml?'8px':'0'}"><span class="muted" style="font-size:11px">Button đã bấm:</span><br>${tapChips}</div>`
-                   : '<div class="muted" style="font-size:12px">— không có tap nào trên màn này —</div>'}
-        ${actHtml ? `<div style="border-top:1px solid var(--line);padding-top:6px;margin-top:6px"><span class="muted" style="font-size:11px">Hành động khác:</span>${actHtml}</div>` : ''}
-      </div>
+      <div style="padding:6px 12px">${actHtml || '<span class="muted" style="font-size:12px">— không có hành động —</span>'}</div>
     </div>`;
   }).join('');
 
   const block=$('#dDevice');
   block.style.whiteSpace='normal'; block.style.background='transparent'; block.style.border='none'; block.style.padding='0';
   block.innerHTML = segHtml || '<span class="muted">— (không có bước nào)</span>';
+
+  // "Generate wireframe session" button in the drawer header.
+  let genBtn = document.getElementById('dGenWf');
+  if(!genBtn){
+    genBtn = document.createElement('button');
+    genBtn.id='dGenWf'; genBtn.className='btn sm';
+    genBtn.style.cssText='margin-left:auto;margin-right:8px';
+    genBtn.textContent='⬡ Generate wireframe session';
+    $('#dClose').parentElement.insertBefore(genBtn, $('#dClose'));
+  }
+  genBtn.onclick = ()=> openSessionWireframe(segs, sid);
+
   $('#drawer').classList.add('open');$('#scrim').classList.add('open');
+}
+
+// ── Per-session wireframe: a detailed flow graph of ONE session ────────────
+// Layout is a vertical sequence of screen lanes; inside each lane the actions
+// (button taps / network calls) are nodes laid left→right in time order, with
+// network children hanging under their triggering action. Clicking a network
+// node shows its URL + status. Rendered in a full-screen overlay.
+let _swfNets = [];   // network details indexed by node id, for click lookup
+function openSessionWireframe(segs, sid){
+  _swfNets = [];
+  const LANE_PAD=16, NODE_H=40, NODE_W=170, NET_W=150, V_GAP=14, LANE_GAP=22;
+  let y = 50;
+  const laneSvgs = [];
+  segs.forEach((seg, si)=>{
+    const actions = seg.actions;
+    // Lane height: one row per action; networks add sub-rows.
+    let rows = 0; for(const a of actions) rows += 1 + a.networks.length;
+    rows = Math.max(rows, 1);
+    const laneH = LANE_PAD*2 + rows*(NODE_H+V_GAP);
+    const laneY = y;
+    // Lane header.
+    let inner = `<rect x="20" y="${laneY}" width="900" height="${laneH}" rx="12" fill="${seg.crashed?'#dc262611':'var(--panel2)'}" stroke="${seg.crashed?'var(--danger)':'var(--line)'}" stroke-width="1.5"/>
+      <text x="36" y="${laneY+24}" fill="var(--text)" font-size="14" font-weight="700">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</text>`;
+    let ry = laneY + 40;
+    actions.forEach(a=>{
+      const isTap = a.event_name==='tap';
+      const fill = isTap ? '#5b8cff' : (a.standaloneNet ? '#79c0ff' : (seg.crashed&&(a.event_name==='crash'||a.event_name==='application_error')?'#dc2626':'#8b94a7'));
+      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':('• '+a.event_name));
+      inner += `<rect x="60" y="${ry}" width="${NODE_W}" height="${NODE_H}" rx="8" fill="${fill}22" stroke="${fill}" stroke-width="1.5"/>
+        <text x="${60+NODE_W/2}" y="${ry+NODE_H/2+4}" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="600">${esc(label.length>22?label.slice(0,21)+'…':label)}</text>`;
+      const ax = 60+NODE_W, ay = ry+NODE_H/2;
+      ry += NODE_H + V_GAP;
+      // network children
+      a.networks.forEach(n=>{
+        const id = _swfNets.length; _swfNets.push(n);
+        const c = n.net_error ? '#dc2626' : (n.status>=400?'#f59e0b':(n.status>=200&&n.status<300?'#27d796':'#8b94a7'));
+        const nx=300, ny=ry;
+        // connector from action to this network
+        inner += `<path d="M${ax},${ay} C${ax+30},${ay} ${nx-30},${ny+NODE_H/2} ${nx},${ny+NODE_H/2}" fill="none" stroke="${c}" stroke-width="1.5" stroke-opacity="0.6"/>`;
+        const statusTxt = n.net_error ? '✕' : (n.status!=null?n.status:'—');
+        inner += `<g class="swf-net" data-id="${id}" style="cursor:pointer">
+          <rect x="${nx}" y="${ny}" width="${NET_W}" height="${NODE_H}" rx="8" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
+          <text x="${nx+12}" y="${ny+NODE_H/2+4}" fill="var(--text)" font-size="11">🌐 ${esc(n.method||'')} <tspan fill="${c}" font-weight="700">${statusTxt}</tspan></text>
+        </g>`;
+        ry += NODE_H + V_GAP;
+      });
+    });
+    laneSvgs.push(inner);
+    y = laneY + laneH + LANE_GAP;
+    // arrow to next lane
+    if(si<segs.length-1){
+      laneSvgs.push(`<path d="M470,${laneY+laneH} L470,${laneY+laneH+LANE_GAP}" stroke="#5b8cff" stroke-width="2" marker-end="url(#swfArrow)"/>`);
+    }
+  });
+
+  const totalH = y + 30;
+  let ov = document.getElementById('swfOverlay');
+  if(!ov){
+    ov = document.createElement('div'); ov.id='swfOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;flex-direction:column';
+    document.body.appendChild(ov);
+  }
+  ov.style.display='flex';
+  ov.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)">
+      <b>Wireframe session ${shortSid(sid)}</b>
+      <span class="muted" style="font-size:12px">${segs.length} màn · click node 🌐 để xem URL + status</span>
+      <button class="btn ghost sm" id="swfClose" style="margin-left:auto">✕ Đóng</button>
+    </div>
+    <div style="flex:1;display:flex;overflow:hidden">
+      <div style="flex:1;overflow:auto;padding:10px">
+        <svg width="960" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="swfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" fill="#5b8cff"/></marker></defs>
+          ${laneSvgs.join('')}
+        </svg>
+      </div>
+      <div id="swfDetail" style="width:320px;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto">
+        <div class="muted" style="font-size:12px">Click một node network (🌐) để xem chi tiết URL + status code.</div>
+      </div>
+    </div>`;
+  document.getElementById('swfClose').onclick = ()=>{ ov.style.display='none'; };
+  ov.querySelectorAll('.swf-net').forEach(g=>{
+    g.onclick = ()=>{
+      const n = _swfNets[+g.dataset.id];
+      const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
+      document.getElementById('swfDetail').innerHTML = `
+        <h3 style="margin:0 0 12px;font-size:14px">Network call</h3>
+        <div class="kv" style="grid-template-columns:90px 1fr">
+          <div class="key">Method</div><div class="mono">${esc(n.method||'—')}</div>
+          <div class="key">Status</div><div class="mono" style="color:${c};font-weight:700">${n.net_error?('✕ '+esc(n.net_error)):(n.status!=null?n.status:'—')}</div>
+          <div class="key">Duration</div><div class="mono">${n.duration_ms!=null?n.duration_ms+' ms':'—'}</div>
+          <div class="key">Thời gian</div><div class="mono">${n.ts?fmtTime(n.ts):'—'}</div>
+        </div>
+        <div class="key" style="margin-top:10px">URL</div>
+        <div class="mono" style="word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:4px;font-size:12px">${esc(n.url||'—')}</div>`;
+    };
+  });
 }
 
 let _logProvider='';

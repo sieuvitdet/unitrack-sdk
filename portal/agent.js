@@ -96,13 +96,23 @@ function buildSessionRow(events) {
     if (started_at == null) started_at = e.timestamp;
     if (!sawEnd) ended_at = e.timestamp;
 
-    // Real journey step (screen_view, tap, network_request, app_*, ...).
-    journey.push({
+    // Real journey step (screen_view, tap, network_request, app_*, ...). For
+    // network calls, keep url/method/status/duration so the session tree + the
+    // per-session wireframe can show "called X → 200/404".
+    const step = {
       screen,
       event_name: e.event_name,
-      element_key: e.element_key || (props && props.url) || null,
+      element_key: e.element_key || null,
       ts: e.timestamp,
-    });
+    };
+    if (e.event_name === 'network_request' && props) {
+      step.url      = props.url || null;
+      step.method   = props.method || null;
+      step.status   = (props.status != null ? props.status : props.status_code) ?? null;
+      step.duration_ms = props.duration_ms ?? null;
+      step.net_error = props.error || null;
+    }
+    journey.push(step);
     // Track distinct consecutive screens for the flow signature.
     if (screen && screenPath[screenPath.length - 1] !== screen) screenPath.push(screen);
   }
