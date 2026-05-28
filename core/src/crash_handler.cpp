@@ -21,10 +21,12 @@ namespace unitrack {
 std::atomic<bool> CrashHandler::installed_{false};
 std::string       CrashHandler::crash_dir_;
 
-// Signals we trap. SIGPIPE is included because killing the SDK's own
-// flush thread on a closed socket would otherwise crash the host app.
+// Signals we trap. SIGTRAP is included because Swift runtime traps — array
+// index out of bounds, force-unwrap of nil, fatalError(), precondition failures
+// — terminate the process via SIGTRAP / __builtin_trap rather than SIGSEGV, so
+// without it those (very common) crashes would go uncaptured.
 static const int kFatalSignals[] = {
-    SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL
+    SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGTRAP
 };
 
 // Buffer reused by the signal handler — pre-allocated so we never
@@ -77,6 +79,7 @@ static void handle_signal(int sig, siginfo_t* info, void* /*uctx*/) {
         case SIGBUS:  name = "SIGBUS";  break;
         case SIGFPE:  name = "SIGFPE";  break;
         case SIGILL:  name = "SIGILL";  break;
+        case SIGTRAP: name = "SIGTRAP"; break;
     }
     safe_write(fd, name);
     safe_write(fd, "\",\"si_code\":");
