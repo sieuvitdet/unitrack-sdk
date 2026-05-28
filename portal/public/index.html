@@ -728,12 +728,15 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
 
   // Collapse identical consecutive screens into a single "segment" so the
   // cursor stays put while taps/network events fire ON that screen — same
-  // shape buildSessionRow uses on the server. Each segment knows when it
-  // started, when it ended, and the inner events with offset from segment start.
+  // shape buildSessionRow uses on the server. Skip lifecycle steps with no
+  // screen (app_start/identify/...) — they aren't screens to land the cursor on,
+  // but keep them attached to the FIRST real segment so their events still ripple.
   const journey = (s.journey || []).filter(x=>x && x.ts);
   if(!journey.length){ toast('Session không có hành trình','err'); return; }
+  const withScreen = journey.filter(x=>x.screen);
+  if(!withScreen.length){ toast('Session này chưa đi qua màn nào (chỉ có lifecycle event)','err'); return; }
   const segs = [];
-  for(const j of journey){
+  for(const j of withScreen){
     const last = segs[segs.length-1];
     if(last && last.screen === j.screen){
       last.last_ts = j.ts; last.events.push(j);
@@ -746,8 +749,8 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
   const fallback = Object.values(nodePos)[0] || { cx: 100, cy: 100 };
   for(const seg of segs){ seg.pos = nodePos[seg.screen] || fallback; }
 
-  const t0 = journey[0].ts;
-  const tEnd = journey[journey.length-1].ts;
+  const t0 = segs[0].start_ts;
+  const tEnd = segs[segs.length-1].last_ts;
   const totalMs = Math.max(1, tEnd - t0);
 
   _wfReplayState = {

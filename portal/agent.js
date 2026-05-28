@@ -286,9 +286,13 @@ function computeFlowGraph(projectId, { refresh = true } = {}) {
 
     // Collapse the journey into a screen timeline (consecutive same-screen steps
     // merged), tracking when each screen segment started so we can measure dwell.
+    // Skip steps with no screen (lifecycle events: app_start, identify,
+    // session_started, notification_*) — they are not screens and would
+    // otherwise create a bogus "(no_screen)" hub/entry node.
     const segs = [];   // [{ screen, start_ts, last_ts, events }]
     for (const step of journey) {
-      const s = step.screen || '(no_screen)';
+      const s = step.screen;
+      if (!s) continue;
       const prev = segs[segs.length - 1];
       if (prev && prev.screen === s) {
         prev.last_ts = step.ts; prev.events++;
