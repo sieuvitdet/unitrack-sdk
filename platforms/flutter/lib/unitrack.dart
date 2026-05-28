@@ -11,12 +11,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture;
+import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
 export 'src/auto_capture.dart'
-    show UniTrackTapObserver, UniTrackRouteObserver, LastTap;
+    show UniTrackTapObserver, UniTrackRouteObserver, LastTap, UniTrackBodyCapture;
 // Extension point for third-party providers (Snowplow, Firebase). The provider
 // implementations live in separate packages (unitrack_snowplow, …).
 export 'src/analytics_provider.dart' show AnalyticsProvider;
@@ -336,8 +336,11 @@ class UniTrack {
   /// Install global HTTP auto-capture: every request/error is tracked, with the
   /// button + screen that triggered it (mirrored from [UniTrackTapObserver]).
   /// Call once at startup, after [initialize]. Returns the previous overrides.
-  static HttpOverrides? installHttpAutoCapture({List<String> excludeSubstrings = const []}) =>
-      installUniTrackHttpAutoCapture(excludeSubstrings: excludeSubstrings);
+  static HttpOverrides? installHttpAutoCapture({
+    List<String> excludeSubstrings = const [],
+    UniTrackBodyCapture body = const UniTrackBodyCapture(),
+  }) =>
+      installUniTrackHttpAutoCapture(excludeSubstrings: excludeSubstrings, body: body);
 }
 
 /// NavigatorObserver — auto-tracks Flutter routes.

@@ -21,6 +21,7 @@
 // request/error (with the button + screen that triggered it) is tracked with
 // no per-widget or per-call code.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/widgets.dart';
@@ -269,32 +270,56 @@ class UniTrackRouteObserver extends NavigatorObserver {
 /// Installs a global HttpOverrides that records every HTTP request/error and
 /// mirrors the last tap (button + screen) that triggered it. Call once at
 /// startup. Returns the previous overrides so callers can chain if needed.
+/// Options for HTTP body capture. OFF by default for privacy — request and
+/// response bodies often contain credentials / PII. Opt in explicitly.
+class UniTrackBodyCapture {
+  /// Capture the request body the app writes (add/write/addStream).
+  final bool request;
+  /// Capture the response body the app reads.
+  final bool response;
+  /// Truncate captured bodies to this many characters (avoid huge payloads).
+  final int maxChars;
+  const UniTrackBodyCapture({
+    this.request = false,
+    this.response = false,
+    this.maxChars = 4096,
+  });
+  bool get any => request || response;
+}
+
 /// [excludeSubstrings]: request URLs containing any of these are NOT tracked —
 /// pass the analytics ingest endpoint(s) here so the SDK never tracks its own
 /// uploads (which otherwise floods the data with thousands of self-calls).
-HttpOverrides? installUniTrackHttpAutoCapture({List<String> excludeSubstrings = const []}) {
+/// [body]: opt-in request/response body capture (off by default).
+HttpOverrides? installUniTrackHttpAutoCapture({
+  List<String> excludeSubstrings = const [],
+  UniTrackBodyCapture body = const UniTrackBodyCapture(),
+}) {
   final previous = HttpOverrides.current;
-  HttpOverrides.global = _UniTrackHttpOverrides(previous, excludeSubstrings);
+  HttpOverrides.global = _UniTrackHttpOverrides(previous, excludeSubstrings, body);
   return previous;
 }
 
 class _UniTrackHttpOverrides extends HttpOverrides {
   final HttpOverrides? _previous;
   final List<String> _exclude;
-  _UniTrackHttpOverrides(this._previous, this._exclude);
+  final UniTrackBodyCapture _body;
+  _UniTrackHttpOverrides(this._previous, this._exclude, this._body);
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     final inner = _previous?.createHttpClient(context) ??
         super.createHttpClient(context);
-    return _TrackingHttpClient(inner, _exclude);
+    return _TrackingHttpClient(inner, _exclude, _body);
   }
 }
 
 class _TrackingHttpClient implements HttpClient {
   final HttpClient _inner;
   final List<String> _exclude;
-  _TrackingHttpClient(this._inner, [this._exclude = const []]);
+  final UniTrackBodyCapture _body;
+  _TrackingHttpClient(this._inner,
+      [this._exclude = const [], this._body = const UniTrackBodyCapture()]);
 
   bool _isExcluded(Uri url) {
     final s = url.toString();
@@ -308,7 +333,7 @@ class _TrackingHttpClient implements HttpClient {
     if (_isExcluded(url)) return _inner.openUrl(method, url);
     final started = DateTime.now();
     final request = await _inner.openUrl(method, url);
-    return _TrackingHttpRequest(request, method, url, started);
+    return _TrackingHttpRequest(request, method, url, started, _body);
   }
 
   @override
@@ -401,12 +426,42 @@ class _TrackingHttpRequest implements HttpClientRequest {
   final String _method;
   final Uri _url;
   final DateTime _started;
-  _TrackingHttpRequest(this._inner, this._method, this._url, this._started);
+  final UniTrackBodyCapture _body;
+  // Accumulates the request body bytes the app writes (only when opted in).
+  final List<int> _reqBytes = [];
+  _TrackingHttpRequest(this._inner, this._method, this._url, this._started, this._body);
+
+  // Decode + truncate captured bytes to a readable string.
+  String? _decode(List<int> bytes) {
+    if (bytes.isEmpty) return null;
+    try {
+      var s = utf8.decode(bytes, allowMalformed: true);
+      if (s.length > _body.maxChars) s = s.substring(0, _body.maxChars) + '…';
+      return s;
+    } catch (_) { return '<${bytes.length} bytes>'; }
+  }
 
   @override
   Future<HttpClientResponse> close() async {
     try {
       final response = await _inner.close();
+      if (_body.response) {
+        // Tee the response stream: hand the app a fresh stream while we collect
+        // a (truncated) copy. We don't block the app — report once drained.
+        final collected = <int>[];
+        final controller = StreamController<List<int>>();
+        response.listen((chunk) {
+          if (collected.length < _body.maxChars * 2) collected.addAll(chunk);
+          controller.add(chunk);
+        }, onError: (e, st) {
+          _report(status: response.statusCode, respBody: _decode(collected));
+          controller.addError(e, st);
+        }, onDone: () {
+          _report(status: response.statusCode, respBody: _decode(collected));
+          controller.close();
+        }, cancelOnError: false);
+        return _ReplayHttpResponse(response, controller.stream);
+      }
       _report(status: response.statusCode);
       return response;
     } catch (e) {
@@ -415,11 +470,12 @@ class _TrackingHttpRequest implements HttpClientRequest {
     }
   }
 
-  void _report({required int status, String? error}) {
+  void _report({required int status, String? error, String? respBody}) {
     final durationMs = DateTime.now().difference(_started).inMilliseconds;
     final tap = UniTrackTapObserver.lastTap;
     final mirrored = tap != null && tap.isFresh;
     final ok = status >= 200 && status < 400 && error == null;
+    final reqBody = _body.request ? _decode(_reqBytes) : null;
 
     UniTrack.instance.track(ok ? 'network_request' : 'network_error', properties: {
       'method': _method,
@@ -431,6 +487,8 @@ class _TrackingHttpRequest implements HttpClientRequest {
       'status': status,
       'duration_ms': durationMs,
       if (error != null) 'error': error,
+      if (reqBody != null) 'request_body': reqBody,
+      if (respBody != null) 'response_body': respBody,
       if (mirrored) 'triggered_by_element': tap.element,
       if (mirrored) 'triggered_by_screen': tap.screen,
     });
@@ -479,22 +537,60 @@ class _TrackingHttpRequest implements HttpClientRequest {
   @override
   void abort([Object? exception, StackTrace? stackTrace]) =>
       _inner.abort(exception, stackTrace);
+  // Capture request-body bytes (capped) as the app writes them, when opted in.
+  void _capReq(List<int> data) {
+    if (!_body.request) return;
+    if (_reqBytes.length < _body.maxChars * 2) _reqBytes.addAll(data);
+  }
+
   @override
-  void add(List<int> data) => _inner.add(data);
+  void add(List<int> data) { _capReq(data); _inner.add(data); }
   @override
   void addError(Object error, [StackTrace? stackTrace]) =>
       _inner.addError(error, stackTrace);
   @override
-  Future addStream(Stream<List<int>> stream) => _inner.addStream(stream);
+  Future addStream(Stream<List<int>> stream) {
+    if (!_body.request) return _inner.addStream(stream);
+    // Tee: capture a copy while forwarding to the real request.
+    return _inner.addStream(stream.map((chunk) { _capReq(chunk); return chunk; }));
+  }
   @override
   Future flush() => _inner.flush();
   @override
-  void write(Object? object) => _inner.write(object);
+  void write(Object? object) { _capReq(utf8.encode(object?.toString() ?? '')); _inner.write(object); }
   @override
-  void writeAll(Iterable objects, [String separator = '']) =>
-      _inner.writeAll(objects, separator);
+  void writeAll(Iterable objects, [String separator = '']) {
+    _capReq(utf8.encode(objects.join(separator)));
+    _inner.writeAll(objects, separator);
+  }
   @override
   void writeCharCode(int charCode) => _inner.writeCharCode(charCode);
   @override
-  void writeln([Object? object = '']) => _inner.writeln(object);
+  void writeln([Object? object = '']) { _capReq(utf8.encode('${object ?? ''}\n')); _inner.writeln(object); }
+}
+
+/// Wraps an HttpClientResponse, replacing its data stream with a teed copy so
+/// the SDK can read the body without consuming it from the app. All other
+/// response API is forwarded to the original.
+class _ReplayHttpResponse extends StreamView<List<int>> implements HttpClientResponse {
+  final HttpClientResponse _inner;
+  _ReplayHttpResponse(this._inner, Stream<List<int>> stream) : super(stream);
+
+  @override
+  noSuchMethod(Invocation i) => super.noSuchMethod(i);
+
+  @override int get statusCode => _inner.statusCode;
+  @override String get reasonPhrase => _inner.reasonPhrase;
+  @override HttpHeaders get headers => _inner.headers;
+  @override int get contentLength => _inner.contentLength;
+  @override List<Cookie> get cookies => _inner.cookies;
+  @override bool get isRedirect => _inner.isRedirect;
+  @override bool get persistentConnection => _inner.persistentConnection;
+  @override HttpConnectionInfo? get connectionInfo => _inner.connectionInfo;
+  @override X509Certificate? get certificate => _inner.certificate;
+  @override HttpClientResponseCompressionState get compressionState => _inner.compressionState;
+  @override List<RedirectInfo> get redirects => _inner.redirects;
+  @override Future<HttpClientResponse> redirect([String? method, Uri? url, bool? followLoops]) =>
+      _inner.redirect(method, url, followLoops);
+  @override Future<Socket> detachSocket() => _inner.detachSocket();
 }

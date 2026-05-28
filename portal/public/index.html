@@ -978,7 +978,7 @@ function buildSessionTree(journey){
       const isError = st.event_name==='crash'||st.event_name==='application_error'||st.event_name==='json_parse_error';
       if(st.event_name==='crash'||st.event_name==='application_error') seg.crashed = true;
       if(st.event_name==='network_request'){
-        const net = { url:st.url, method:st.method, status:st.status, duration_ms:st.duration_ms, net_error:st.net_error, ts:st.ts };
+        const net = { url:st.url, method:st.method, status:st.status, duration_ms:st.duration_ms, net_error:st.net_error, ts:st.ts, request_body:st.request_body, response_body:st.response_body, req_bytes:st.req_bytes, resp_bytes:st.resp_bytes };
         if(lastAction && (st.ts - lastAction.ts) <= NET_WINDOW_MS){
           lastAction.networks.push(net);
         } else {
@@ -1325,6 +1325,8 @@ function showSwfNetGroup(group){
         </div>
         <div class="key" style="margin-top:6px;font-size:11px">URL</div>
         <div class="mono" style="word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:2px;font-size:11px">${esc(n.url||'—')}</div>
+        ${n.request_body!=null?`<div class="key" style="margin-top:6px;font-size:11px">Request body (input)</div><pre style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:2px;font-size:10px;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto">${esc(n.request_body)}</pre>`:''}
+        ${n.response_body!=null?`<div class="key" style="margin-top:6px;font-size:11px">Response body (output)</div><pre style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:2px;font-size:10px;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto">${esc(n.response_body)}</pre>`:''}
         ${n.req_bytes!=null||n.resp_bytes!=null?`<div class="muted" style="font-size:10px;margin-top:4px">req ${n.req_bytes??'—'}b · resp ${n.resp_bytes??'—'}b</div>`:''}
       </div>
     </div>`;

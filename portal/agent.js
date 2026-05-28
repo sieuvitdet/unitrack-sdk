@@ -113,6 +113,10 @@ function buildSessionRow(events) {
       step.status   = (props.status != null ? props.status : props.status_code) ?? null;
       step.duration_ms = props.duration_ms ?? null;
       step.net_error = props.error || null;
+      if (props.request_body != null)  step.request_body = props.request_body;
+      if (props.response_body != null) step.response_body = props.response_body;
+      if (props.req_bytes != null)  step.req_bytes = props.req_bytes;
+      if (props.resp_bytes != null) step.resp_bytes = props.resp_bytes;
     } else if (props && Object.keys(props).length
                && e.event_name !== 'screen_view'
                && e.event_name !== 'screen_load_completed') {
