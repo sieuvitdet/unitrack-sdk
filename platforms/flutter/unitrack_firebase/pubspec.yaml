@@ -16,8 +16,10 @@ dependencies:
   # Firebase. The app must add google-services.json (android/app) and
   # GoogleService-Info.plist (ios/Runner) and apply the google-services gradle
   # plugin — this package only calls Firebase.initializeApp() + logEvent.
-  firebase_core: ^3.0.0
-  firebase_analytics: ^11.0.0
+  # Wide range so this provider works with whatever Firebase major the host app
+  # pins (MobiX uses firebase_core 4.x / firebase_analytics 12.x via overrides).
+  firebase_core: '>=2.0.0 <5.0.0'
+  firebase_analytics: '>=10.0.0 <13.0.0'
 
 dev_dependencies:
   flutter_lints: ^3.0.0

@@ -210,14 +210,18 @@ class UniTrack {
   List<UniTrackEventRule> _eventRules = const [];
   void setEventRules(List<UniTrackEventRule> rules) { _eventRules = rules; }
 
-  (String, Map<String, Object?>)? _applyRules(String event, Map<String, Object?> props) {
+  // Returns the rewritten (name, props) as a MapEntry, or null if no rule
+  // matched. (MapEntry instead of a record tuple, to keep this compatible with
+  // host apps pinning an older Dart language version.)
+  MapEntry<String, Map<String, Object?>>? _applyRules(
+      String event, Map<String, Object?> props) {
     final screen = (props['screen'] ?? props['screen_name']) as String?;
     final elem = props['element_key'] as String?;
     for (final r in _eventRules) {
       if (r.matchEvent != event) continue;
       if (r.matchScreen != null && r.matchScreen != screen) continue;
       if (r.matchElementKey != null && r.matchElementKey != elem) continue;
-      return (r.toName, {...props, ...r.addProps});
+      return MapEntry(r.toName, {...props, ...r.addProps});
     }
     return null;
   }
@@ -227,7 +231,7 @@ class UniTrack {
     var name = event;
     // Phase 2: a config rule may rewrite an auto-captured event before sending.
     final rewritten = _applyRules(event, props);
-    if (rewritten != null) { name = rewritten.$1; props = rewritten.$2; }
+    if (rewritten != null) { name = rewritten.key; props = rewritten.value; }
     // Forward to every registered provider (Snowplow, Firebase, …).
     _forEachProvider((p) => p.track(name, props));
     return _channel.invokeMethod('track', {
