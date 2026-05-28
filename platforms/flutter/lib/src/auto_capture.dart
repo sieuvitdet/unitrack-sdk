@@ -150,7 +150,11 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
       }
       if (keyLabel == null && w.key is ValueKey) {
         final v = (w.key as ValueKey).value;
-        if (v is String && v.isNotEmpty) keyLabel = v;
+        // Ignore generic container/layout keys that aren't a real element name
+        // (apps reuse keys like 'main'/'body' on wrapper widgets, which would
+        // otherwise label every tap the same).
+        const generic = {'main','root','body','container','content','wrapper','scaffold','page','screen'};
+        if (v is String && v.isNotEmpty && !generic.contains(v.toLowerCase())) keyLabel = v;
       }
       if (text == null && w is Text && (w.data?.isNotEmpty ?? false)) {
         text = w.data;
@@ -184,7 +188,11 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     // Name priority: explicit semantic/key > visible text > tooltip > icon name
     // (icon-only buttons) > widget type. tooltip/icon mean an icon button gets a
     // real name ("delete", "icon:add") instead of just "IconButton".
-    final key = semantic ?? keyLabel ?? text ?? tooltip
+    // Priority: explicit Semantics > visible text label > tooltip > non-generic
+    // ValueKey > icon name > widget type. Visible text is preferred over a key
+    // because the button's text ("Cập nhật") is more meaningful than a reused
+    // layout key ("main").
+    final key = semantic ?? text ?? tooltip ?? keyLabel
         ?? (iconName != null ? 'icon:$iconName' : null) ?? interactiveType!;
     return _ResolvedTap(key: key, type: interactiveType ?? 'unknown', text: text ?? tooltip);
   }
@@ -274,8 +282,12 @@ class UniTrackRouteObserver extends NavigatorObserver {
   ///   3. else the route's own runtimeType.
   String _screenName(PageRoute<dynamic> r) {
     final widgetType = _builtWidgetType(r);
-    if (widgetType != null) return widgetType;
-    return r.settings.name ?? r.runtimeType.toString();
+    if (widgetType != null && widgetType.isNotEmpty) return widgetType;
+    // settings.name is often '/' or empty for unnamed routes — those aren't
+    // useful screen names, so fall back to the route's runtimeType instead.
+    final n = r.settings.name;
+    if (n != null && n.isNotEmpty && n != '/') return n;
+    return r.runtimeType.toString();
   }
 
   /// Build the route's widget once (in the navigator's context) and read its
