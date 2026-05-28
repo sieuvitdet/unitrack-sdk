@@ -37,6 +37,10 @@ final class LiveStreamViewController: UIViewController {
             UI.button("🎞  Xem sự kiện chuyển động", id: "event_view") { [weak self] in
                 guard let self else { return }
                 CameraAnalytics.eventViewed(cameraId: self.cameraId, eventType: "motion")
+                DemoAPI.sequence([
+                    ("/v1/cameras/\(self.cameraId)/events?type=motion", "GET", 200),
+                    ("/v1/cameras/\(self.cameraId)/events/thumbnail",   "GET", 404),
+                ])
             },
             UI.button("⏮  Phát lại bản ghi", id: "playback_start") { [weak self] in
                 self?.playback()
@@ -47,6 +51,14 @@ final class LiveStreamViewController: UIViewController {
     private func startStream() {
         streamStart = Date()
         CameraAnalytics.streamStarted(cameraId: cameraId, quality: "1080p")
+        // Tapping "start stream" triggers a burst of backend calls — these get
+        // auto-captured as network_request and nest under this tap in the tree.
+        DemoAPI.sequence([
+            ("/v1/cameras/\(cameraId)/stream/authorize", "POST", 200),
+            ("/v1/cameras/\(cameraId)/stream/manifest",   "GET",  200),
+            ("/v1/cameras/\(cameraId)/stream/keyframe",   "GET",  200),
+            ("/v1/cameras/\(cameraId)/ai/motion-zones",   "GET",  200),
+        ])
         // Simulate first-frame + a buffering blip with realistic timings.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
@@ -55,6 +67,8 @@ final class LiveStreamViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self else { return }
             CameraAnalytics.streamBuffering(cameraId: self.cameraId, durationMs: 350)
+            // Buffering re-requests a fresh segment — sometimes the CDN 503s.
+            DemoAPI.call("/v1/cameras/\(self.cameraId)/stream/segment-retry", method: "GET", status: 503)
         }
     }
 
@@ -66,6 +80,10 @@ final class LiveStreamViewController: UIViewController {
 
     private func playback() {
         CameraAnalytics.playbackStarted(cameraId: cameraId, recordingId: "rec_20260525_1430")
+        DemoAPI.sequence([
+            ("/v1/recordings/rec_20260525_1430/manifest", "GET",  200),
+            ("/v1/recordings/rec_20260525_1430/segments", "GET",  200),
+        ])
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             CameraAnalytics.playbackEnded(cameraId: self.cameraId, durationMs: 1500)
