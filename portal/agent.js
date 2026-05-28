@@ -111,6 +111,15 @@ function buildSessionRow(events) {
       step.status   = (props.status != null ? props.status : props.status_code) ?? null;
       step.duration_ms = props.duration_ms ?? null;
       step.net_error = props.error || null;
+    } else if (props && Object.keys(props).length
+               && e.event_name !== 'screen_view'
+               && e.event_name !== 'screen_load_completed') {
+      // Keep the full properties for custom events (camera_stream_*, …),
+      // crashes and errors so the session tree can show what was sent up and,
+      // for failures, the cause. Strip Snowplow's bulky forwarding envelope
+      // (_contexts / category) which isn't useful in the tree.
+      const { _contexts, category, ...rest } = props;
+      if (Object.keys(rest).length) step.props = rest;
     }
     journey.push(step);
     // Track distinct consecutive screens for the flow signature.

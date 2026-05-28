@@ -972,8 +972,10 @@ function buildSessionTree(journey){
     seg.actions = [];
     seg.crashed = false;
     let lastAction = null;
+    let lastTap = null;   // most recent button tap, to attribute errors/crashes
     for(const st of seg.steps){
       if(PASSIVE.has(st.event_name)) continue;
+      const isError = st.event_name==='crash'||st.event_name==='application_error'||st.event_name==='json_parse_error';
       if(st.event_name==='crash'||st.event_name==='application_error') seg.crashed = true;
       if(st.event_name==='network_request'){
         const net = { url:st.url, method:st.method, status:st.status, duration_ms:st.duration_ms, net_error:st.net_error, ts:st.ts };
@@ -983,8 +985,12 @@ function buildSessionTree(journey){
           seg.actions.push({ event_name:'network_request', element_key:null, ts:st.ts, networks:[net], standaloneNet:true });
         }
       } else {
-        lastAction = { event_name:st.event_name, element_key:st.element_key, ts:st.ts, networks:[] };
-        seg.actions.push(lastAction);
+        const action = { event_name:st.event_name, element_key:st.element_key, ts:st.ts, networks:[], props:st.props||null };
+        if(st.event_name==='tap') lastTap = st;
+        // Attribute an error/crash to the button tapped just before it (same screen).
+        if(isError && lastTap && (st.ts - lastTap.ts) <= NET_WINDOW_MS) action.triggeredBy = lastTap.element_key || '(button)';
+        lastAction = action;
+        seg.actions.push(action);
       }
     }
   }
@@ -1022,20 +1028,25 @@ async function openSessionDrawer(pid,sid){
 
   const segs = buildSessionTree(s.journey||[]);
   const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
+  const _treeActions = [];   // clickable actions (props / error) indexed by data-aid
 
   const segHtml = segs.map(seg=>{
     const actHtml = seg.actions.map(a=>{
       const isTap = a.event_name==='tap';
-      const danger = a.event_name==='crash'||a.event_name==='application_error';
+      const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
       let label, icon, color;
       if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
       else if(a.standaloneNet){ icon='🌐'; label='network'; color='#79c0ff'; }
-      else { icon='•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
+      else { icon=danger?'⚠':'•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
       const nets = a.networks.map(netLine).join('');
-      return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
+      // Clickable when there are properties to show, or it's an error/crash.
+      const hasDetail = danger || (a.props && Object.keys(a.props).length);
+      const aid = _treeActions.length; if(hasDetail) _treeActions.push(a);
+      return `<div class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="padding:4px 0;border-bottom:1px solid var(--line);${hasDetail?'cursor:pointer':''}">
         <div style="display:flex;gap:8px;align-items:center;font-size:12px">
           <span style="color:${color};font-weight:600">${icon} ${esc(label)}</span>
           ${a.networks.length?`<span class="muted" style="font-size:10px">↳ ${a.networks.length} call</span>`:''}
+          ${hasDetail?`<span class="muted" style="font-size:10px">${danger?'· xem lỗi':'· xem chi tiết'} ⓘ</span>`:''}
           <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
         </div>
         ${nets}
@@ -1054,6 +1065,11 @@ async function openSessionDrawer(pid,sid){
   block.style.whiteSpace='normal'; block.style.background='transparent'; block.style.border='none'; block.style.padding='0';
   block.innerHTML = segHtml || '<span class="muted">— (không có bước nào)</span>';
 
+  // Click an action with details → show its properties / error info in a popup.
+  block.querySelectorAll('.tree-act').forEach(el=>{
+    el.onclick = ()=> showActionDetail(_treeActions[+el.dataset.aid]);
+  });
+
   // "Generate wireframe session" button in the drawer header.
   let genBtn = document.getElementById('dGenWf');
   if(!genBtn){
@@ -1066,6 +1082,71 @@ async function openSessionDrawer(pid,sid){
   genBtn.onclick = ()=> openSessionWireframe(segs, sid);
 
   $('#drawer').classList.add('open');$('#scrim').classList.add('open');
+}
+
+// Popup showing an action's properties, or — for crash/error/parse failures —
+// a human-readable cause + which button triggered it + bad-data preview.
+function showActionDetail(a){
+  if(!a) return;
+  let dlg = document.getElementById('actDlg');
+  if(!dlg){
+    dlg = document.createElement('dialog'); dlg.id='actDlg';
+    dlg.style.width='460px';
+    document.body.appendChild(dlg);
+  }
+  const p = a.props || {};
+  const isCrash = a.event_name==='crash';
+  const isParse = a.event_name==='json_parse_error';
+  const isErr   = a.event_name==='application_error' || isCrash || isParse;
+
+  let body = '';
+  if(isErr){
+    // Diagnose the cause from the properties the SDK sent up.
+    let cause, kind;
+    if(isParse){
+      kind = 'Parse sai dữ liệu';
+      cause = p.error || p.error_message || 'Không parse được dữ liệu';
+    } else if(isCrash){
+      kind = 'Crash (native)';
+      cause = p.signal_name ? `Tín hiệu ${p.signal_name}` : (p.message || 'Ứng dụng dừng đột ngột');
+    } else {
+      kind = (p.fatal===true||p.fatal==='true') ? 'Lỗi nghiêm trọng' : 'Lỗi ứng dụng';
+      cause = p.message || p.error || 'Không rõ';
+    }
+    const rows = [
+      ['Loại lỗi', kind],
+      ['Nguyên nhân', cause],
+      ['Domain/Module', p.domain || p.target_type || null],
+      ['Do bấm nút', a.triggeredBy || null],   // set by caller when known
+      ['On launch', isCrash ? (p.crash_on_launch ? 'có' : 'không') : null],
+    ].filter(([,v])=>v!=null && v!=='');
+    body = `<div class="kv" style="grid-template-columns:120px 1fr">
+      ${rows.map(([k,v])=>`<div class="key">${k}</div><div style="${k==='Nguyên nhân'?'color:var(--danger);font-weight:600':''}">${esc(v)}</div>`).join('')}
+    </div>`;
+    if(isParse && (p.data_preview||p.data)){
+      body += `<div class="key" style="margin-top:8px">Dữ liệu lỗi (preview)</div>
+        <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-all">${esc(p.data_preview||p.data)}</pre>`;
+    }
+    if(isCrash && p.stack_trace){
+      body += `<div class="key" style="margin-top:8px">Stack trace</div>
+        <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap">${esc(p.stack_trace)}</pre>`;
+    }
+    // Always show the raw properties too (collapsed feel).
+    body += `<div class="key" style="margin-top:10px">Properties</div>
+      <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto">${esc(JSON.stringify(p,null,2))}</pre>`;
+  } else {
+    // Plain custom event → show its properties.
+    body = Object.keys(p).length
+      ? `<div class="kv" style="grid-template-columns:140px 1fr">${Object.entries(p).map(([k,v])=>`<div class="key">${esc(k)}</div><div class="mono">${esc(typeof v==='object'?JSON.stringify(v):String(v))}</div>`).join('')}</div>`
+      : '<div class="muted">Sự kiện này không truyền properties.</div>';
+  }
+
+  const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
+  dlg.innerHTML = `
+    <div class="dlg-h" style="color:${titleColor}">${isErr?'⚠ ':''}${esc(a.event_name)}${a.element_key?` · ${esc(a.element_key)}`:''}
+      <button onclick="document.getElementById('actDlg').close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b">${body}</div>`;
+  dlg.showModal();
 }
 
 // ── Per-session wireframe: a detailed flow graph of ONE session ────────────
