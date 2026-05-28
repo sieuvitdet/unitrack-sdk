@@ -243,6 +243,122 @@ function computeFlows(projectId, { refresh = true } = {}) {
   });
 }
 
+// ── Wireframe flow graph (nodes = screens, edges = transitions) ──────────────
+//
+// Reconstructs a screen-flow graph from every session's journey, with per-node
+// and per-edge metrics that drive the heatmap on the portal:
+//   node.visits        # sessions that reached this screen
+//   node.events        # journey steps recorded on this screen
+//   node.avg_dwell_ms  avg time spent on the screen before moving on
+//   node.exits         # sessions whose journey ENDED on this screen
+//   node.crash_count   # sessions that crashed while on this screen
+//   node.stuck_score   0..1 heuristic: high exit ratio or crashes → a "red" node
+//   edge.count         # times users moved screen A → B
+//   edge.avg_ms        avg transition time A → B
+// Returns { nodes, edges, entry_screen, totals }. Pure read of app_sessions.
+function computeFlowGraph(projectId, { refresh = true } = {}) {
+  if (refresh) {
+    try { reconstructSessions(projectId); }
+    catch (err) { console.error('[flowgraph] reconstruct failed', err); }
+  }
+
+  const rows = db.prepare(
+    'SELECT journey, crashed, ended_reason FROM app_sessions WHERE project_id = ?'
+  ).all(projectId);
+
+  const nodes = new Map();   // screen → metrics accumulator
+  const edges = new Map();   // "A B" → { from, to, count, ms_sum }
+  const entryCounts = new Map();
+  let sessionCount = 0;
+
+  const node = (s) => {
+    if (!nodes.has(s)) nodes.set(s, {
+      screen: s, visits: 0, events: 0, dwell_sum: 0, dwell_n: 0,
+      exits: 0, crash_count: 0,
+    });
+    return nodes.get(s);
+  };
+
+  for (const r of rows) {
+    const journey = parseJSON(r.journey, []);
+    if (!Array.isArray(journey) || !journey.length) continue;
+    sessionCount++;
+
+    // Collapse the journey into a screen timeline (consecutive same-screen steps
+    // merged), tracking when each screen segment started so we can measure dwell.
+    const segs = [];   // [{ screen, start_ts, last_ts, events }]
+    for (const step of journey) {
+      const s = step.screen || '(no_screen)';
+      const prev = segs[segs.length - 1];
+      if (prev && prev.screen === s) {
+        prev.last_ts = step.ts; prev.events++;
+      } else {
+        segs.push({ screen: s, start_ts: step.ts, last_ts: step.ts, events: 1 });
+      }
+    }
+    if (!segs.length) continue;
+
+    // Entry screen of this session.
+    entryCounts.set(segs[0].screen, (entryCounts.get(segs[0].screen) || 0) + 1);
+
+    const seenInSession = new Set();
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const n = node(seg.screen);
+      n.events += seg.events;
+      if (!seenInSession.has(seg.screen)) { n.visits++; seenInSession.add(seg.screen); }
+
+      // Dwell = time from entering this segment to entering the next (or, for the
+      // last segment, the time spent within it).
+      const next = segs[i + 1];
+      const dwell = next ? (next.start_ts - seg.start_ts) : (seg.last_ts - seg.start_ts);
+      if (dwell > 0) { n.dwell_sum += dwell; n.dwell_n++; }
+
+      if (next) {
+        const key = seg.screen + ' ' + next.screen;
+        if (!edges.has(key)) edges.set(key, { from: seg.screen, to: next.screen, count: 0, ms_sum: 0 });
+        const e = edges.get(key);
+        e.count++;
+        if (next.start_ts > seg.start_ts) e.ms_sum += (next.start_ts - seg.start_ts);
+      }
+    }
+
+    // The session ended on its last screen.
+    const lastScreen = segs[segs.length - 1].screen;
+    node(lastScreen).exits++;
+    if (r.crashed) node(lastScreen).crash_count++;
+  }
+
+  // Finalize node metrics + stuck_score.
+  const nodeList = [...nodes.values()].map((n) => {
+    const avg_dwell_ms = n.dwell_n ? Math.round(n.dwell_sum / n.dwell_n) : 0;
+    const exit_ratio = n.visits ? n.exits / n.visits : 0;
+    const crash_ratio = n.visits ? n.crash_count / n.visits : 0;
+    // Stuck = sessions tend to end here (exit) or crash here. Weight crashes more.
+    const stuck_score = Math.min(1, exit_ratio * 0.6 + crash_ratio * 1.0);
+    return {
+      screen: n.screen, visits: n.visits, events: n.events,
+      avg_dwell_ms, exits: n.exits, crash_count: n.crash_count,
+      exit_pct: Math.round(exit_ratio * 1000) / 10,
+      stuck_score: Math.round(stuck_score * 100) / 100,
+    };
+  }).sort((a, b) => b.visits - a.visits);
+
+  const edgeList = [...edges.values()].map((e) => ({
+    from: e.from, to: e.to, count: e.count,
+    avg_ms: e.count ? Math.round(e.ms_sum / e.count) : 0,
+  })).sort((a, b) => b.count - a.count);
+
+  const entry_screen = [...entryCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+  return {
+    nodes: nodeList,
+    edges: edgeList,
+    entry_screen,
+    totals: { sessions: sessionCount, screens: nodeList.length, transitions: edgeList.length },
+  };
+}
+
 // ── Phase 4: LLM analyze → report pipeline ───────────────────────────────────
 
 const LLM_TIMEOUT_MS = 60_000;
@@ -405,7 +521,7 @@ async function runCycle(projectId, deliverFn) {
 }
 
 module.exports = {
-  reconstructSessions, buildSessionRow, cleanScreen, computeFlows,
+  reconstructSessions, buildSessionRow, cleanScreen, computeFlows, computeFlowGraph,
   callLLM, buildAnalysisInput, heuristicReport, runCycle,
   DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT,
 };

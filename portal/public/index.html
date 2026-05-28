@@ -286,6 +286,7 @@ async function renderProject(){
         <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
         <div class="tab ${route.tab==='sessions'?'active':''}" data-tab="sessions">Sessions</div>
         <div class="tab ${route.tab==='flows'?'active':''}" data-tab="flows">Flows</div>
+        <div class="tab ${route.tab==='wireframe'?'active':''}" data-tab="wireframe">Wireframe</div>
         <div class="tab ${route.tab==='agent'?'active':''}" data-tab="agent">Agent</div>
         <div class="tab ${route.tab==='tree'?'active':''}" data-tab="tree">Cây class → event</div>
       </div>
@@ -295,6 +296,7 @@ async function renderProject(){
   if(route.tab==='logs') renderLogs(pid);
   else if(route.tab==='sessions') renderSessions(pid);
   else if(route.tab==='flows') renderFlows(pid);
+  else if(route.tab==='wireframe') renderWireframe(pid);
   else if(route.tab==='agent') renderAgent(pid);
   else renderTree(pid);
 }
@@ -428,6 +430,161 @@ async function renderFlows(pid){
           <td class="mono muted">${esc(f.last_screen)||'—'}</td>
         </tr>`).join(''):'<tr><td colspan=7 class=empty>Chưa có flow. Cần session đã reconstruct (tab Sessions).</td></tr>'}
       </tbody></table></div>`;
+}
+
+// ── Wireframe tab: flow graph + heatmap (Wireframe Phase 1) ────────────────
+// Layout: BFS from entry_screen assigns each node a column (depth) and a row
+// within that column. Render as SVG: rect nodes (size ∝ visits, fill by
+// stuck_score) + curved edges (width ∝ count, arrowhead) + legend + hover tip.
+function layoutGraph(g){
+  const adj = new Map();         // screen → [neighbour]
+  for(const e of g.edges){
+    if(!adj.has(e.from)) adj.set(e.from, []);
+    adj.get(e.from).push(e.to);
+  }
+  // BFS from entry (fallback: most-visited node). Unreached nodes get their
+  // own next column so they still render.
+  const level = new Map();       // screen → column index
+  const start = g.entry_screen || (g.nodes[0] && g.nodes[0].screen);
+  const queue = [];
+  if(start){ level.set(start, 0); queue.push(start); }
+  while(queue.length){
+    const s = queue.shift();
+    for(const n of (adj.get(s)||[])){
+      if(!level.has(n)){ level.set(n, level.get(s)+1); queue.push(n); }
+    }
+  }
+  // Place any isolated nodes (no path from entry) in the last column.
+  let maxCol = 0; for(const v of level.values()) if(v>maxCol) maxCol = v;
+  for(const n of g.nodes) if(!level.has(n.screen)) level.set(n.screen, maxCol+1);
+  // Rows: within each column, order by visits desc.
+  const cols = new Map();        // col → [{screen,visits}]
+  for(const n of g.nodes){
+    const c = level.get(n.screen);
+    if(!cols.has(c)) cols.set(c, []);
+    cols.get(c).push(n);
+  }
+  for(const arr of cols.values()) arr.sort((a,b)=>b.visits-a.visits);
+
+  // Pixel positions.
+  const COL_W=200, ROW_H=110, NODE_W=140, NODE_H=64;
+  const pos = new Map();         // screen → {x,y}
+  for(const [c,arr] of cols){
+    arr.forEach((n,i)=>{
+      pos.set(n.screen, { x: 60 + c*COL_W, y: 60 + i*ROW_H });
+    });
+  }
+  const cw = (maxCol+2)*COL_W + 60;
+  const maxRows = Math.max(1, ...[...cols.values()].map(a=>a.length));
+  const ch = maxRows*ROW_H + 120;
+  return { pos, NODE_W, NODE_H, cw, ch };
+}
+
+// Map stuck_score (0..1) to a fill color (green → yellow → red).
+function stuckColor(score){
+  if(score >= 0.7) return '#dc2626';   // red
+  if(score >= 0.4) return '#f59e0b';   // amber
+  if(score >= 0.15) return '#facc15';  // yellow
+  return '#16a34a';                    // green
+}
+
+async function renderWireframe(pid){
+  const g = await api(`/api/projects/${pid}/flowgraph`);
+  if(!g.nodes || !g.nodes.length){
+    $('#tabBody').innerHTML=`<div class="empty">Chưa có flow graph. Cần session journey (tab Sessions). App build mới sẽ gửi dữ liệu để dựng wireframe.</div>`;
+    return;
+  }
+  const { pos, NODE_W, NODE_H, cw, ch } = layoutGraph(g);
+  const maxVisits = Math.max(...g.nodes.map(n=>n.visits)) || 1;
+  const maxEdge   = Math.max(...g.edges.map(e=>e.count), 1);
+
+  // Build edges (curved path) BEFORE nodes so nodes render on top.
+  const edgeSvg = g.edges.map(e=>{
+    const a=pos.get(e.from), b=pos.get(e.to);
+    if(!a||!b) return '';
+    const x1=a.x+NODE_W, y1=a.y+NODE_H/2;
+    const x2=b.x,        y2=b.y+NODE_H/2;
+    const mx=(x1+x2)/2;
+    const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+    const w = 1 + (e.count/maxEdge)*4;
+    const op = 0.35 + (e.count/maxEdge)*0.55;
+    return `<path d="${d}" fill="none" stroke="#5b8cff" stroke-width="${w.toFixed(1)}" stroke-opacity="${op.toFixed(2)}" marker-end="url(#arrow)" data-from="${esc(e.from)}" data-to="${esc(e.to)}" data-count="${e.count}" data-ms="${e.avg_ms}"/>`;
+  }).join('');
+
+  const nodeSvg = g.nodes.map(n=>{
+    const p=pos.get(n.screen); if(!p) return '';
+    const size = 0.75 + (n.visits/maxVisits)*0.5;   // 0.75x..1.25x scale
+    const w = NODE_W*size, h = NODE_H*size;
+    const x = p.x + (NODE_W-w)/2, y = p.y + (NODE_H-h)/2;
+    const fill = stuckColor(n.stuck_score);
+    const labelMax = 16;
+    const label = n.screen.length>labelMax ? n.screen.slice(0,labelMax-1)+'…' : n.screen;
+    const badge = n.crash_count>0 ? '⚠ ' : '';
+    return `<g class="wf-node" data-screen="${esc(n.screen)}" data-visits="${n.visits}" data-exits="${n.exits}" data-exit-pct="${n.exit_pct}" data-crash="${n.crash_count}" data-stuck="${n.stuck_score}" data-dwell="${n.avg_dwell_ms}" style="cursor:pointer">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${fill}" fill-opacity="0.18" stroke="${fill}" stroke-width="2"/>
+      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2-4}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">${badge}${esc(label)}</text>
+      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2+14}" text-anchor="middle" fill="var(--muted)" font-size="11">${n.visits} session · exit ${n.exit_pct}%</text>
+    </g>`;
+  }).join('');
+
+  $('#tabBody').innerHTML = `
+    <div class="filter-bar" style="justify-content:space-between">
+      <span class="muted" style="font-size:12px">
+        ${g.totals.sessions} session · ${g.totals.screens} màn · ${g.totals.transitions} chuyển màn · entry: <b>${esc(g.entry_screen)||'—'}</b>
+      </span>
+      <span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">
+        <span><span style="display:inline-block;width:10px;height:10px;background:#16a34a;border-radius:50%;vertical-align:middle"></span> ổn</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#facc15;border-radius:50%;vertical-align:middle"></span> theo dõi</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;vertical-align:middle"></span> nghẽn</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:50%;vertical-align:middle"></span> crash/stuck</span>
+      </span>
+    </div>
+    <div style="overflow:auto;max-height:70vh;background:var(--bg);position:relative">
+      <svg id="wfSvg" width="${cw}" height="${ch}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#5b8cff" opacity="0.8"/>
+          </marker>
+        </defs>
+        ${edgeSvg}
+        ${nodeSvg}
+      </svg>
+      <div id="wfTip" style="position:absolute;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:5;max-width:240px"></div>
+    </div>`;
+
+  // Tooltip handlers — show metrics on hover.
+  const tip = document.getElementById('wfTip');
+  const svg = document.getElementById('wfSvg');
+  const showTip = (html, evt)=>{
+    tip.innerHTML = html;
+    const r = svg.getBoundingClientRect();
+    tip.style.left = (evt.clientX - r.left + 14) + 'px';
+    tip.style.top  = (evt.clientY - r.top  + 14) + 'px';
+    tip.style.display = 'block';
+  };
+  const hideTip = ()=>{ tip.style.display='none'; };
+  svg.querySelectorAll('.wf-node').forEach(g=>{
+    g.addEventListener('mousemove',(ev)=>{
+      const d=g.dataset;
+      const dwell = d.dwell>0 ? fmtDur(+d.dwell) : '—';
+      showTip(`<b>${esc(d.screen)}</b><br>
+        Visits: ${d.visits}<br>
+        Thoát tại đây: ${d.exits} (${d.exitPct}%)<br>
+        ${d.crash>0?'<span style="color:var(--danger)">⚠ Crash: '+d.crash+'</span><br>':''}
+        Dwell TB: ${dwell}<br>
+        Stuck score: ${d.stuck}`, ev);
+    });
+    g.addEventListener('mouseleave', hideTip);
+  });
+  svg.querySelectorAll('path[data-from]').forEach(p=>{
+    p.addEventListener('mousemove',(ev)=>{
+      const d=p.dataset;
+      showTip(`<b>${esc(d.from)} → ${esc(d.to)}</b><br>
+        Lượt chuyển: ${d.count}<br>
+        Trung bình: ${d.ms>0?fmtDur(+d.ms):'—'}`, ev);
+    });
+    p.addEventListener('mouseleave', hideTip);
+  });
 }
 
 // ── Sessions tab: reconstructed journey timeline (Phase 1) ─────────────────

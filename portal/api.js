@@ -7,7 +7,7 @@ const { buildWorkbook } = require('./export');
 const { namingIssues, isValidName, healthScore } = require('./scoring');
 const { requireAdmin } = require('./auth');
 const { configForProject, saveConfig } = require('./config');
-const { reconstructSessions, computeFlows, runCycle,
+const { reconstructSessions, computeFlows, computeFlowGraph, runCycle,
         DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT } = require('./agent');
 const { deliver } = require('./deliver');
 
@@ -318,6 +318,12 @@ router.get('/projects/:id/sessions', ownProject, (req, res) => {
 router.get('/projects/:id/flows', ownProject, (req, res) => {
   try { res.json(computeFlows(req.params.id)); }
   catch (err) { console.error('[flows] failed', err); res.status(500).json({ error: 'flows_failed' }); }
+});
+
+// Wireframe flow graph: screen nodes + transition edges with heatmap metrics.
+router.get('/projects/:id/flowgraph', ownProject, (req, res) => {
+  try { res.json(computeFlowGraph(req.params.id)); }
+  catch (err) { console.error('[flowgraph] failed', err); res.status(500).json({ error: 'flowgraph_failed' }); }
 });
 
 // ---------------------------------------------------------------- agent
