@@ -336,8 +336,8 @@ class UniTrack {
   /// Install global HTTP auto-capture: every request/error is tracked, with the
   /// button + screen that triggered it (mirrored from [UniTrackTapObserver]).
   /// Call once at startup, after [initialize]. Returns the previous overrides.
-  static HttpOverrides? installHttpAutoCapture() =>
-      installUniTrackHttpAutoCapture();
+  static HttpOverrides? installHttpAutoCapture({List<String> excludeSubstrings = const []}) =>
+      installUniTrackHttpAutoCapture(excludeSubstrings: excludeSubstrings);
 }
 
 /// NavigatorObserver — auto-tracks Flutter routes.

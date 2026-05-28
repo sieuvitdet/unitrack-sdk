@@ -105,8 +105,10 @@ function buildSessionRow(events) {
       element_key: e.element_key || null,
       ts: e.timestamp,
     };
-    if (e.event_name === 'network_request' && props) {
-      step.url      = props.url || null;
+    if ((e.event_name === 'network_request' || e.event_name === 'network_error') && props) {
+      // Prefer the full URL; fall back to host+path (older SDKs only sent those).
+      step.url = props.url
+        || (props.host ? (props.host + (props.path || '') + (props.query ? '?' + props.query : '')) : null);
       step.method   = props.method || null;
       step.status   = (props.status != null ? props.status : props.status_code) ?? null;
       step.duration_ms = props.duration_ms ?? null;

@@ -1154,70 +1154,89 @@ function showActionDetail(a){
 // (button taps / network calls) are nodes laid left→right in time order, with
 // network children hanging under their triggering action. Clicking a network
 // node shows its URL + status. Rendered in a full-screen overlay.
-let _swfNets = [];   // network details indexed by node id, for click lookup
-let _swfActions = [];   // action nodes (clickable) for the per-session wireframe
+let _swfActions = [];   // action nodes (clickable), indexed by id
+let _swfNetGroups = [];  // grouped network lists, indexed by id
+// Per-session wireframe as a node-link GRAPH (screens + actions + grouped
+// network nodes) on a pannable/zoomable canvas. N network calls under one
+// action collapse into a single "🌐 [N]" node; clicking it opens a list drawer.
 function openSessionWireframe(segs, sid){
-  _swfNets = []; _swfActions = [];
-  const LANE_PAD=16, NODE_H=38, NODE_X=60, V_GAP=12, LANE_GAP=24, NET_X=420;
-  // Approx pixel width of a label (full text, no ellipsis) → node width.
-  const nodeWidth = (label)=> Math.max(150, Math.min(360, label.length*7.4 + 28));
-  let y = 50;
-  let laneW = 980;   // grows to fit the widest node + its network child
-  const laneSvgs = [];
-  segs.forEach((seg, si)=>{
-    const actions = seg.actions;
-    let rows = 0; for(const a of actions) rows += 1 + a.networks.length;
-    rows = Math.max(rows, 1);
-    const laneH = LANE_PAD*2 + 28 + rows*(NODE_H+V_GAP);
-    const laneY = y;
-    let body = '';
-    let ry = laneY + 46;
-    actions.forEach(a=>{
+  _swfActions = []; _swfNetGroups = [];
+  // ── build graph model: nodes + edges ──────────────────────────────────
+  const nodes = [];   // {id,kind,label,color,x,y,w,h,data}
+  const edges = [];   // {from,to,color}
+  const COL_W = 300, SCREEN_W = 200, SCREEN_H = 50, ACT_W = 190, ACT_H = 34;
+  let colX = 60;
+  let prevScreenId = null;
+
+  segs.forEach((seg)=>{
+    // Screen node (a column header).
+    const sx = colX, sy = 60;
+    const sId = nodes.length;
+    nodes.push({ id:sId, kind:'screen', label:seg.screen, crashed:seg.crashed,
+      x:sx, y:sy, w:SCREEN_W, h:SCREEN_H, color: seg.crashed?'#dc2626':'#5b8cff' });
+    if(prevScreenId!=null) edges.push({ from:prevScreenId, to:sId, color:'#5b8cff', main:true });
+    prevScreenId = sId;
+
+    // Action nodes stacked under the screen.
+    let ay = sy + SCREEN_H + 40;
+    let prevActId = sId;
+    seg.actions.forEach(a=>{
       const aid = _swfActions.length; _swfActions.push({ ...a, sid });
       const isTap = a.event_name==='tap';
       const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
-      const fill = danger ? '#dc2626' : (isTap ? '#5b8cff' : (a.standaloneNet ? '#79c0ff' : '#8b94a7'));
-      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':((danger?'⚠ ':'• ')+a.event_name));
-      const w = nodeWidth(label);
-      if(NODE_X+w+20 > laneW) laneW = NODE_X+w+20;
-      body += `<g class="swf-act" data-aid="${aid}" style="cursor:pointer">
-        <rect x="${NODE_X}" y="${ry}" width="${w}" height="${NODE_H}" rx="8" fill="${fill}22" stroke="${fill}" stroke-width="1.5"/>
-        <text x="${NODE_X+12}" y="${ry+NODE_H/2+4}" fill="var(--text)" font-size="12" font-weight="600">${esc(label)}</text>
-        <text x="${NODE_X+w-10}" y="${ry+NODE_H/2+4}" text-anchor="end" fill="var(--muted)" font-size="10">ⓘ</text>
-      </g>`;
-      const ax = NODE_X+w, ay = ry+NODE_H/2;
-      ry += NODE_H + V_GAP;
-      a.networks.forEach(n=>{
-        const id = _swfNets.length; _swfNets.push(n);
-        const c = n.net_error ? '#dc2626' : (n.status>=400?'#f59e0b':(n.status>=200&&n.status<300?'#27d796':'#8b94a7'));
-        const netLabel = `🌐 ${n.method||''} ${n.net_error?'✕':(n.status!=null?n.status:'—')}`;
-        const nw = nodeWidth(netLabel);
-        const nx=NET_X, ny=ry;
-        if(nx+nw+20 > laneW) laneW = nx+nw+20;
-        body += `<path d="M${ax},${ay} C${ax+30},${ay} ${nx-30},${ny+NODE_H/2} ${nx},${ny+NODE_H/2}" fill="none" stroke="${c}" stroke-width="1.5" stroke-opacity="0.6"/>`;
-        body += `<g class="swf-net" data-id="${id}" style="cursor:pointer">
-          <rect x="${nx}" y="${ny}" width="${nw}" height="${NODE_H}" rx="8" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
-          <text x="${nx+12}" y="${ny+NODE_H/2+4}" fill="var(--text)" font-size="11">🌐 ${esc(n.method||'')} <tspan fill="${c}" font-weight="700">${n.net_error?'✕':(n.status!=null?n.status:'—')}</tspan></text>
-        </g>`;
-        ry += NODE_H + V_GAP;
-      });
-    });
-    // header drawn last using laneW (kept simple: full-width band)
-    laneSvgs.push({ laneY, laneH, crashed:seg.crashed, screen:seg.screen, body });
-    y = laneY + laneH + LANE_GAP;
-  });
-  // Now we know laneW — render lane rects + headers + connectors.
-  const rendered = laneSvgs.map((L,i)=>{
-    const arrow = i<laneSvgs.length-1
-      ? `<path d="M${NODE_X+40},${L.laneY+L.laneH} L${NODE_X+40},${L.laneY+L.laneH+LANE_GAP}" stroke="#5b8cff" stroke-width="2" marker-end="url(#swfArrow)"/>`
-      : '';
-    return `<rect x="20" y="${L.laneY}" width="${laneW-40}" height="${L.laneH}" rx="12" fill="${L.crashed?'#dc262611':'var(--panel2)'}" stroke="${L.crashed?'var(--danger)':'var(--line)'}" stroke-width="1.5"/>
-      <text x="36" y="${L.laneY+26}" fill="var(--text)" font-size="14" font-weight="700">${L.crashed?'⚠ ':''}📱 ${esc(L.screen)}</text>
-      ${L.body}${arrow}`;
-  });
-  laneSvgs.length = 0; laneSvgs.push(...rendered);
+      const color = danger?'#dc2626':(isTap?'#27d796':(a.standaloneNet?'#79c0ff':'#8b94a7'));
+      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':((danger?'⚠ ':'')+a.event_name));
+      const actId = nodes.length;
+      nodes.push({ id:actId, kind:'action', aid, label, color,
+        x: sx + (SCREEN_W-ACT_W)/2, y:ay, w:ACT_W, h:ACT_H });
+      edges.push({ from:prevActId, to:actId, color:'#3a4358' });
+      prevActId = actId;
+      ay += ACT_H + 16;
 
-  const totalH = y + 30;
+      // Group this action's network calls into ONE node "🌐 [N]".
+      if(a.networks.length){
+        const gid = _swfNetGroups.length; _swfNetGroups.push({ networks:a.networks, action:label });
+        const hasErr = a.networks.some(n=>n.net_error || (n.status>=400));
+        const netColor = hasErr ? '#f59e0b' : '#79c0ff';
+        const netId = nodes.length;
+        nodes.push({ id:netId, kind:'netgroup', gid, label:`🌐 [${a.networks.length}]${hasErr?' ⚠':''}`,
+          color:netColor, x: sx + SCREEN_W + 30, y:ay-ACT_H-16, w:90, h:ACT_H });
+        edges.push({ from:actId, to:netId, color:netColor });
+      }
+    });
+    colX += COL_W;
+    // Make column wide enough if it has net groups.
+    if(seg.actions.some(a=>a.networks.length)) colX += 40;
+  });
+
+  const canvasW = colX + 200;
+  const canvasH = Math.max(...nodes.map(n=>n.y+n.h), 400) + 80;
+
+  // ── render nodes + edges to SVG ───────────────────────────────────────
+  const edgeSvg = edges.map(e=>{
+    const a=nodes[e.from], b=nodes[e.to];
+    const x1=a.x+a.w/2, y1=a.y+a.h, x2=b.x+b.w/2, y2=b.y;
+    // gentle curve, thin line
+    const d = `M${x1},${y1} C${x1},${(y1+y2)/2} ${x2},${(y1+y2)/2} ${x2},${y2}`;
+    return `<path d="${d}" fill="none" stroke="${e.color}" stroke-width="${e.main?1.6:1}" stroke-opacity="0.55" marker-end="url(#swfArrow)"/>`;
+  }).join('');
+
+  const nodeSvg = nodes.map(n=>{
+    if(n.kind==='screen'){
+      return `<g><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="12" fill="${n.color}26" stroke="${n.color}" stroke-width="2"/>
+        <text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">${n.crashed?'⚠ ':''}📱 ${esc(n.label.length>22?n.label.slice(0,21)+'…':n.label)}</text></g>`;
+    }
+    if(n.kind==='action'){
+      return `<g class="swf-act" data-aid="${n.aid}" style="cursor:pointer">
+        <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${n.color}22" stroke="${n.color}" stroke-width="1.5"/>
+        <text x="${n.x+10}" y="${n.y+n.h/2+4}" fill="var(--text)" font-size="11" font-weight="600">${esc(n.label.length>24?n.label.slice(0,23)+'…':n.label)}</text></g>`;
+    }
+    // netgroup
+    return `<g class="swf-netgroup" data-gid="${n.gid}" style="cursor:pointer">
+      <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${n.color}22" stroke="${n.color}" stroke-width="1.5"/>
+      <text x="${n.x+n.w/2}" y="${n.y+n.h/2+4}" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="700">${esc(n.label)}</text></g>`;
+  }).join('');
+
   let ov = document.getElementById('swfOverlay');
   if(!ov){
     ov = document.createElement('div'); ov.id='swfOverlay';
@@ -1228,40 +1247,95 @@ function openSessionWireframe(segs, sid){
   ov.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)">
       <b>Wireframe session ${shortSid(sid)}</b>
-      <span class="muted" style="font-size:12px">${segs.length} màn · click node để xem chi tiết (event / network)</span>
-      <button class="btn ghost sm" id="swfClose" style="margin-left:auto">✕ Đóng</button>
+      <span class="muted" style="font-size:12px">${segs.length} màn · kéo để di chuyển, cuộn để zoom · click node để xem chi tiết</span>
+      <button class="btn ghost sm" id="swfZoomOut" style="margin-left:auto">−</button>
+      <button class="btn ghost sm" id="swfZoomIn">+</button>
+      <button class="btn ghost sm" id="swfFit">Fit</button>
+      <button class="btn ghost sm" id="swfClose">✕ Đóng</button>
     </div>
     <div style="flex:1;display:flex;overflow:hidden">
-      <div style="flex:1;overflow:auto;padding:10px">
-        <svg width="${laneW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
-          <defs><marker id="swfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" fill="#5b8cff"/></marker></defs>
-          ${laneSvgs.join('')}
+      <div id="swfCanvas" style="flex:1;overflow:hidden;background:var(--bg);cursor:grab;position:relative">
+        <svg id="swfSvg" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="swfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" fill="#5b8cff" opacity="0.7"/></marker></defs>
+          <g id="swfViewport">${edgeSvg}${nodeSvg}</g>
         </svg>
       </div>
-      <div id="swfDetail" style="width:380px;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto">
-        <div class="muted" style="font-size:12px">Click một node:<br>• 🌐 network → URL + status<br>• event → properties + payload Snowplow/Firebase</div>
+      <div id="swfDetail" style="width:400px;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto">
+        <div class="muted" style="font-size:12px">Click một node:<br>• action → properties + payload Snowplow/Firebase<br>• 🌐 [N] → danh sách network call (expand từng cái)</div>
       </div>
     </div>`;
+
+  // ── pan + zoom ────────────────────────────────────────────────────────
+  const vp = document.getElementById('swfViewport');
+  const canvas = document.getElementById('swfCanvas');
+  let scale=1, tx=0, ty=0, dragging=false, sx0=0, sy0=0, tx0=0, ty0=0;
+  const apply = ()=>{ vp.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`); };
+  const fit = ()=>{
+    const rect = canvas.getBoundingClientRect();
+    scale = Math.min(1, (rect.width-40)/canvasW, (rect.height-40)/canvasH);
+    if(!isFinite(scale)||scale<=0) scale=0.6;
+    tx = 20; ty = 20; apply();
+  };
+  canvas.onmousedown = (e)=>{ dragging=true; sx0=e.clientX; sy0=e.clientY; tx0=tx; ty0=ty; canvas.style.cursor='grabbing'; };
+  window.addEventListener('mousemove', (e)=>{ if(!dragging)return; tx=tx0+(e.clientX-sx0); ty=ty0+(e.clientY-sy0); apply(); });
+  window.addEventListener('mouseup', ()=>{ dragging=false; canvas.style.cursor='grab'; });
+  canvas.onwheel = (e)=>{ e.preventDefault();
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const f = e.deltaY<0 ? 1.12 : 1/1.12;
+    const ns = Math.max(0.2, Math.min(2.5, scale*f));
+    // zoom toward cursor
+    tx = mx - (mx-tx)*(ns/scale); ty = my - (my-ty)*(ns/scale); scale=ns; apply();
+  };
+  document.getElementById('swfZoomIn').onclick = ()=>{ scale=Math.min(2.5,scale*1.2); apply(); };
+  document.getElementById('swfZoomOut').onclick = ()=>{ scale=Math.max(0.2,scale/1.2); apply(); };
+  document.getElementById('swfFit').onclick = fit;
   document.getElementById('swfClose').onclick = ()=>{ ov.style.display='none'; };
-  ov.querySelectorAll('.swf-net').forEach(g=>{
-    g.onclick = ()=>{
-      const n = _swfNets[+g.dataset.id];
-      const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
-      document.getElementById('swfDetail').innerHTML = `
-        <h3 style="margin:0 0 12px;font-size:14px">Network call</h3>
-        <div class="kv" style="grid-template-columns:90px 1fr">
+  setTimeout(fit, 30);
+
+  // ── node clicks ───────────────────────────────────────────────────────
+  ov.querySelectorAll('.swf-act').forEach(g=>{
+    g.onclick = (e)=>{ e.stopPropagation(); showSwfEventDetail(_swfActions[+g.dataset.aid]); };
+  });
+  ov.querySelectorAll('.swf-netgroup').forEach(g=>{
+    g.onclick = (e)=>{ e.stopPropagation(); showSwfNetGroup(_swfNetGroups[+g.dataset.gid]); };
+  });
+}
+
+// Network group drawer: list of N calls, each expand/collapse to see url + IO.
+function showSwfNetGroup(group){
+  const panel = document.getElementById('swfDetail');
+  const rows = group.networks.map((n,i)=>{
+    const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
+    const path = n.url ? (()=>{ try{ return new URL(n.url).pathname; }catch(_){ return n.url; } })() : (n.url||'(no url)');
+    const statusTxt = n.net_error ? '✕' : (n.status!=null?n.status:'—');
+    return `<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden">
+      <div class="swf-netrow" data-i="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;font-size:12px">
+        <span style="color:#79c0ff">${esc(n.method||'')}</span>
+        <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path)}</span>
+        <span style="color:${c};font-weight:700">${statusTxt}</span>
+        <span class="muted" style="font-size:10px">▾</span>
+      </div>
+      <div class="swf-netbody" data-i="${i}" style="display:none;padding:8px 10px;border-top:1px solid var(--line)">
+        <div class="kv" style="grid-template-columns:80px 1fr;font-size:11px">
           <div class="key">Method</div><div class="mono">${esc(n.method||'—')}</div>
           <div class="key">Status</div><div class="mono" style="color:${c};font-weight:700">${n.net_error?('✕ '+esc(n.net_error)):(n.status!=null?n.status:'—')}</div>
           <div class="key">Duration</div><div class="mono">${n.duration_ms!=null?n.duration_ms+' ms':'—'}</div>
           <div class="key">Thời gian</div><div class="mono">${n.ts?fmtTime(n.ts):'—'}</div>
         </div>
-        <div class="key" style="margin-top:10px">URL</div>
-        <div class="mono" style="word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:4px;font-size:12px">${esc(n.url||'—')}</div>`;
+        <div class="key" style="margin-top:6px;font-size:11px">URL</div>
+        <div class="mono" style="word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:2px;font-size:11px">${esc(n.url||'—')}</div>
+        ${n.req_bytes!=null||n.resp_bytes!=null?`<div class="muted" style="font-size:10px;margin-top:4px">req ${n.req_bytes??'—'}b · resp ${n.resp_bytes??'—'}b</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  panel.innerHTML = `<h3 style="margin:0 0 10px;font-size:14px">🌐 ${group.networks.length} network call</h3>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}`;
+  panel.querySelectorAll('.swf-netrow').forEach(r=>{
+    r.onclick = ()=>{
+      const body = panel.querySelector(`.swf-netbody[data-i="${r.dataset.i}"]`);
+      body.style.display = body.style.display==='none' ? 'block':'none';
     };
-  });
-  // Click an event node → load its detail across providers (unitrack / snowplow / firebase).
-  ov.querySelectorAll('.swf-act').forEach(g=>{
-    g.onclick = ()=> showSwfEventDetail(_swfActions[+g.dataset.aid]);
   });
 }
 

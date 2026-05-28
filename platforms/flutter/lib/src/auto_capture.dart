@@ -269,30 +269,43 @@ class UniTrackRouteObserver extends NavigatorObserver {
 /// Installs a global HttpOverrides that records every HTTP request/error and
 /// mirrors the last tap (button + screen) that triggered it. Call once at
 /// startup. Returns the previous overrides so callers can chain if needed.
-HttpOverrides? installUniTrackHttpAutoCapture() {
+/// [excludeSubstrings]: request URLs containing any of these are NOT tracked —
+/// pass the analytics ingest endpoint(s) here so the SDK never tracks its own
+/// uploads (which otherwise floods the data with thousands of self-calls).
+HttpOverrides? installUniTrackHttpAutoCapture({List<String> excludeSubstrings = const []}) {
   final previous = HttpOverrides.current;
-  HttpOverrides.global = _UniTrackHttpOverrides(previous);
+  HttpOverrides.global = _UniTrackHttpOverrides(previous, excludeSubstrings);
   return previous;
 }
 
 class _UniTrackHttpOverrides extends HttpOverrides {
   final HttpOverrides? _previous;
-  _UniTrackHttpOverrides(this._previous);
+  final List<String> _exclude;
+  _UniTrackHttpOverrides(this._previous, this._exclude);
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     final inner = _previous?.createHttpClient(context) ??
         super.createHttpClient(context);
-    return _TrackingHttpClient(inner);
+    return _TrackingHttpClient(inner, _exclude);
   }
 }
 
 class _TrackingHttpClient implements HttpClient {
   final HttpClient _inner;
-  _TrackingHttpClient(this._inner);
+  final List<String> _exclude;
+  _TrackingHttpClient(this._inner, [this._exclude = const []]);
+
+  bool _isExcluded(Uri url) {
+    final s = url.toString();
+    for (final e in _exclude) { if (e.isNotEmpty && s.contains(e)) return true; }
+    return false;
+  }
 
   @override
   Future<HttpClientRequest> openUrl(String method, Uri url) async {
+    // Never track the SDK's own analytics uploads → avoids a feedback loop.
+    if (_isExcluded(url)) return _inner.openUrl(method, url);
     final started = DateTime.now();
     final request = await _inner.openUrl(method, url);
     return _TrackingHttpRequest(request, method, url, started);
@@ -410,8 +423,11 @@ class _TrackingHttpRequest implements HttpClientRequest {
 
     UniTrack.instance.track(ok ? 'network_request' : 'network_error', properties: {
       'method': _method,
+      // Full URL (scheme://host/path?query) so the portal shows the real call.
+      'url': _url.toString(),
       'host': _url.host,
       'path': _url.path,
+      if (_url.query.isNotEmpty) 'query': _url.query,
       'status': status,
       'duration_ms': durationMs,
       if (error != null) 'error': error,
