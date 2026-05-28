@@ -1028,36 +1028,49 @@ async function openSessionDrawer(pid,sid){
 
   const segs = buildSessionTree(s.journey||[]);
   const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
-  const _treeActions = [];   // clickable actions (props / error) indexed by data-aid
+  const _treeActions = [];   // clickable actions (props / error)
+  const _treeNetGroups = []; // clickable network groups → list drawer
+
+  // A "network [N]" chip: click opens the network list drawer.
+  const netChip = (networks, ctx)=>{
+    const gid = _treeNetGroups.length; _treeNetGroups.push({ networks, action: ctx });
+    const hasErr = networks.some(n=>n.net_error || (n.status>=400));
+    const c = hasErr ? 'var(--warn)' : '#79c0ff';
+    return `<span class="tree-net" data-gid="${gid}" style="display:inline-block;cursor:pointer;background:${c}22;border:1px solid ${c}66;color:${c};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600">🌐 network [${networks.length}]${hasErr?' ⚠':''}</span>`;
+  };
 
   const segHtml = segs.map(seg=>{
+    // Network calls NOT attached to a tap (standalone) → one chip at screen level.
+    const screenNets = [];
     const actHtml = seg.actions.map(a=>{
+      if(a.standaloneNet){ screenNets.push(...a.networks); return ''; }
       const isTap = a.event_name==='tap';
       const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
       let label, icon, color;
       if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
-      else if(a.standaloneNet){ icon='🌐'; label='network'; color='#79c0ff'; }
       else { icon=danger?'⚠':'•'; label=a.event_name; color=danger?'var(--danger)':'var(--text)'; }
-      const nets = a.networks.map(netLine).join('');
-      // Clickable when there are properties to show, or it's an error/crash.
       const hasDetail = danger || (a.props && Object.keys(a.props).length);
       const aid = _treeActions.length; if(hasDetail) _treeActions.push(a);
-      return `<div class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="padding:4px 0;border-bottom:1px solid var(--line);${hasDetail?'cursor:pointer':''}">
+      // Networks triggered BY this tap → nested chip under the action.
+      const childNet = a.networks.length
+        ? `<div style="padding:3px 0 1px 22px">${netChip(a.networks, label)}</div>` : '';
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
         <div style="display:flex;gap:8px;align-items:center;font-size:12px">
-          <span style="color:${color};font-weight:600">${icon} ${esc(label)}</span>
-          ${a.networks.length?`<span class="muted" style="font-size:10px">↳ ${a.networks.length} call</span>`:''}
-          ${hasDetail?`<span class="muted" style="font-size:10px">${danger?'· xem lỗi':'· xem chi tiết'} ⓘ</span>`:''}
+          <span class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'xem chi tiết'} ⓘ</span>`:''}</span>
           <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
         </div>
-        ${nets}
+        ${childNet}
       </div>`;
     }).join('');
+    // Screen-level network chip (calls fired on this screen without a tap).
+    const screenNetHtml = screenNets.length
+      ? `<div style="padding:4px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:12px"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>` : '';
     return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden">
       <div style="background:var(--panel2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
         <b style="font-size:13px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</b>
-        <span class="muted" style="font-size:11px">${seg.actions.length} hành động</span>
+        <span class="muted" style="font-size:11px">${seg.actions.filter(a=>!a.standaloneNet).length} hành động${screenNets.length?` · ${screenNets.length} network`:''}</span>
       </div>
-      <div style="padding:6px 12px">${actHtml || '<span class="muted" style="font-size:12px">— không có hành động —</span>'}</div>
+      <div style="padding:6px 12px">${screenNetHtml}${actHtml || (screenNetHtml?'':'<span class="muted" style="font-size:12px">— không có hành động —</span>')}</div>
     </div>`;
   }).join('');
 
@@ -1065,9 +1078,12 @@ async function openSessionDrawer(pid,sid){
   block.style.whiteSpace='normal'; block.style.background='transparent'; block.style.border='none'; block.style.padding='0';
   block.innerHTML = segHtml || '<span class="muted">— (không có bước nào)</span>';
 
-  // Click an action with details → show its properties / error info in a popup.
+  // Click an action → properties / error popup. Click a network chip → list drawer.
   block.querySelectorAll('.tree-act').forEach(el=>{
-    el.onclick = ()=> showActionDetail(_treeActions[+el.dataset.aid]);
+    el.onclick = (e)=>{ e.stopPropagation(); showActionDetail(_treeActions[+el.dataset.aid]); };
+  });
+  block.querySelectorAll('.tree-net').forEach(el=>{
+    el.onclick = (e)=>{ e.stopPropagation(); showSwfNetGroup(_treeNetGroups[+el.dataset.gid]); };
   });
 
   // "Generate wireframe session" button in the drawer header.
@@ -1161,80 +1177,84 @@ let _swfNetGroups = [];  // grouped network lists, indexed by id
 // action collapse into a single "🌐 [N]" node; clicking it opens a list drawer.
 function openSessionWireframe(segs, sid){
   _swfActions = []; _swfNetGroups = [];
-  // ── build graph model: nodes + edges ──────────────────────────────────
-  const nodes = [];   // {id,kind,label,color,x,y,w,h,data}
-  const edges = [];   // {from,to,color}
-  const COL_W = 300, SCREEN_W = 200, SCREEN_H = 50, ACT_W = 190, ACT_H = 34;
-  let colX = 60;
-  let prevScreenId = null;
-
+  // ── render each screen as a PHONE-FRAME mockup ────────────────────────
+  // A frame is a tall rounded rect (a device screen). Inside, blocks stack
+  // top→bottom in interaction order: a title bar (class name), a "{N api call}"
+  // block, then button-labels / actions. Frames sit left→right, joined by thin
+  // arrows. The whole thing lives on the pannable/zoomable canvas.
+  const PHONE_W = 280, FRAME_GAP = 90, PAD = 16, BLOCK_H = 42, BLOCK_GAP = 12, TOP = 60, TITLE_H = 44;
+  const frames = [];   // {x, y, w, h, svg}
+  let fx = 50;
   segs.forEach((seg)=>{
-    // Screen node (a column header).
-    const sx = colX, sy = 60;
-    const sId = nodes.length;
-    nodes.push({ id:sId, kind:'screen', label:seg.screen, crashed:seg.crashed,
-      x:sx, y:sy, w:SCREEN_W, h:SCREEN_H, color: seg.crashed?'#dc2626':'#5b8cff' });
-    if(prevScreenId!=null) edges.push({ from:prevScreenId, to:sId, color:'#5b8cff', main:true });
-    prevScreenId = sId;
+    // Build the inner blocks for this screen.
+    let by = TOP + TITLE_H + 14;   // first block y (below title)
+    let inner = '';
+    // Screen-level network (standalone calls) → one "{N api call}" block on top.
+    const standalone = [];
+    seg.actions.forEach(a=>{ if(a.standaloneNet) standalone.push(...a.networks); });
+    const blockW = PHONE_W - PAD*2;
+    const addNetBlock = (networks, ctxLabel)=>{
+      const gid = _swfNetGroups.length; _swfNetGroups.push({ networks, action: ctxLabel });
+      const hasErr = networks.some(n=>n.net_error || (n.status>=400));
+      const c = hasErr ? '#f59e0b' : '#79c0ff';
+      inner += `<g class="swf-netgroup" data-gid="${gid}" style="cursor:pointer">
+        <rect x="${fx+PAD}" y="${by}" width="${blockW}" height="${BLOCK_H}" rx="8" fill="${c}1f" stroke="${c}" stroke-width="1.4" stroke-dasharray="4,3"/>
+        <text x="${fx+PHONE_W/2}" y="${by+BLOCK_H/2+4}" text-anchor="middle" fill="${c}" font-size="12" font-weight="700">{ ${networks.length} api call${hasErr?' ⚠':''} }</text></g>`;
+      by += BLOCK_H + BLOCK_GAP;
+    };
+    if(standalone.length) addNetBlock(standalone, seg.screen);
 
-    // Action nodes stacked under the screen.
-    let ay = sy + SCREEN_H + 40;
-    let prevActId = sId;
     seg.actions.forEach(a=>{
+      if(a.standaloneNet) return;   // already in the top net block
       const aid = _swfActions.length; _swfActions.push({ ...a, sid });
       const isTap = a.event_name==='tap';
       const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
-      const color = danger?'#dc2626':(isTap?'#27d796':(a.standaloneNet?'#79c0ff':'#8b94a7'));
-      const label = isTap ? ('👆 '+(a.element_key||'button')) : (a.standaloneNet?'🌐 network':((danger?'⚠ ':'')+a.event_name));
-      const actId = nodes.length;
-      nodes.push({ id:actId, kind:'action', aid, label, color,
-        x: sx + (SCREEN_W-ACT_W)/2, y:ay, w:ACT_W, h:ACT_H });
-      edges.push({ from:prevActId, to:actId, color:'#3a4358' });
-      prevActId = actId;
-      ay += ACT_H + 16;
-
-      // Group this action's network calls into ONE node "🌐 [N]".
+      const c = danger?'#dc2626':(isTap?'#27d796':'#8b94a7');
+      // A button-style block (rounded, looks like a UI control).
+      const label = isTap ? (a.element_key||'button') : a.event_name;
+      const icon = danger?'⚠ ':(isTap?'':'• ');
+      inner += `<g class="swf-act" data-aid="${aid}" style="cursor:pointer">
+        <rect x="${fx+PAD}" y="${by}" width="${blockW}" height="${BLOCK_H}" rx="${isTap?20:8}" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
+        <text x="${fx+PHONE_W/2}" y="${by+BLOCK_H/2+4}" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="600">${esc(icon)}${esc(label.length>28?label.slice(0,27)+'…':label)}</text></g>`;
+      by += BLOCK_H + BLOCK_GAP;
+      // Network triggered by this action → a small "{N api}" block indented under it.
       if(a.networks.length){
         const gid = _swfNetGroups.length; _swfNetGroups.push({ networks:a.networks, action:label });
         const hasErr = a.networks.some(n=>n.net_error || (n.status>=400));
-        const netColor = hasErr ? '#f59e0b' : '#79c0ff';
-        const netId = nodes.length;
-        nodes.push({ id:netId, kind:'netgroup', gid, label:`🌐 [${a.networks.length}]${hasErr?' ⚠':''}`,
-          color:netColor, x: sx + SCREEN_W + 30, y:ay-ACT_H-16, w:90, h:ACT_H });
-        edges.push({ from:actId, to:netId, color:netColor });
+        const c2 = hasErr ? '#f59e0b' : '#79c0ff';
+        inner += `<g class="swf-netgroup" data-gid="${gid}" style="cursor:pointer">
+          <rect x="${fx+PAD+24}" y="${by}" width="${blockW-24}" height="${BLOCK_H-8}" rx="6" fill="${c2}18" stroke="${c2}" stroke-width="1.2" stroke-dasharray="3,3"/>
+          <text x="${fx+PAD+24+(blockW-24)/2}" y="${by+(BLOCK_H-8)/2+4}" text-anchor="middle" fill="${c2}" font-size="11" font-weight="600">↳ { ${a.networks.length} api }${hasErr?' ⚠':''}</text></g>`;
+        by += (BLOCK_H-8) + BLOCK_GAP;
       }
     });
-    colX += COL_W;
-    // Make column wide enough if it has net groups.
-    if(seg.actions.some(a=>a.networks.length)) colX += 40;
+
+    const frameH = Math.max(by + PAD - TOP, 360);
+    frames.push({ x:fx, y:TOP, w:PHONE_W, h:frameH, crashed:seg.crashed, screen:seg.screen, inner });
+    fx += PHONE_W + FRAME_GAP;
   });
 
-  const canvasW = colX + 200;
-  const canvasH = Math.max(...nodes.map(n=>n.y+n.h), 400) + 80;
+  const canvasW = fx + 60;
+  const canvasH = Math.max(...frames.map(f=>f.y+f.h), 400) + 60;
 
-  // ── render nodes + edges to SVG ───────────────────────────────────────
-  const edgeSvg = edges.map(e=>{
-    const a=nodes[e.from], b=nodes[e.to];
-    const x1=a.x+a.w/2, y1=a.y+a.h, x2=b.x+b.w/2, y2=b.y;
-    // gentle curve, thin line
-    const d = `M${x1},${y1} C${x1},${(y1+y2)/2} ${x2},${(y1+y2)/2} ${x2},${y2}`;
-    return `<path d="${d}" fill="none" stroke="${e.color}" stroke-width="${e.main?1.6:1}" stroke-opacity="0.55" marker-end="url(#swfArrow)"/>`;
+  // Thin arrows between consecutive phone frames (screen → screen flow).
+  const edgeSvg = frames.slice(0,-1).map((f,i)=>{
+    const a=f, b=frames[i+1];
+    const x1=a.x+a.w, y1=a.y+60, x2=b.x, y2=b.y+60;
+    return `<path d="M${x1},${y1} C${x1+FRAME_GAP/2},${y1} ${x2-FRAME_GAP/2},${y2} ${x2},${y2}" fill="none" stroke="#5b8cff" stroke-width="1.4" stroke-opacity="0.6" marker-end="url(#swfArrow)"/>`;
   }).join('');
 
-  const nodeSvg = nodes.map(n=>{
-    if(n.kind==='screen'){
-      return `<g><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="12" fill="${n.color}26" stroke="${n.color}" stroke-width="2"/>
-        <text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">${n.crashed?'⚠ ':''}📱 ${esc(n.label.length>22?n.label.slice(0,21)+'…':n.label)}</text></g>`;
-    }
-    if(n.kind==='action'){
-      return `<g class="swf-act" data-aid="${n.aid}" style="cursor:pointer">
-        <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${n.color}22" stroke="${n.color}" stroke-width="1.5"/>
-        <text x="${n.x+10}" y="${n.y+n.h/2+4}" fill="var(--text)" font-size="11" font-weight="600">${esc(n.label.length>24?n.label.slice(0,23)+'…':n.label)}</text></g>`;
-    }
-    // netgroup
-    return `<g class="swf-netgroup" data-gid="${n.gid}" style="cursor:pointer">
-      <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${n.color}22" stroke="${n.color}" stroke-width="1.5"/>
-      <text x="${n.x+n.w/2}" y="${n.y+n.h/2+4}" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="700">${esc(n.label)}</text></g>`;
+  // Phone frames (device chrome + title bar + inner blocks).
+  const nodeSvg = frames.map(f=>{
+    const sc = f.crashed ? '#dc2626' : '#3a4358';
+    const title = f.screen.length>26 ? f.screen.slice(0,25)+'…' : f.screen;
+    return `<g>
+      <rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="22" fill="var(--panel)" stroke="${sc}" stroke-width="2"/>
+      <rect x="${f.x}" y="${f.y}" width="${f.w}" height="${TITLE_H}" rx="22" fill="${f.crashed?'#dc2626':'#5b8cff'}22"/>
+      <rect x="${f.x}" y="${f.y+TITLE_H-12}" width="${f.w}" height="12" fill="${f.crashed?'#dc2626':'#5b8cff'}22"/>
+      <text x="${f.x+f.w/2}" y="${f.y+TITLE_H/2+5}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">${f.crashed?'⚠ ':''}📱 ${esc(title)}</text>
+      ${f.inner}
+    </g>`;
   }).join('');
 
   let ov = document.getElementById('swfOverlay');
@@ -1304,7 +1324,6 @@ function openSessionWireframe(segs, sid){
 
 // Network group drawer: list of N calls, each expand/collapse to see url + IO.
 function showSwfNetGroup(group){
-  const panel = document.getElementById('swfDetail');
   const rows = group.networks.map((n,i)=>{
     const c = n.net_error ? 'var(--danger)' : statusColor(n.status);
     const path = n.url ? (()=>{ try{ return new URL(n.url).pathname; }catch(_){ return n.url; } })() : (n.url||'(no url)');
@@ -1331,11 +1350,28 @@ function showSwfNetGroup(group){
       </div>
     </div>`;
   }).join('');
-  panel.innerHTML = `<h3 style="margin:0 0 10px;font-size:14px">🌐 ${group.networks.length} network call</h3>
-    <div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}`;
-  panel.querySelectorAll('.swf-netrow').forEach(r=>{
+  const inner = `<div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}`;
+
+  // If the wireframe side panel exists (we're in the wireframe overlay), render
+  // there. Otherwise (called from the session drawer tree) use a modal dialog.
+  const panel = document.getElementById('swfDetail');
+  let container;
+  if (panel && document.getElementById('swfOverlay')?.style.display !== 'none'
+      && document.getElementById('swfOverlay')) {
+    panel.innerHTML = `<h3 style="margin:0 0 10px;font-size:14px">🌐 ${group.networks.length} network call</h3>${inner}`;
+    container = panel;
+  } else {
+    let dlg = document.getElementById('netListDlg');
+    if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; dlg.style.width='520px'; document.body.appendChild(dlg); }
+    dlg.innerHTML = `<div class="dlg-h">🌐 ${group.networks.length} network call
+      <button onclick="document.getElementById('netListDlg').close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+      <div class="dlg-b">${inner}</div>`;
+    dlg.showModal();
+    container = dlg;
+  }
+  container.querySelectorAll('.swf-netrow').forEach(r=>{
     r.onclick = ()=>{
-      const body = panel.querySelector(`.swf-netbody[data-i="${r.dataset.i}"]`);
+      const body = container.querySelector(`.swf-netbody[data-i="${r.dataset.i}"]`);
       body.style.display = body.style.display==='none' ? 'block':'none';
     };
   });

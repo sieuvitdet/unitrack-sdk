@@ -27,7 +27,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 // For resolving the widget class behind Material/Cupertino page routes so the
 // screen name is the class (ProductListScreen) rather than the path (/products).
-import 'package:flutter/material.dart' show MaterialPageRoute;
+import 'package:flutter/material.dart' show MaterialPageRoute, Tooltip;
 import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 
 import '../unitrack.dart';
@@ -132,9 +132,11 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     visit(root);
     if (chain.isEmpty) return null;
 
-    String? semantic;
-    String? keyLabel;
-    String? text;
+    String? semantic;       // Semantics identifier or label
+    String? keyLabel;       // ValueKey
+    String? text;           // visible Text
+    String? tooltip;        // Tooltip message (common on IconButtons)
+    String? iconName;       // IconData semantic label (icon-only buttons)
     String? interactiveType;
     Element? interactiveEl;
 
@@ -142,7 +144,9 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
       final w = el.widget;
       if (semantic == null && w is Semantics) {
         final id = w.properties.identifier;
+        final lbl = w.properties.label;
         if (id != null && id.isNotEmpty) semantic = id;
+        else if (lbl != null && lbl.isNotEmpty) semantic = lbl;
       }
       if (keyLabel == null && w.key is ValueKey) {
         final v = (w.key as ValueKey).value;
@@ -150,6 +154,12 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
       }
       if (text == null && w is Text && (w.data?.isNotEmpty ?? false)) {
         text = w.data;
+      }
+      if (tooltip == null && w is Tooltip && (w.message?.isNotEmpty ?? false)) {
+        tooltip = w.message;
+      }
+      if (iconName == null && w is Icon) {
+        iconName = _iconName(w.icon);
       }
       if (interactiveType == null && _isInteractive(w)) {
         interactiveType = w.runtimeType.toString();
@@ -161,15 +171,47 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
       return null;
     }
 
-    // If the hit point missed the label (tapping the empty area of a
-    // Card/InkWell whose Text sits in a sibling branch), search the interactive
-    // widget's subtree for its label.
+    // If the hit point missed the label/icon (tapping empty area of a Card/
+    // InkWell whose content sits in a sibling branch), search the interactive
+    // widget's subtree for a Text, then an Icon.
     if (text == null && interactiveEl != null) {
       text = _firstTextIn(interactiveEl);
     }
+    if (text == null && iconName == null && interactiveEl != null) {
+      iconName = _firstIconIn(interactiveEl);
+    }
 
-    final key = semantic ?? keyLabel ?? text ?? interactiveType!;
-    return _ResolvedTap(key: key, type: interactiveType ?? 'unknown', text: text);
+    // Name priority: explicit semantic/key > visible text > tooltip > icon name
+    // (icon-only buttons) > widget type. tooltip/icon mean an icon button gets a
+    // real name ("delete", "icon:add") instead of just "IconButton".
+    final key = semantic ?? keyLabel ?? text ?? tooltip
+        ?? (iconName != null ? 'icon:$iconName' : null) ?? interactiveType!;
+    return _ResolvedTap(key: key, type: interactiveType ?? 'unknown', text: text ?? tooltip);
+  }
+
+  // Resolve a readable name from an IconData. Flutter's IconData has a
+  // semanticLabel only sometimes; otherwise we derive from the const name when
+  // available (toString → "IconData(U+0E047)"), so prefer the codepoint hex as
+  // a stable id. Material Icons expose their name via the widget's
+  // semanticLabel; fall back to the codepoint.
+  String? _iconName(IconData? icon) {
+    if (icon == null) return null;
+    // Material `Icons.x` const instances stringify usefully in debug; in release
+    // we only have the codepoint. Use a short hex id so the same icon groups.
+    final cp = icon.codePoint.toRadixString(16);
+    return 'u$cp';
+  }
+
+  String? _firstIconIn(Element root) {
+    String? found;
+    void walk(Element el) {
+      if (found != null) return;
+      final w = el.widget;
+      if (w is Icon) { found = _iconName(w.icon); if (found != null) return; }
+      el.visitChildren(walk);
+    }
+    root.visitChildren(walk);
+    return found;
   }
 
   String? _firstTextIn(Element root) {
