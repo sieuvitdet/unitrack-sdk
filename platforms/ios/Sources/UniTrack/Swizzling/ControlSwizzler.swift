@@ -32,12 +32,19 @@ private extension UIControl {
         // Forward to original (swapped).
         self.ut_sendAction(action, to: target, for: event)
 
-        // Only react to taps & value-change, skip continuous events.
-        guard let touches = event?.allTouches,
-              let touch = touches.first,
-              touch.phase == .ended || touch.phase == .began else {
-            return
+        // Decide whether to record this as a tap.
+        //  • Touch-driven controls (UIButton via addTarget) carry a UIEvent with
+        //    a touch in the .ended phase — record on .ended only (one per tap).
+        //  • UIAction-driven controls (addAction(UIAction:), iOS 14+) call
+        //    sendAction with event == nil — there's no touch to inspect, so we
+        //    record once here (the action only fires on the actual interaction).
+        //  • Skip continuous controls (UISlider/UIStepper) to avoid a flood.
+        if self is UISlider || self is UIStepper { return }
+        if let event = event {
+            guard let touch = event.allTouches?.first,
+                  touch.phase == .ended else { return }
         }
+        // event == nil → UIAction path: fall through and record.
 
         let key = resolveKey(action: action)
         let screen = currentScreenName()
@@ -63,13 +70,12 @@ private extension UIControl {
     }
 
     private func currentScreenName() -> String {
-        // Walk responder chain to find owning UIViewController.
+        // Walk responder chain to find the owning UIViewController. Use its
+        // class-based screen name (NOT title, which is often a dynamic string
+        // like a camera name — that produced the bogus "Phòng khách" screen).
         var r: UIResponder? = self
         while let next = r?.next {
-            if let vc = next as? UIViewController {
-                return vc.title?.isEmpty == false ?
-                    vc.title! : String(describing: type(of: vc))
-            }
+            if let vc = next as? UIViewController { return vc.ut_screenName }
             r = next
         }
         return ""

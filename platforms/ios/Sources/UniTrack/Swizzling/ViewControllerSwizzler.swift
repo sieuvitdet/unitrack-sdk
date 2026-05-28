@@ -62,15 +62,6 @@ private extension UIViewController {
         return skipped.contains(String(describing: type(of: self)))
     }
 
-    // Use the controller's class name as the stable analytics screen name. (We
-    // intentionally do NOT use `title`, which is often a localized navbar string
-    // and not a stable key.) Strip the Swift module prefix so the name is
-    // consistent — `type(of:)` can yield "MyApp.HomeVC" or "HomeVC" depending on
-    // context; we always want the bare class name.
-    var ut_screenName: String {
-        let full = String(describing: type(of: self))
-        return full.split(separator: ".").last.map(String.init) ?? full
-    }
 
     @objc func ut_viewDidLoad() {
         self.ut_viewDidLoad()                 // original (swapped)
@@ -91,5 +82,17 @@ private extension UIViewController {
             UniTrack.track("screen_load_completed",
                            properties: ["screen": screen, "load_ms": ms])
         }
+    }
+}
+
+// Shared screen-name resolver (internal — also used by ControlSwizzler for taps).
+// Uses the controller's class name as the stable analytics screen name. We
+// intentionally do NOT use `title`, which is often a dynamic string (e.g. a
+// camera name) and not a stable key. Strip the Swift module prefix so the name
+// is consistent — `type(of:)` can yield "MyApp.HomeVC" or "HomeVC".
+extension UIViewController {
+    var ut_screenName: String {
+        let full = String(describing: type(of: self))
+        return full.split(separator: ".").last.map(String.init) ?? full
     }
 }
