@@ -1362,10 +1362,14 @@ function showSwfNetGroup(group){
     container = panel;
   } else {
     let dlg = document.getElementById('netListDlg');
-    if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; dlg.style.width='520px'; document.body.appendChild(dlg); }
-    dlg.innerHTML = `<div class="dlg-h">🌐 ${group.networks.length} network call
+    if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; document.body.appendChild(dlg); }
+    // Constrain the dialog to the viewport and make it a fixed-header /
+    // scrollable-body column so expanding rows scrolls instead of overflowing.
+    dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;'
+      +'display:flex;flex-direction:column;overflow:hidden';
+    dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">🌐 ${group.networks.length} network call
       <button onclick="document.getElementById('netListDlg').close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-      <div class="dlg-b">${inner}</div>`;
+      <div class="dlg-b" style="flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto">${inner}</div>`;
     dlg.showModal();
     container = dlg;
   }
