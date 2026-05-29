@@ -79,13 +79,13 @@ object UniTrack {
     @JvmStatic
     fun identify(userId: String, traits: Map<String, Any?> = emptyMap()) {
         forEachProvider { it.setUser(userId, traits) }
-        NativeBridge.identify(userId, JSONObject(traits).toString())
+        if (initialized) NativeBridge.identify(userId, JSONObject(traits).toString())
     }
 
     @JvmStatic
     fun reset() {
         forEachProvider { it.setUser(null, emptyMap()) }
-        NativeBridge.reset()
+        if (initialized) NativeBridge.reset()
     }
 
     // Event rewrite rules (Phase 2 — config-driven). A matching rule renames an
@@ -125,13 +125,17 @@ object UniTrack {
         var props = properties
         applyRules(event, properties)?.let { (n, p) -> name = n; props = p }
         forEachProvider { it.track(name, props) }
-        NativeBridge.track(name, JSONObject(props).toString())
+        // Guard the native call: a tracking call can arrive before initialize()
+        // finishes (e.g. RN's navigation tracker fires setScreen on first render
+        // while initialize() is still in-flight). Calling JNI before
+        // System.loadLibrary ran throws UnsatisfiedLinkError, so skip it.
+        if (initialized) NativeBridge.track(name, JSONObject(props).toString())
     }
 
     @JvmStatic
     fun setScreen(name: String) {
         forEachProvider { it.setScreen(name) }
-        NativeBridge.setScreen(name)
+        if (initialized) NativeBridge.setScreen(name)
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------
@@ -162,10 +166,10 @@ object UniTrack {
     }.getOrDefault(url)
 
     @JvmStatic
-    fun flush() = NativeBridge.flush()
+    fun flush() { if (initialized) NativeBridge.flush() }
 
     @JvmStatic
-    fun setEnabled(enabled: Boolean) = NativeBridge.setEnabled(enabled)
+    fun setEnabled(enabled: Boolean) { if (initialized) NativeBridge.setEnabled(enabled) }
 
     private fun buildConfigJson(ctx: Context, c: UniTrackConfig): String {
         val obj = JSONObject()

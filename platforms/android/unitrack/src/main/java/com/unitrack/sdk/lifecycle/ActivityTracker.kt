@@ -58,9 +58,14 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     // ─── Fragment tracking ────────────────────────────────────────────────
     private val fragmentCb = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
-            // Skip framework / nav-host fragments.
+            // Skip framework / nav-host / container fragments that aren't real
+            // app screens. On React Native the JS navigation tracker names the
+            // screens (route names), so the react-native-screens container
+            // fragments here are just noise.
             val name = f.javaClass.simpleName
-            if (name.startsWith("Nav") || name == "ReportFragment") return
+            if (name.startsWith("Nav") || name == "ReportFragment" ||
+                name == "ScreenStackFragment" || name == "ScreenFragment" ||
+                name == "ScreenContainer" || name.startsWith("Supportable")) return
             UniTrack.setScreen(name)
         }
     }
