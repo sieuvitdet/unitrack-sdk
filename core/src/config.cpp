@@ -16,9 +16,42 @@ static std::string find_string(const std::string& json, const std::string& key) 
     if (p == std::string::npos) return "";
     p = json.find('"', p);
     if (p == std::string::npos) return "";
-    auto end = json.find('"', p + 1);
-    if (end == std::string::npos) return "";
-    return json.substr(p + 1, end - p - 1);
+    // Walk to the closing quote, honoring backslash escapes, and decode the
+    // standard JSON escapes as we go. (Without this, a value like an absolute
+    // path serialized as "\/data\/..." by some JSON encoders would keep its
+    // backslashes and break, e.g. sqlite3_open on Android.)
+    std::string out;
+    for (size_t i = p + 1; i < json.size(); ++i) {
+        char ch = json[i];
+        if (ch == '\\' && i + 1 < json.size()) {
+            char nx = json[++i];
+            switch (nx) {
+                case 'n': out.push_back('\n'); break;
+                case 't': out.push_back('\t'); break;
+                case 'r': out.push_back('\r'); break;
+                case 'b': out.push_back('\b'); break;
+                case 'f': out.push_back('\f'); break;
+                case '/': out.push_back('/');  break;
+                case '"': out.push_back('"');  break;
+                case '\\': out.push_back('\\'); break;
+                case 'u': {
+                    // Minimal \uXXXX handling: keep ASCII, drop the rest.
+                    if (i + 4 < json.size()) {
+                        int code = std::strtol(json.substr(i + 1, 4).c_str(), nullptr, 16);
+                        if (code > 0 && code < 128) out.push_back(static_cast<char>(code));
+                        i += 4;
+                    }
+                    break;
+                }
+                default: out.push_back(nx); break;
+            }
+        } else if (ch == '"') {
+            return out;          // unescaped closing quote
+        } else {
+            out.push_back(ch);
+        }
+    }
+    return out;
 }
 
 static bool find_number(const std::string& json, const std::string& key, double& out) {

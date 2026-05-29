@@ -96,7 +96,7 @@ class SnowplowProvider(
                 property = (properties["element_key"] ?: properties["state"])?.toString()
             }
         }
-        event.customContexts.addAll(entities())
+        event.entities.addAll(entities())
         t.track(event)
     }
 
@@ -110,7 +110,7 @@ class SnowplowProvider(
     override fun setScreen(name: String) {
         val t = tracker ?: return
         val sv = ScreenView(name)
-        sv.customContexts.addAll(entities())
+        sv.entities.addAll(entities())
         t.track(sv)
     }
 }

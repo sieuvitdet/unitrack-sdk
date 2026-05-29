@@ -48,10 +48,11 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     override fun onActivityDestroyed(a: Activity) {}
 
     private fun resolveScreenName(a: Activity): String {
-        // Prefer activity.title when set, otherwise simple class name.
-        val title = a.title?.toString().orEmpty()
-        return if (title.isNotBlank() && title != a.packageName)
-            title else a.javaClass.simpleName
+        // Use the Activity's CLASS NAME as the stable screen name (mirrors the
+        // iOS swizzler's ut_screenName). We intentionally do NOT use
+        // activity.title — it's often a dynamic/display string (e.g. a camera
+        // name or the app label) and not a stable analytics key.
+        return a.javaClass.simpleName
     }
 
     // ─── Fragment tracking ────────────────────────────────────────────────

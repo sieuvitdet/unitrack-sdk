@@ -10,10 +10,64 @@
 
 #include <jni.h>
 #include <cstdint>
+#include <cstring>
 #include "unitrack/unitrack.h"
 
 static inline ut_context* ctx_of(jlong p) {
     return reinterpret_cast<ut_context*>(static_cast<uintptr_t>(p));
+}
+
+// ── HTTP transport callback ─────────────────────────────────────────────────
+// The core is built without libcurl, so it calls this C function to upload each
+// batch. We bounce up to Kotlin (NativeBridge.httpPost) which uses
+// HttpURLConnection.
+//
+// IMPORTANT: the callback runs on the core's flush thread, which we attach to
+// the JVM. A thread attached this way uses the SYSTEM classloader, so
+// FindClass() there CANNOT see app classes (→ ClassNotFoundException). We must
+// resolve the class on JNI_OnLoad (which runs on a thread that has the app
+// classloader) and cache it as a global ref.
+static JavaVM*    g_vm = nullptr;
+static jclass     g_bridgeCls = nullptr;   // global ref to NativeBridge
+static jmethodID  g_httpPostMid = nullptr;
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+    g_vm = vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
+    jclass local = env->FindClass("com/unitrack/sdk/bridge/NativeBridge");
+    if (local) {
+        g_bridgeCls = static_cast<jclass>(env->NewGlobalRef(local));
+        g_httpPostMid = env->GetStaticMethodID(
+            g_bridgeCls, "httpPost", "(Ljava/lang/String;Ljava/lang/String;[B)I");
+        env->DeleteLocalRef(local);
+    }
+    return JNI_VERSION_1_6;
+}
+
+static int ut_android_http_send(const char* url, const char* /*method*/,
+                                const char* headers, const char* body,
+                                size_t body_len, void* /*user_data*/) {
+    if (!g_vm || !g_bridgeCls || !g_httpPostMid) return 0;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return 0;
+        attached = true;
+    }
+    jstring jurl  = env->NewStringUTF(url ? url : "");
+    jstring jhdrs = env->NewStringUTF(headers ? headers : "{}");
+    jbyteArray jbody = env->NewByteArray(static_cast<jsize>(body_len));
+    if (jbody && body_len > 0)
+        env->SetByteArrayRegion(jbody, 0, static_cast<jsize>(body_len),
+                                reinterpret_cast<const jbyte*>(body));
+    int status = env->CallStaticIntMethod(g_bridgeCls, g_httpPostMid, jurl, jhdrs, jbody);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); status = 0; }
+    env->DeleteLocalRef(jurl);
+    env->DeleteLocalRef(jhdrs);
+    if (jbody) env->DeleteLocalRef(jbody);
+    if (attached) g_vm->DetachCurrentThread();
+    return status;
 }
 
 // Helper: scoped UTF-8 C string from jstring.
@@ -39,6 +93,13 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeInit(
     JStr k(env, apiKey), c(env, cfg);
     ut_context* ctx = ut_init(k.c(), c.c(), (ut_platform)platform);
     return static_cast<jlong>(reinterpret_cast<uintptr_t>(ctx));
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeInstallHttp(
+    JNIEnv*, jobject, jlong p)
+{
+    ut_set_http_transport(ctx_of(p), ut_android_http_send, nullptr);
 }
 
 JNIEXPORT void JNICALL

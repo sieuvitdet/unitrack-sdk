@@ -17,7 +17,9 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags '-std=c++17', '-fvisibility=hidden', '-fno-exceptions'
+                // Core uses try/catch (e.g. ut_init in capi.cpp), so exceptions
+                // must stay enabled — do NOT add -fno-exceptions here.
+                cppFlags '-std=c++17', '-fvisibility=hidden'
                 arguments '-DUT_USE_BUNDLED_SQLITE=OFF',
                           '-DUT_USE_LIBCURL=OFF',
                           '-DCMAKE_BUILD_TYPE=Release'

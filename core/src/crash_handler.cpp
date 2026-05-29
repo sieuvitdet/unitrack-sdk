@@ -11,7 +11,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#if defined(__APPLE__) || defined(__linux__)
+// Android's bionic defines __linux__ but ships no <execinfo.h>/backtrace(3),
+// so exclude it here (the #if frames block is skipped on Android).
+#if (defined(__APPLE__) || defined(__linux__)) && !defined(__ANDROID__)
   #include <execinfo.h>
   #define UT_HAVE_BACKTRACE 1
 #endif

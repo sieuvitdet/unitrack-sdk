@@ -68,10 +68,9 @@ internal object ClickTracker : Application.ActivityLifecycleCallbacks {
 
             val key   = resolveKey(target)
             val ctx   = target.context
-            val screen = (ctx as? Activity)?.let {
-                it.title?.toString().takeIf { t -> t.isNotBlank() }
-                    ?: it.javaClass.simpleName
-            } ?: ""
+            // Use the Activity CLASS NAME as the screen (matches ActivityTracker
+            // + the iOS swizzler); not activity.title, which is dynamic.
+            val screen = (ctx as? Activity)?.javaClass?.simpleName ?: ""
 
             UniTrack.track("tap", mapOf(
                 "element_key" to key,
