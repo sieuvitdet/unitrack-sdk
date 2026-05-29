@@ -1143,8 +1143,18 @@ async function openSessionDrawer(pid,sid){
 
 // Popup showing an action's properties, or — for crash/error/parse failures —
 // a human-readable cause + which button triggered it + bad-data preview.
+// Close any UniTrack detail dialogs that are still open, so we never stack two
+// modals (the bug: closing the top one left a second behind it).
+function closeAllUtilDialogs(){
+  for(const id of ['actDlg','netListDlg']){
+    const d = document.getElementById(id);
+    if(d && d.open) d.close();
+  }
+}
+
 function showActionDetail(a){
   if(!a) return;
+  closeAllUtilDialogs();
   let dlg = document.getElementById('actDlg');
   if(!dlg){
     dlg = document.createElement('dialog'); dlg.id='actDlg';
@@ -1404,11 +1414,9 @@ function showSwfNetGroup(group){
     panel.innerHTML = `<h3 style="margin:0 0 10px;font-size:14px">🌐 ${group.networks.length} network call</h3>${inner}`;
     container = panel;
   } else {
+    closeAllUtilDialogs();   // never stack two modals
     let dlg = document.getElementById('netListDlg');
     if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; document.body.appendChild(dlg); }
-    // If a previous list dialog is still open, close it first so we never stack
-    // two modals (that looked like the popup "showing twice").
-    if(dlg.open) dlg.close();
     // Constrain the dialog to the viewport and make it a fixed-header /
     // scrollable-body column so expanding rows scrolls instead of overflowing.
     dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;'
