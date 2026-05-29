@@ -1405,28 +1405,23 @@ function showSwfNetGroup(group){
   // each row to a sliver (the bug: 40 rows collapsed to ~2px tall each).
   const inner = `<div style="display:block"><div class="muted" style="font-size:11px;margin-bottom:8px">từ: ${esc(group.action)}</div>${rows}</div>`;
 
-  // If the wireframe side panel exists (we're in the wireframe overlay), render
-  // there. Otherwise (called from the session drawer tree) use a modal dialog.
-  const panel = document.getElementById('swfDetail');
-  let container;
-  if (panel && document.getElementById('swfOverlay')?.style.display !== 'none'
-      && document.getElementById('swfOverlay')) {
-    panel.innerHTML = `<h3 style="margin:0 0 10px;font-size:14px">🌐 ${group.networks.length} network call</h3>${inner}`;
-    container = panel;
-  } else {
-    closeAllUtilDialogs();   // never stack two modals
-    let dlg = document.getElementById('netListDlg');
-    if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; document.body.appendChild(dlg); }
-    // Constrain the dialog to the viewport and make it a fixed-header /
-    // scrollable-body column so expanding rows scrolls instead of overflowing.
-    dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;'
-      +'display:flex;flex-direction:column;overflow:hidden';
-    dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">🌐 ${group.networks.length} network call
-      <button onclick="document.getElementById('netListDlg').close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-      <div class="dlg-b" style="flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto">${inner}</div>`;
-    dlg.showModal();
-    container = dlg;
-  }
+  // Always use a single modal dialog (works from the session drawer AND from
+  // the wireframe overlay). One source of truth → no stacked/stuck popups, and
+  // the ✕ / backdrop always closes it.
+  closeAllUtilDialogs();
+  let dlg = document.getElementById('netListDlg');
+  if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; document.body.appendChild(dlg); }
+  // Fixed-header / scrollable-body column constrained to the viewport.
+  dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;'
+    +'display:flex;flex-direction:column;overflow:hidden';
+  dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">🌐 ${group.networks.length} network call
+    <button class="swf-net-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b" style="flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto">${inner}</div>`;
+  dlg.showModal();
+  // Close on ✕ and on backdrop click.
+  dlg.querySelector('.swf-net-close').onclick = ()=> dlg.close();
+  dlg.onclick = (e)=>{ if(e.target === dlg) dlg.close(); };  // click outside (backdrop)
+  const container = dlg;
   container.querySelectorAll('.swf-netrow').forEach(r=>{
     r.onclick = ()=>{
       const body = container.querySelector(`.swf-netbody[data-i="${r.dataset.i}"]`);
