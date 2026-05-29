@@ -97,6 +97,10 @@ export class UniTrackTapBoundary extends React.Component<Props> {
           const screen = tapState.currentScreen;
           tapState.last = { element: resolved.name, screen, at: now };
           UniTrack.track('tap', {
+            // `element_key` is the field the portal (session tree + heatmap) and
+            // the iOS/Android native tap capture use — send it so RN taps line up
+            // with the other platforms. `element` kept for backwards-compat.
+            element_key: resolved.name,
             element: resolved.name,
             element_type: resolved.type,
             screen,

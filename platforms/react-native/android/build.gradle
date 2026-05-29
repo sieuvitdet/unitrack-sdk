@@ -10,11 +10,13 @@ android {
         targetSdk 34
     }
 
+    // RN 0.85 / AGP compiles Java at 17; keep Kotlin's jvmTarget in lockstep
+    // (Gradle 9 fails the build on a Java-17 / Kotlin-11 mismatch).
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = '11' }
+    kotlinOptions { jvmTarget = '17' }
 }
 
 dependencies {
