@@ -64,6 +64,10 @@ enum CameraAnalytics {
                     screenContext:               o["screenContext"] ?? true,
                     lifecycleAutotracking:       o["lifecycleAutotracking"] ?? true,
                     screenEngagementAutotracking: o["screenEngagementAutotracking"] ?? true,
+                    // OFF: UniTrack already emits screen_view; Snowplow's own
+                    // ScreenView autotracking would double-count each screen
+                    // (once stripped by UniTrack, once raw "MyApp.VC" by Snowplow).
+                    screenViewAutotracking:      o["screenViewAutotracking"] ?? false,
                     exceptionAutotracking:       o["exceptionAutotracking"] ?? true,
                     installAutotracking:         o["installAutotracking"] ?? true
                 )

@@ -27,6 +27,12 @@ public struct SnowplowOptions {
     public var screenContext: Bool
     public var lifecycleAutotracking: Bool
     public var screenEngagementAutotracking: Bool
+    /// Snowplow's own UIViewController-swizzling ScreenView autotracking.
+    /// DEFAULT false: UniTrack already emits screen_view (via setScreen with a
+    /// module-prefix-stripped class name), so leaving Snowplow's autotracking on
+    /// double-counts every screen — once from UniTrack (e.g. "HomeVC") and once
+    /// from Snowplow's own swizzler with the raw name (e.g. "MyApp.HomeVC").
+    public var screenViewAutotracking: Bool
     public var exceptionAutotracking: Bool
     public var installAutotracking: Bool
     public var deepLinkContext: Bool
@@ -39,6 +45,7 @@ public struct SnowplowOptions {
                 screenContext: Bool = true,
                 lifecycleAutotracking: Bool = true,
                 screenEngagementAutotracking: Bool = true,
+                screenViewAutotracking: Bool = false,
                 exceptionAutotracking: Bool = true,
                 installAutotracking: Bool = true,
                 deepLinkContext: Bool = true,
@@ -50,6 +57,7 @@ public struct SnowplowOptions {
         self.screenContext = screenContext
         self.lifecycleAutotracking = lifecycleAutotracking
         self.screenEngagementAutotracking = screenEngagementAutotracking
+        self.screenViewAutotracking = screenViewAutotracking
         self.exceptionAutotracking = exceptionAutotracking
         self.installAutotracking = installAutotracking
         self.deepLinkContext = deepLinkContext
@@ -105,6 +113,7 @@ public final class SnowplowProvider: AnalyticsProvider {
             .sessionContext(options.sessionContext)
             .screenContext(options.screenContext)
             .lifecycleAutotracking(options.lifecycleAutotracking)
+            .screenViewAutotracking(options.screenViewAutotracking)
             .screenEngagementAutotracking(options.screenEngagementAutotracking)
             .exceptionAutotracking(options.exceptionAutotracking)
             .installAutotracking(options.installAutotracking)
