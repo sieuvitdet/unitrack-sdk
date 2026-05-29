@@ -55,8 +55,9 @@ PKG_PRODUCTS.each do |product|
   target.package_product_dependencies << dep
 end
 
-# To run on a REAL DEVICE, pass DEV_TEAM=<team id>. Without it: simulator only.
-dev_team = ENV['DEV_TEAM']
+# To run on a REAL DEVICE we sign with this Apple Development team. Override with
+# DEV_TEAM=<id>, or DEV_TEAM= (empty) to disable signing (simulator only).
+dev_team = ENV.fetch('DEV_TEAM', '7755R4CX4U')
 
 target.build_configurations.each do |c|
   c.build_settings.merge!(

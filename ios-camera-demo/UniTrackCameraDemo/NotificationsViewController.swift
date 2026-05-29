@@ -6,6 +6,7 @@
 
 import UIKit
 import UserNotifications
+import UniTrack
 
 final class NotificationsViewController: UIViewController {
 
@@ -22,6 +23,21 @@ final class NotificationsViewController: UIViewController {
             },
             UI.button("👆  Mô phỏng bấm vào thông báo", id: "notif_clicked") {
                 CameraAnalytics.notificationClicked(cameraId: "cam_front_door", type: "motion")
+            },
+            // Open the MobiX app via its custom-scheme deeplink. iOS routes
+            // mobix:// to whichever installed app registered that scheme (the
+            // real MobiX app). The deeplink_opened event then shows up on the
+            // MobiX project in the portal — emitted by UniTrack inside MobiX.
+            UI.button("🔗  Mở MobiX qua deeplink", id: "open_mobix_deeplink") {
+                let urlStr = "mobix://open?screen=detail&id=123"
+                UniTrack.trackDeeplink(urlStr, source: "camera_demo")
+                if let url = URL(string: urlStr) {
+                    UIApplication.shared.open(url, options: [:]) { ok in
+                        if !ok { CameraAnalytics.applicationError(
+                            domain: "Deeplink",
+                            message: "Không mở được \(urlStr) — chưa cài MobiX?") }
+                    }
+                }
             },
             UI.button("💥  Báo lỗi xử lý (non-fatal)", id: "report_error") {
                 CameraAnalytics.applicationError(domain: "StreamDecoder",
