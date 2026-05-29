@@ -1,12 +1,10 @@
-// Mobix UniTrack — React Native demo.
+// Mobix UniTrack — React Native CAMERA demo (mirrors the iOS/Android camera demos).
 //
-// THE ENTIRE TRACKING SETUP IS HERE. The screens contain ZERO tracking code.
-// Three pieces wire up everything:
-//   1. UniTrack.initialize(...)            → SDK + transport to the portal
-//   2. createNavigationTracker()           → screen_view per route
-//   3. <UniTrackTapBoundary>               → every tap (button name + screen)
-// Network requests (fetch) are auto-captured by the SDK, with the button that
-// triggered them mirrored in. Uncaught JS errors are reported as `crash`.
+// ALL tracking setup is here; the screens have zero tracking plumbing:
+//   1. UniTrack.initialize(...)      → SDK + transport to the portal
+//   2. createNavigationTracker()     → screen_view per route
+//   3. <UniTrackTapBoundary>         → every tap (button testID + screen)
+// fetch() is auto-captured as network_request; uncaught JS errors → `crash`.
 
 import React, {useEffect} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
@@ -17,24 +15,24 @@ import UniTrack, {
   UniTrackRemoteConfig,
 } from '@unitrack/react-native';
 
-import HomeScreen from './src/HomeScreen';
-import ProductsScreen from './src/ProductsScreen';
-import ProductDetailScreen from './src/ProductDetailScreen';
-import NetworkScreen from './src/NetworkScreen';
+import CamerasScreen from './src/CamerasScreen';
+import LiveStreamScreen from './src/LiveStreamScreen';
+import VmsScreen from './src/VmsScreen';
+import PairingScreen from './src/PairingScreen';
+import AlertsScreen from './src/AlertsScreen';
 import SettingsScreen from './src/SettingsScreen';
+import {CameraAnalytics} from './src/cameraAnalytics';
 
 const Stack = createNativeStackNavigator();
 const nav = createNavigationTracker();
 
 declare const ErrorUtils: any;
 
-const API_KEY = 'utk_FPxp0q7RK3jja0CnFp3WEx9Q';
+const API_KEY = 'utk_Nfn_ex3MZRNL1Yith0GL0X5q';   // project "Demo React Native"
 const CONFIG_URL = 'https://mobix.asia/event-tracking-mobile/config';
 
 export default function App() {
   useEffect(() => {
-    // Fetch remote config first (cache/default fallback), install rewrite rules,
-    // then initialize the SDK from it — so config/rules change without a rebuild.
     (async () => {
       const cfg = await UniTrackRemoteConfig.fetch(API_KEY, CONFIG_URL, 3000);
       UniTrack.setEventRules(UniTrackRemoteConfig.toEventRules(cfg));
@@ -46,10 +44,11 @@ export default function App() {
         samplingRate: (s.samplingRate as number) ?? 1.0,
         autoCapture: (s.autoCapture as boolean) ?? true,
       });
+      await UniTrack.identify('rn_user_alpha', {plan: 'b2c_premium', region: 'VN'});
+      CameraAnalytics.sessionStarted();
     })();
 
-    // Report uncaught JS errors as crash events. (A JS throw is not a native
-    // signal, so the native crash handler never sees it — hook it here.)
+    // Uncaught JS errors → crash (a JS throw is not a native signal).
     const prior = ErrorUtils?.getGlobalHandler?.();
     ErrorUtils?.setGlobalHandler?.((error: any, isFatal?: boolean) => {
       UniTrack.track('crash', {
@@ -70,11 +69,12 @@ export default function App() {
         ref={nav.ref}
         onReady={nav.onReady}
         onStateChange={nav.onStateChange}>
-        <Stack.Navigator initialRouteName="Home">
-          <Stack.Screen name="Home" component={HomeScreen} options={{title: 'Mobix RN Demo'}} />
-          <Stack.Screen name="Products" component={ProductsScreen} options={{title: 'Cửa hàng'}} />
-          <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{title: 'Chi tiết'}} />
-          <Stack.Screen name="Network" component={NetworkScreen} options={{title: 'Network demo'}} />
+        <Stack.Navigator initialRouteName="Cameras">
+          <Stack.Screen name="Cameras" component={CamerasScreen} options={{title: 'Cameras'}} />
+          <Stack.Screen name="LiveStream" component={LiveStreamScreen} options={{title: 'Live stream'}} />
+          <Stack.Screen name="VMS" component={VmsScreen} options={{title: 'VMS (B2B)'}} />
+          <Stack.Screen name="Pairing" component={PairingScreen} options={{title: 'Thêm Camera'}} />
+          <Stack.Screen name="Alerts" component={AlertsScreen} options={{title: 'Cảnh báo'}} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{title: 'Cài đặt'}} />
         </Stack.Navigator>
       </NavigationContainer>

@@ -19,3 +19,13 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Resolve the UniTrack core SDK (io.unitrack:sdk) from mavenLocal — we publish
+// the locally-fixed core there with `./gradlew :unitrack:publishToMavenLocal`,
+// so the RN module's `implementation 'io.unitrack:sdk:1.0.0'` picks up the
+// device-tested fixes (HTTP transport, JNI, db_path escape, screen names).
+allprojects {
+    repositories {
+        mavenLocal()
+    }
+}
