@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 11+ package visibility: declare the mobix:// deeplink intent so
+         we can launch the MobiX app (otherwise startActivity is filtered out). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mobix" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".DemoApp"
+        android:allowBackup="true"
+        android:label="UniTrack Camera Demo"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Material3.DayNight">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="UniTrack Camera Demo">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".LiveStreamActivity"
+            android:exported="false"
+            android:label="Live stream" />
+
+    </application>
+
+</manifest>

@@ -1,0 +1,53 @@
+// UniTrack Android demo app.
+//
+// A tiny multi-screen app that exercises the SDK's auto-capture:
+//   • screen_view  — every Activity / Fragment is tracked on resume (no code)
+//   • tap          — button taps are captured via the Window.Callback hook;
+//                    give each view an android:id so the element_key is readable
+//   • network_request — OkHttp calls captured via OkHttpTracker.attach(client)
+//   • crash / json_parse_error / custom events — triggered by demo buttons
+//
+// Depends on the SDK module by path (project(':unitrack')), so it builds the
+// native lib too — run it from this Gradle build (platforms/android).
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.unitrack.demo'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.unitrack.demo'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions { jvmTarget = '11' }
+
+    buildFeatures { viewBinding false }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+
+dependencies {
+    implementation project(':unitrack')
+    // Snowplow provider — added at runtime only when the portal's remote config
+    // enables it (see CameraAnalytics.start). Firebase is left out of the demo
+    // because it requires a google-services.json; the code path is documented.
+    implementation project(':unitrack-snowplow')
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.fragment:fragment-ktx:1.6.2'
+    implementation 'com.google.android.material:material:1.11.0'
+    // The app builds its own OkHttp client; the SDK wraps it via OkHttpTracker.attach.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
