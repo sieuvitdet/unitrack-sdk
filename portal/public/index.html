@@ -1407,7 +1407,10 @@ async function renderSessions(pid){
 // inherit the screen that was active when they fired.
 const NET_WINDOW_MS = 6000;
 function buildSessionTree(journey){
-  const PASSIVE = new Set(['screen_view','screen_load_completed','screen_end']);
+  // Screen lifecycle events are navigation markers, not user actions — keep
+  // them out of the per-screen action list. (screen_start/screen_end are the
+  // default names; a renamed pair is detected below by its props shape.)
+  const PASSIVE = new Set(['screen_view','screen_load_completed','screen_end','screen_start','session_start','session_started','session_end','session_ended','app_start','app_foreground','app_background']);
   // First pass: assign every step an effective screen (network inherits current).
   let curScreen = null;
   const steps = journey.map(j=>{

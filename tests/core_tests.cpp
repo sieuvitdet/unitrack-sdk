@@ -219,6 +219,7 @@ static void test_c_api_end_to_end() {
         "{\"db_path\":\"/tmp/ut_e2e.db\","
         " \"batch_size\":3,"
         " \"flush_interval_ms\":100,"
+        " \"screen_lifecycle\":false,"   // this test checks track/tap/net, not screen events
         " \"sampling_rate\":1.0}";
     ut_context* ctx = ut_init("test-key", cfg, UT_PLATFORM_IOS);
     CHECK(ctx != nullptr, "ut_init");
@@ -312,6 +313,54 @@ static void test_session_boundary() {
     CHECK(e.prev_reason == SessionEndReason::manual_reset, "session: manual_reset reason preserved");
 }
 
+// Screen lifecycle: switching screens should emit screen_end (for the screen
+// being left, with dwell_ms) + screen_view + screen_start (for the new one),
+// and the start/end event names must be renameable via config.
+static void test_screen_lifecycle() {
+    printf("test_screen_lifecycle\n");
+    std::remove("/tmp/ut_screen.db");
+    g_http_calls.store(0);
+    g_last_payload.clear();
+
+    // Rename the lifecycle events to a custom taxonomy.
+    const char* cfg =
+        "{\"db_path\":\"/tmp/ut_screen.db\","
+        " \"batch_size\":50,"          // hold everything in one batch
+        " \"flush_interval_ms\":100,"
+        " \"screen_lifecycle\":true,"
+        " \"screen_start_event\":\"page_enter\","
+        " \"screen_end_event\":\"page_leave\","
+        " \"sampling_rate\":1.0}";
+    ut_context* ctx = ut_init("test-key", cfg, UT_PLATFORM_IOS);
+    CHECK(ctx != nullptr, "screen: ut_init");
+    ut_set_http_transport(ctx, mock_http, nullptr);
+
+    ut_set_screen(ctx, "Home");                 // first screen: enter only
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    ut_set_screen(ctx, "Detail");               // leave Home (+dwell), enter Detail
+    ut_set_screen(ctx, "Detail");               // same screen → no event
+    ut_flush(ctx);
+
+    for (int i = 0; i < 30 && g_http_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    const std::string& p = g_last_payload;
+    CHECK(g_http_calls.load() >= 1, "screen: HTTP send happened");
+    CHECK(p.find("page_enter") != std::string::npos, "screen: renamed start event present");
+    CHECK(p.find("page_leave") != std::string::npos, "screen: renamed end event present");
+    CHECK(p.find("\"screen_start\"") == std::string::npos, "screen: default start name NOT used");
+    CHECK(p.find("dwell_ms") != std::string::npos, "screen: end carries dwell_ms");
+    CHECK(p.find("screen_view") != std::string::npos, "screen: screen_view kept for back-compat");
+    // Home should have a leave event; Detail should have an enter event.
+    CHECK(p.find("\"screen\":\"Home\"") != std::string::npos, "screen: Home tracked");
+    CHECK(p.find("\"from\":\"Home\"") != std::string::npos, "screen: Detail start records from=Home");
+
+    ut_shutdown(ctx);
+    std::remove("/tmp/ut_screen.db");
+    std::remove("/tmp/ut_screen.db-shm");
+    std::remove("/tmp/ut_screen.db-wal");
+}
+
 int main() {
     printf("UniTrack core tests\n");
     printf("===================\n");
@@ -324,6 +373,7 @@ int main() {
     test_backoff();
     test_crash_handler_flush();
     test_session_boundary();
+    test_screen_lifecycle();
     test_c_api_end_to_end();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);

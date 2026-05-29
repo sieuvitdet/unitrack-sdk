@@ -109,6 +109,13 @@ Config Config::from_json(const std::string& api_key, const std::string& json) {
     if (find_bool(json, "enabled", b))         c.enabled         = b;
     if (find_bool(json, "auto_capture", b))    c.auto_capture    = b;
     if (find_bool(json, "journey_capture", b)) c.journey_capture = b;
+    if (find_bool(json, "screen_lifecycle", b)) c.screen_lifecycle = b;
+
+    // Optional custom names for the screen lifecycle events (renameable taxonomy).
+    s = find_string(json, "screen_start_event");
+    if (!s.empty()) c.screen_start_event = s;
+    s = find_string(json, "screen_end_event");
+    if (!s.empty()) c.screen_end_event = s;
 
     return c;
 }

@@ -79,6 +79,7 @@ private:
 
     std::mutex       state_mu_;
     std::string      current_screen_;
+    long long        screen_entered_at_ms_ = 0;  // when current_screen_ was entered (dwell)
     std::string      user_id_;
     std::string      user_traits_json_ = "{}";
     std::string      device_json_;        // device/app metadata, attached to every event

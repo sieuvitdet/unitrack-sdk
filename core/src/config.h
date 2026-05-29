@@ -24,6 +24,16 @@ struct Config {
     bool        journey_capture   = true;
     int         session_timeout_ms = 30 * 60 * 1000;  // 30 min
 
+    // Screen lifecycle. When set_screen() switches screens, the Tracker emits a
+    // screen_view (always, back-compat) plus — when screen_lifecycle is on — a
+    // "screen_end" for the screen being left (carrying dwell_ms = time spent on
+    // it) and a "screen_start" for the one being entered. The event NAMES are
+    // configurable so a team can map them onto their own taxonomy without an
+    // app rebuild (e.g. "page_enter" / "page_leave").
+    bool        screen_lifecycle   = true;
+    std::string screen_start_event = "screen_start";
+    std::string screen_end_event   = "screen_end";
+
     // Exponential backoff for failed flushes. After a failed send, an event is
     // not retried until now + min(retry_base_ms * 2^(retry_count-1), retry_max_ms),
     // with jitter, so a downed server is not hammered every flush interval.

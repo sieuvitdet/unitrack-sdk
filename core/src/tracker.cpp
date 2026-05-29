@@ -107,13 +107,34 @@ void Tracker::track(const std::string& event_name, const std::string& props_json
 }
 
 void Tracker::set_screen(const std::string& screen_name) {
+    std::string previous;
+    long long dwell_ms = 0;
+    long long now = current_time_ms();
     {
         std::lock_guard<std::mutex> lock(state_mu_);
-        if (current_screen_ == screen_name) return;
+        if (current_screen_ == screen_name) return;   // same screen → nothing
+        previous = current_screen_;
+        if (!previous.empty() && screen_entered_at_ms_ > 0)
+            dwell_ms = now - screen_entered_at_ms_;
         current_screen_ = screen_name;
+        screen_entered_at_ms_ = now;
     }
-    std::string props = "{\"screen\":\"" + screen_name + "\"}";
-    track("screen_view", props);
+
+    // screen_end for the screen we're leaving (with how long we stayed on it),
+    // then screen_view (back-compat), then screen_start for the new screen.
+    // Event names for start/end are configurable so teams can map them onto
+    // their own taxonomy. The whole pair is gated by config_.screen_lifecycle.
+    if (config_.screen_lifecycle && !previous.empty()) {
+        track(config_.screen_end_event,
+              "{\"screen\":\"" + previous + "\",\"dwell_ms\":" +
+              std::to_string(dwell_ms) + "}");
+    }
+    track("screen_view", "{\"screen\":\"" + screen_name + "\"}");
+    if (config_.screen_lifecycle) {
+        track(config_.screen_start_event,
+              "{\"screen\":\"" + screen_name +
+              (previous.empty() ? "\"" : "\",\"from\":\"" + previous + "\"") + "}");
+    }
 }
 
 void Tracker::identify(const std::string& user_id, const std::string& traits_json) {
