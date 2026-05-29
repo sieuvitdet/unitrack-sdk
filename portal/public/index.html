@@ -20,6 +20,24 @@
   [hidden]{display:none !important;}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,215,150,.5)}70%{box-shadow:0 0 0 8px rgba(39,215,150,0)}100%{box-shadow:0 0 0 0 rgba(39,215,150,0)}}
+  /* Animated thin arrow connector between timeline screens: a chevron (▲) tiled
+     vertically that scrolls upward continuously (newest screen is at the top, so
+     the flow points back toward the start). Drawn as a repeating SVG background
+     on the dot column itself, so it always spans the full row height. */
+  .ide-conn{
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M8%204%20L13%2010%20L11.3%2011.2%20L8%207.2%20L4.7%2011.2%20L3%2010%20Z'%20fill='%235b8cff'/%3E%3C/svg%3E");
+    background-repeat:repeat-y;background-position:center top;background-size:16px 16px;
+    animation:ideFlowUp 0.8s linear infinite}
+  @keyframes ideFlowUp{from{background-position-y:0}to{background-position-y:-16px}}
+  @media (prefers-reduced-motion: reduce){.ide-conn{animation:none}}
+  /* Wireframe (flow/heatmap) fullscreen + pan/zoom. */
+  #wfWrap.wf-fs{position:fixed;inset:0;z-index:45;background:var(--bg);max-height:none!important;padding:0}
+  #wfWrap.wf-fs .wf-grid{height:100vh;max-height:none!important}
+  .wf-pan{position:relative;overflow:hidden;cursor:grab;background:var(--bg)}
+  .wf-pan.dragging{cursor:grabbing}
+  .wf-pan #wfSvg{transform-origin:0 0;will-change:transform}
+  .wf-zoom{position:absolute;top:10px;left:10px;z-index:6;display:flex;flex-direction:column;gap:4px}
+  .wf-zoom button{width:30px;height:30px;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:6px;cursor:pointer;font-size:15px;line-height:1}
   .wrap{padding:22px;max-width:1400px;margin:0 auto;}
   .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;}
   .btn:hover{opacity:.9;}
@@ -165,6 +183,44 @@ const fmtAgo=(ms)=>{if(!ms)return'—';const s=(Date.now()-ms)/1000;if(s<60)retu
 const fmtTime=(ms)=>new Date(ms).toLocaleString('vi-VN',{hour12:false});
 // Short, readable session id for tracing one session across tabs.
 const shortSid=(s)=>s?('#'+String(s).slice(0,8)):'—';
+
+// Friendly screen labels for the current project (class name → Vietnamese),
+// loaded once when a project opens. screenLabel('HomeScreen') → 'Trang chủ' or
+// '' if unmapped. screenDisplay() builds the "ClassName - Nhãn" display string.
+let _screenLabels = {};
+// Currently selected user filter (user_id), shared across Sessions + Wireframe.
+// '' = all users. Cache the project's user list so the selector is instant.
+let _userFilter = '';
+let _usersCache = { pid:null, users:[] };
+async function loadUsers(pid){
+  if(_usersCache.pid===pid) return _usersCache.users;
+  const r = await api(`/api/projects/${pid}/users`).catch(()=>({users:[]}));
+  _usersCache = { pid, users: r.users||[] };
+  return _usersCache.users;
+}
+// A <select> of users (id + epcode + counts) that drives _userFilter. onChange
+// re-renders the current tab. Returns the HTML; call wireUserSelect() after.
+function userSelectHtml(users){
+  const opts = ['<option value="">Tất cả user</option>'].concat(users.map(u=>{
+    const lbl = `${u.username}${u.epcode?` · ${u.epcode}`:''} (${u.session_count} session)`;
+    return `<option value="${esc(u.user_id)}" ${u.user_id===_userFilter?'selected':''}>${esc(lbl)}</option>`;
+  })).join('');
+  return `<select id="userSelect" style="height:30px;max-width:340px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12px">${opts}</select>`;
+}
+const screenLabel = (name)=> (name && _screenLabels[name]) || '';
+const screenDisplay = (name)=>{
+  const lbl = screenLabel(name);
+  return lbl ? `${name} - ${lbl}` : (name||'');
+};
+// Text used for searching a screen: both the class name and its label.
+const screenSearchText = (name)=> ((name||'') + ' ' + screenLabel(name)).toLowerCase();
+// A flow signature "A>B>C" → label each hop ("Trang chủ>..."), keeping the
+// leading "/>" route prefix intact. Falls back to the raw name when unmapped.
+const flowDisplay = (sig)=> String(sig||'').split('>').map(seg=>{
+  const name = seg.replace(/^\/?>?/,'').trim();
+  const lbl = screenLabel(name);
+  return lbl ? lbl : seg;
+}).join(' › ');
 function evTag(r){
   let p=r.properties; if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){p={};}}
   p=p||{};
@@ -263,7 +319,12 @@ function providerBadge(p){
 
 async function renderProject(){
   const pid=route.pid;
-  const [p,stats]=await Promise.all([api(`/api/projects/${pid}`),api(`/api/projects/${pid}/stats`)]);
+  const [p,stats,labels]=await Promise.all([
+    api(`/api/projects/${pid}`),
+    api(`/api/projects/${pid}/stats`),
+    api(`/api/projects/${pid}/screen-labels`).catch(()=>({labels:{}})),
+  ]);
+  _screenLabels = (labels && labels.labels) || {};
   $('#crumb').innerHTML=`· <a onclick="go({name:'projects'})">Dự án</a> / ${esc(p.name)}`;
   $('#view').innerHTML=`
     <div class="row" style="justify-content:space-between;margin-bottom:16px">
@@ -274,7 +335,42 @@ async function renderProject(){
       </div>
       <div class="row">
         <span class="keybox" title="API key">${esc(p.api_key)}</span>
+        <button class="btn ghost sm" id="provBtn" title="Bật/forward Snowplow & Firebase">⚙ Providers</button>
+        <button class="btn ghost sm" onclick="openScreenLabelsDialog(${pid})" title="Import map tên màn (JSON)">🏷 Tên màn</button>
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
+      </div>
+    </div>
+    <div class="panel" id="provPanel" style="display:none;padding:16px;margin-bottom:16px">
+      <b>Providers — forward & xem log đa nguồn</b>
+      <div class="muted" style="font-size:12px;margin:6px 0 12px">
+        Khi bật, portal hiển thị log từ provider tương ứng (nhãn màu trong bảng Log).
+      </div>
+      <label class="row" style="gap:8px"><input type="checkbox" id="provSnow"> Snowplow</label>
+      <div id="snowCfg" style="margin:6px 0 12px 24px">
+        <div class="muted" style="font-size:12px">Snowplow collector endpoint của bạn (trỏ tracker tới đây):</div>
+        <div class="keybox mono" style="display:block;margin:4px 0">${location.origin}${BASE}/sp/${esc(p.api_key)}</div>
+        <div class="muted" style="font-size:12px;margin-top:6px">Forward tới collector THẬT (để trống = chỉ thu ở portal):</div>
+        <input id="spForward" placeholder="https://collector-that.cua-ban.com" style="width:100%;margin-top:4px" value="${esc(p.sp_forward_url||'')}"/>
+      </div>
+      <label class="row" style="gap:8px"><input type="checkbox" id="provFire"> Firebase <span class="muted" style="font-size:12px">(SDK gửi bản sao về portal)</span></label>
+      <div class="row" style="margin-top:12px"><button class="btn sm" id="provSave">Lưu</button></div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <b>Map event → Snowplow schema</b>
+      <div class="muted" style="font-size:12px;margin:6px 0 10px">
+        Khi Snowplow thêm loại event mới, thêm map ở đây để portal đóng gói đúng
+        schema rồi forward — KHÔNG cần build lại app. Event đã có schema chuẩn (app
+        tự bắn) thì để <i>forward = off</i> (portal chỉ log).
+      </div>
+      <table style="margin-bottom:10px"><thead><tr>
+        <th>Event name (thô)</th><th>Mode</th><th>Schema (iglu)</th><th>Forward</th><th></th>
+      </tr></thead><tbody id="spMapRows"></tbody></table>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <input id="smName" placeholder="event_name (vd: check)" style="flex:1;min-width:120px"/>
+        <select id="smMode"><option value="self_describing">self-describing</option><option value="structured">structured</option></select>
+        <input id="smSchema" placeholder="iglu:vendor/event_check/jsonschema/1-0-0" style="flex:2;min-width:200px"/>
+        <label class="row" style="gap:4px;font-size:12px"><input type="checkbox" id="smFwd" checked> forward</label>
+        <button class="btn sm" id="smAdd">+ Thêm map</button>
       </div>
     </div>
     <div class="cards">
@@ -287,16 +383,217 @@ async function renderProject(){
       <div class="tabs">
         <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
         <div class="tab ${(!route.tab||route.tab==='sessions')?'active':''}" data-tab="sessions">Sessions</div>
+        <div class="tab ${route.tab==='wireframe'?'active':''}" data-tab="wireframe">Hành trình & Heatmap</div>
         <div class="tab ${route.tab==='agent'?'active':''}" data-tab="agent">Agent</div>
         <div class="tab ${route.tab==='tree'?'active':''}" data-tab="tree">Cây class → event</div>
+        <div class="tab ${route.tab==='config'?'active':''}" data-tab="config">Config (remote)</div>
       </div>
       <div id="tabBody"></div>
     </div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>go({tab:t.dataset.tab}));
+  // Providers settings panel.
+  const provs=(()=>{ try{return JSON.parse(p.providers||'[]');}catch(_){return [];} })();
+  $('#provSnow').checked=provs.includes('snowplow');
+  $('#provFire').checked=provs.includes('firebase');
+  $('#provBtn').onclick=()=>{ const el=$('#provPanel'); el.style.display=el.style.display==='none'?'block':'none'; };
+  $('#provSave').onclick=async()=>{
+    const list=[]; if($('#provSnow').checked)list.push('snowplow'); if($('#provFire').checked)list.push('firebase');
+    await api(`/api/projects/${pid}/providers`,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({providers:list, sp_forward_url:$('#spForward').value.trim()})});
+    toast('Đã lưu cấu hình providers');
+  };
+  renderSpMaps(pid);
+  $('#smAdd').onclick=async()=>{
+    const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
+    const mode=$('#smMode').value, schema=$('#smSchema').value.trim();
+    if(mode==='self_describing' && !schema){toast('Self-describing cần schema iglu','err');return;}
+    try{
+      await api(`/api/projects/${pid}/sp-maps`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({event_name:name,mode,schema,forward:$('#smFwd').checked})});
+      $('#smName').value='';$('#smSchema').value='';
+      toast('Đã lưu map'); renderSpMaps(pid);
+    }catch(e){toast('Lưu map thất bại: '+e.message,'err');}
+  };
   if(route.tab==='logs') renderLogs(pid);
+  else if(route.tab==='wireframe') renderWireframe(pid);
   else if(route.tab==='agent') renderAgent(pid);
   else if(route.tab==='tree') renderTree(pid);
+  else if(route.tab==='config') renderConfig(pid);
   else renderSessions(pid);   // default tab = Sessions
+}
+
+async function renderSpMaps(pid){
+  let maps=[]; try{ maps=await api(`/api/projects/${pid}/sp-maps`); }catch(_){}
+  const tb=$('#spMapRows'); if(!tb)return;
+  tb.innerHTML = maps.length ? maps.map(m=>`
+    <tr>
+      <td class="mono">${esc(m.event_name)}</td>
+      <td><span class="pill">${esc(m.mode)}</span></td>
+      <td class="mono muted" style="word-break:break-all">${esc(m.schema)||'—'}</td>
+      <td>${m.forward?'<span style="color:var(--accent2)">✓ on</span>':'<span class="muted">off</span>'}</td>
+      <td><button class="btn ghost sm smDel" data-n="${esc(m.event_name)}">×</button></td>
+    </tr>`).join('') : '<tr><td colspan="5" class="muted" style="padding:10px">Chưa có map. Event UniTrack sẽ không tự forward sang Snowplow.</td></tr>';
+  tb.querySelectorAll('.smDel').forEach(b=>b.onclick=async()=>{
+    await fetch(`${BASE}/api/projects/${pid}/sp-maps/${encodeURIComponent(b.dataset.n)}`,{method:'DELETE'});
+    toast('Đã xoá map'); renderSpMaps(pid);
+  });
+}
+
+// ---------- remote config editor (Snowplow / Firebase / SDK) ----------
+async function renderConfig(pid){
+  const c = await api(`/api/projects/${pid}/config`);
+  const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{});
+  const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
+  $('#tabBody').innerHTML = `
+    <div style="padding:16px;max-width:760px">
+      <div class="muted" style="font-size:12px;margin-bottom:14px">
+        App kéo cấu hình này về lúc khởi tạo (qua <span class="mono">GET /config</span>).
+        Đổi ở đây → app áp dụng lần mở sau, <b>không cần build lại</b>. Phiên bản: <b>v${c.version}</b>
+      </div>
+
+      <h3 style="margin:0 0 8px;font-size:14px">Endpoint & SDK</h3>
+      <label>Ingest endpoint</label>
+      <input id="cfEndpoint" style="width:100%" value="${esc(c.endpoint)}"/>
+      <div class="row" style="gap:10px;margin-top:8px;flex-wrap:wrap">
+        <div><label>batchSize</label><input id="cfBatch" type="number" style="width:90px" value="${s.batchSize??10}"/></div>
+        <div><label>flushIntervalMs</label><input id="cfFlush" type="number" style="width:110px" value="${s.flushIntervalMs??3000}"/></div>
+        <div><label>logLevel</label><select id="cfLog"><option ${s.logLevel==='debug'?'selected':''}>debug</option><option ${s.logLevel!=='debug'?'selected':''}>warn</option></select></div>
+      </div>
+      <div class="row" style="gap:14px;margin-top:8px">
+        <label class="row" style="gap:5px"><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
+        <label class="row" style="gap:5px"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> screens</label>
+        <label class="row" style="gap:5px"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> taps</label>
+        <label class="row" style="gap:5px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> network</label>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}> Snowplow</label></h3>
+      <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
+        <div style="flex:2"><label>userContext schema (iglu)</label><input id="cfSpSchema" style="width:100%" value="${esc(sp.userContextSchema||'')}"/></div>
+      </div>
+      <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
+      <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}> Firebase</label></h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Kéo-thả <b>google-services.json</b> hoặc <b>GoogleService-Info.plist</b> vào ô dưới để tự điền:</div>
+      <div id="cfFbDrop" style="border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px">Thả file vào đây</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><label>GOOGLE_APP_ID (appId)</label><input id="cfFbApp" style="width:100%" value="${esc(fbo.appId||'')}"/></div>
+        <div style="flex:1;min-width:160px"><label>GCM_SENDER_ID</label><input id="cfFbSender" style="width:100%" value="${esc(fbo.gcmSenderId||'')}"/></div>
+      </div>
+      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:8px">
+        <div style="flex:1;min-width:160px"><label>API_KEY</label><input id="cfFbKey" style="width:100%" value="${esc(fbo.apiKey||'')}"/></div>
+        <div style="flex:1;min-width:140px"><label>PROJECT_ID</label><input id="cfFbProj" style="width:100%" value="${esc(fbo.projectId||'')}"/></div>
+        <div style="flex:1;min-width:140px"><label>BUNDLE_ID</label><input id="cfFbBundle" style="width:100%" value="${esc(fbo.bundleId||'')}"/></div>
+      </div>
+      <label style="margin-top:8px">superProperties (mọi event)</label>
+      <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
+      <label>userProperties (audience)</label>
+      <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 4px;font-size:14px">Event registry</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Danh sách event hợp lệ + schema. (Gán nhanh ở tab "Cây class → event".)</div>
+      <pre id="cfReg" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.event_registry||[],null,2))}</pre>
+
+      <h3 style="margin:14px 0 4px;font-size:14px">Rewrite rules (Phase 2)</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">SDK đổi event auto-capture → tên nghiệp vụ ngay tại app. Tạo/sửa ở tab "Cây class → event".</div>
+      <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.rules||[],null,2))}</pre>
+
+      <div class="row" style="margin-top:16px"><button class="btn" id="cfSave">Lưu config</button></div>
+    </div>`;
+
+  const parseKV=(id)=>{const o={};$(id).value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();});return o;};
+
+  // Firebase file drag-drop → parse json/plist, fill inputs.
+  const drop=$('#cfFbDrop');
+  ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
+  drop.addEventListener('dragleave',()=>drop.style.borderColor='var(--line)');
+  drop.addEventListener('drop',e=>{
+    e.preventDefault();drop.style.borderColor='var(--line)';
+    const f=e.dataTransfer.files[0]; if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{ try{ fillFirebaseFromFile(f.name, r.result); toast('Đã đọc '+f.name);}catch(err){toast('File không hợp lệ','err');} };
+    r.readAsText(f);
+  });
+  function fillFirebaseFromFile(name, text){
+    if(name.endsWith('.json')){
+      const j=JSON.parse(text); const cli=(j.client&&j.client[0])||{};
+      $('#cfFbApp').value   = cli.client_info?.mobilesdk_app_id || '';
+      $('#cfFbSender').value= j.project_info?.project_number || '';
+      $('#cfFbKey').value   = (cli.api_key&&cli.api_key[0]?.current_key) || '';
+      $('#cfFbProj').value  = j.project_info?.project_id || '';
+      $('#cfFbBundle').value= cli.client_info?.android_client_info?.package_name || '';
+    } else { // .plist (XML) — pull values by key
+      const get=(k)=>{const m=text.match(new RegExp('<key>'+k+'</key>\\s*<string>([^<]*)</string>'));return m?m[1]:'';};
+      $('#cfFbApp').value   = get('GOOGLE_APP_ID');
+      $('#cfFbSender').value= get('GCM_SENDER_ID');
+      $('#cfFbKey').value   = get('API_KEY');
+      $('#cfFbProj').value  = get('PROJECT_ID');
+      $('#cfFbBundle').value= get('BUNDLE_ID');
+    }
+  }
+
+  $('#cfSave').onclick=async()=>{
+    const body={
+      endpoint: $('#cfEndpoint').value.trim(),
+      sdk_config:{ batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
+        autoCapture:$('#cfAuto').checked, trackScreens:$('#cfScreens').checked, trackTaps:$('#cfTaps').checked, trackNetwork:$('#cfNet').checked },
+      snowplow:{ enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
+        userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx') },
+      firebase:{ enabled:$('#cfFbOn').checked,
+        options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
+          projectId:$('#cfFbProj').value.trim(), bundleId:$('#cfFbBundle').value.trim() },
+        superProperties:parseKV('#cfFbSuper'), userProperties:parseKV('#cfFbUser') },
+    };
+    const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
+  };
+}
+
+// Import / edit the screen-label map (class name → Vietnamese). Accepts a JSON
+// object pasted in; saved per-project on the backend and applied everywhere.
+async function openScreenLabelsDialog(pid){
+  closeAllUtilDialogs();
+  const cur = JSON.stringify(_screenLabels||{}, null, 2);
+  const dlg = document.createElement('dialog'); dlg.className='ut-util-dlg';
+  dlg.style.cssText='width:560px;max-width:92vw;z-index:100';
+  dlg.innerHTML = `
+    <div class="dlg-h">🏷 Map tên màn (JSON)
+      <button class="lbl-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b">
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Dán JSON dạng <code>{"HomeScreen":"Trang chủ", ...}</code>. Portal sẽ hiển thị <b>ClassName - Nhãn</b> và cho phép tìm theo cả hai.</div>
+      <textarea id="lblJson" style="width:100%;height:300px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:monospace;font-size:12px;white-space:pre">${esc(cur)}</textarea>
+      <div id="lblErr" style="color:var(--danger);font-size:12px;margin-top:6px;min-height:16px"></div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px">
+        <button class="btn ghost sm lbl-close">Hủy</button>
+        <button class="btn sm" id="lblSave">Lưu</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
+  const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
+  dlg.querySelectorAll('.lbl-close').forEach(b=>b.onclick=kill);
+  dlg.querySelector('#lblSave').onclick = async ()=>{
+    const errEl = dlg.querySelector('#lblErr');
+    let map;
+    try {
+      map = JSON.parse(dlg.querySelector('#lblJson').value || '{}');
+      if(typeof map!=='object' || Array.isArray(map)) throw new Error('phải là một object JSON');
+    } catch(e){ errEl.textContent = 'JSON không hợp lệ: '+e.message; return; }
+    try {
+      const r = await api(`/api/projects/${pid}/screen-labels`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({labels:map})});
+      _screenLabels = (r && r.labels) || {};
+      kill();
+      // Refresh whatever view is open so the new labels show up.
+      if(document.getElementById('ideOverlay') && document.getElementById('ideOverlay').style.display!=='none' && _ideState){
+        openSessionIDE(_ideState.pid, _ideState.sid);
+      } else { render(); }
+    } catch(e){ errEl.textContent = 'Lưu thất bại: '+(e.message||e); }
+  };
 }
 
 // ── Agent tab: root-agent config + reports (Phase 3/4/5) ───────────────────
@@ -511,10 +808,27 @@ function stuckColor(score){
   return '#16a34a';                    // green
 }
 
+// Heatmap color: cold (blue) → warm (orange) → hot (red) by a 0..1 score.
+function heatColor(h){
+  if(h >= 0.75) return '#dc2626';   // hot
+  if(h >= 0.45) return '#f97316';   // warm
+  if(h >= 0.2)  return '#f59e0b';   // mild
+  if(h > 0)     return '#3b82f6';   // cool
+  return '#475569';                 // none
+}
+let _wfMode = 'flow';   // 'flow' = stuck graph, 'heat' = engagement heatmap
 async function renderWireframe(pid){
-  const g = await api(`/api/projects/${pid}/flowgraph`);
+  const users = await loadUsers(pid);
+  const qs = _userFilter ? `?user=${encodeURIComponent(_userFilter)}` : '';
+  const g = await api(`/api/projects/${pid}/flowgraph${qs}`);
   if(!g.nodes || !g.nodes.length){
-    $('#tabBody').innerHTML=`<div class="empty">Chưa có flow graph. Cần session journey (tab Sessions). App build mới sẽ gửi dữ liệu để dựng wireframe.</div>`;
+    $('#tabBody').innerHTML=`
+      <div class="filter-bar" style="gap:10px;align-items:center">
+        <span class="muted" style="font-size:12px">👤 User:</span>${userSelectHtml(users)}
+      </div>
+      <div class="empty">Chưa có hành trình cho bộ lọc này. Cần session journey (tab Sessions).</div>`;
+    const sel0=document.getElementById('userSelect');
+    if(sel0) sel0.onchange=()=>{ _userFilter=sel0.value; renderWireframe(pid); };
     return;
   }
   const { pos, level, NODE_W, NODE_H, cw, ch } = layoutGraph(g);
@@ -568,52 +882,99 @@ async function renderWireframe(pid){
     }
   }).join('');
 
+  const heatMode = _wfMode==='heat';
   const nodeSvg = g.nodes.map(n=>{
     const p=pos.get(n.screen); if(!p) return '';
-    const size = 0.75 + (n.visits/maxVisits)*0.5;   // 0.75x..1.25x scale
+    // Flow mode: size by visits, color by stuck_score. Heatmap mode: size +
+    // color by engagement heat (how heavily the user uses this screen).
+    const size = heatMode ? (0.75 + (n.heat||0)*0.6) : (0.75 + (n.visits/maxVisits)*0.5);
     const w = NODE_W*size, h = NODE_H*size;
     const x = p.x + (NODE_W-w)/2, y = p.y + (NODE_H-h)/2;
-    const fill = stuckColor(n.stuck_score);
+    const fill = heatMode ? heatColor(n.heat||0) : stuckColor(n.stuck_score);
+    const fillOp = heatMode ? (0.12 + (n.heat||0)*0.55) : 0.18;   // hotter = more solid
     const labelMax = 16;
-    const label = n.screen.length>labelMax ? n.screen.slice(0,labelMax-1)+'…' : n.screen;
+    const lbl = screenLabel(n.screen);
+    const shown = lbl || n.screen;
+    const label = shown.length>labelMax ? shown.slice(0,labelMax-1)+'…' : shown;
     const badge = n.crash_count>0 ? '⚠ ' : '';
-    return `<g class="wf-node" data-screen="${esc(n.screen)}" data-visits="${n.visits}" data-exits="${n.exits}" data-exit-pct="${n.exit_pct}" data-crash="${n.crash_count}" data-stuck="${n.stuck_score}" data-dwell="${n.avg_dwell_ms}" style="cursor:pointer">
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${fill}" fill-opacity="0.18" stroke="${fill}" stroke-width="2"/>
+    const sub = heatMode
+      ? `${n.tap_count} tap · ${n.visits} session`
+      : `${n.visits} session · exit ${n.exit_pct}%`;
+    return `<g class="wf-node" data-screen="${esc(n.screen)}" data-visits="${n.visits}" data-exits="${n.exits}" data-exit-pct="${n.exit_pct}" data-crash="${n.crash_count}" data-stuck="${n.stuck_score}" data-dwell="${n.avg_dwell_ms}" data-taps="${n.tap_count||0}" data-heat="${n.heat||0}" style="cursor:pointer">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${fill}" fill-opacity="${fillOp.toFixed(2)}" stroke="${fill}" stroke-width="2"/>
       <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2-4}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">${badge}${esc(label)}</text>
-      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2+14}" text-anchor="middle" fill="var(--muted)" font-size="11">${n.visits} session · exit ${n.exit_pct}%</text>
+      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2+14}" text-anchor="middle" fill="var(--muted)" font-size="11">${sub}</text>
     </g>`;
   }).join('');
 
-  // Fetch session list for the replay sidebar in parallel with rendering.
-  const sessResp = await api(`/api/projects/${pid}/sessions`).catch(()=>({sessions:[]}));
-  const sessions = (sessResp.sessions||[]).slice(0, 200);
-  // Sidebar: newest first, badge crash/stuck.
-  const sessListHtml = sessions.length ? sessions.map(s=>{
-    const dot = s.crashed ? '#dc2626' : (s.ended_reason==='inferred_terminate' ? '#f59e0b' : '#5b8cff');
-    return `<div class="wf-sess" data-sid="${esc(s.session_id)}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px">
-      <div style="display:flex;justify-content:space-between;gap:6px;align-items:center">
-        <span style="color:${dot};font-weight:600">●</span>
-        <span class="mono" style="color:var(--accent2)">${shortSid(s.session_id)}</span>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right" class="mono muted">${esc((s.flow_signature||'').slice(0,24))||'(no flow)'}</span>
-      </div>
-      <div class="muted" style="font-size:10px;margin-top:2px">${s.started_at?fmtTime(s.started_at):''} · ${fmtDur(s.duration_ms)} · ${esc(s.ended_reason)}</div>
-    </div>`;
-  }).join('') : '<div class="empty" style="padding:20px;font-size:12px">Chưa có session</div>';
+  // Right sidebar content depends on the mode:
+  //  • flow → session list (click to replay)
+  //  • heat → button heatmap (most-tapped element_keys for the user)
+  let rightTitle, rightBody;
+  if(heatMode){
+    const els = g.elements || [];
+    rightTitle = '🔥 Button được dùng nhiều nhất';
+    rightBody = els.length ? els.slice(0,60).map(e=>{
+      const c = heatColor(e.heat);
+      return `<div style="padding:8px 10px;border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.element_key)}">${esc(e.element_key)}</span>
+          <b style="color:${c}">${e.taps}</b>
+        </div>
+        <div style="height:6px;border-radius:4px;background:var(--line);margin-top:4px;overflow:hidden"><div style="height:100%;width:${Math.max(6,e.heat*100)}%;background:${c}"></div></div>
+        <div class="muted" style="font-size:10px;margin-top:2px">${esc(screenLabel(e.screen)||e.screen)}</div>
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:20px;font-size:12px">Chưa có lượt tap nào.</div>';
+  } else {
+    const sessResp = await api(`/api/projects/${pid}/sessions${qs}`).catch(()=>({sessions:[]}));
+    const sessions = (sessResp.sessions||[]).slice(0, 200);
+    rightTitle = 'Sessions — click để replay';
+    rightBody = sessions.length ? sessions.map(s=>{
+      const dot = s.crashed ? '#dc2626' : (s.ended_reason==='inferred_terminate' ? '#f59e0b' : '#5b8cff');
+      return `<div class="wf-sess" data-sid="${esc(s.session_id)}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:center">
+          <span style="color:${dot};font-weight:600">●</span>
+          <span class="mono" style="color:var(--accent2)">${shortSid(s.session_id)}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right" class="mono muted">${esc((s.flow_signature||'').slice(0,24))||'(no flow)'}</span>
+        </div>
+        <div class="muted" style="font-size:10px;margin-top:2px">${s.started_at?fmtTime(s.started_at):''} · ${fmtDur(s.duration_ms)} · ${esc(s.ended_reason)}</div>
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:20px;font-size:12px">Chưa có session</div>';
+  }
 
-  $('#tabBody').innerHTML = `
-    <div class="filter-bar" style="justify-content:space-between">
-      <span class="muted" style="font-size:12px">
-        ${g.totals.sessions} session · ${g.totals.screens} màn · ${g.totals.transitions} chuyển màn · entry: <b>${esc(g.entry_screen)||'—'}</b>
-      </span>
-      <span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">
+  const legend = heatMode
+    ? `<span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">Mức dùng:
+        <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:50%;vertical-align:middle"></span> ít</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;vertical-align:middle"></span> vừa</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#f97316;border-radius:50%;vertical-align:middle"></span> nhiều</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:50%;vertical-align:middle"></span> rất nhiều</span>
+      </span>`
+    : `<span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">
         <span><span style="display:inline-block;width:10px;height:10px;background:#16a34a;border-radius:50%;vertical-align:middle"></span> ổn</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:#facc15;border-radius:50%;vertical-align:middle"></span> theo dõi</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;vertical-align:middle"></span> nghẽn</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:50%;vertical-align:middle"></span> crash/stuck</span>
+      </span>`;
+
+  $('#tabBody').innerHTML = `
+   <div id="wfWrap">
+    <div class="filter-bar" style="gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="muted" style="font-size:12px">👤</span>${userSelectHtml(users)}
+      <span style="display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden">
+        <button id="wfModeFlow" style="border:none;padding:6px 12px;font-size:12px;cursor:pointer;background:${heatMode?'var(--bg)':'var(--accent)'};color:${heatMode?'var(--muted)':'#fff'}">Luồng (flow)</button>
+        <button id="wfModeHeat" style="border:none;padding:6px 12px;font-size:12px;cursor:pointer;background:${heatMode?'var(--accent)':'var(--bg)'};color:${heatMode?'#fff':'var(--muted)'}">🔥 Heatmap</button>
       </span>
+      <button class="btn ghost sm" id="wfFsBtn" title="Mở rộng / thu gọn">⛶ Toàn màn hình</button>
+      <span class="muted" style="font-size:12px;margin-left:auto">${g.totals.sessions} session · ${g.totals.screens} màn · ${g.totals.taps||0} tap · entry: <b>${esc(g.entry_screen)||'—'}</b></span>
+      ${legend}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 280px;gap:0;max-height:70vh">
-      <div style="position:relative;overflow:auto;background:var(--bg);border-right:1px solid var(--line)">
+    <div class="wf-grid" style="display:grid;grid-template-columns:1fr 300px;gap:0;max-height:70vh">
+      <div class="wf-pan" id="wfPan" style="border-right:1px solid var(--line)">
+        <div class="wf-zoom">
+          <button id="wfZoomIn" title="Phóng to">+</button>
+          <button id="wfZoomOut" title="Thu nhỏ">−</button>
+          <button id="wfZoomFit" title="Vừa khung" style="font-size:11px">fit</button>
+        </div>
         <svg id="wfSvg" width="${cw}" height="${ch+160}" xmlns="http://www.w3.org/2000/svg" style="display:block">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -632,25 +993,86 @@ async function renderWireframe(pid){
             <text id="wfStuckLabel" text-anchor="middle" font-size="11" font-weight="700" fill="#dc2626" style="display:none"/>
           </g>
         </svg>
-        <div id="wfTip" style="position:absolute;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:5;max-width:240px"></div>
-        <!-- Replay controls (visible only during replay) -->
-        <div id="wfCtrl" style="display:none;position:sticky;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:12px">
+        <div id="wfTip" style="position:absolute;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:7;max-width:240px"></div>
+        <!-- Replay controls (visible only during replay), pinned to the pan area bottom -->
+        <div id="wfCtrl" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:7;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:12px">
           <button class="btn sm" id="wfPlay" style="min-width:60px">▶ Play</button>
           <span id="wfTime" class="mono muted" style="min-width:80px">0.0s / 0.0s</span>
           <input id="wfSeek" type="range" min="0" max="1000" value="0" style="flex:1"/>
-          <select id="wfSpeed" style="height:28px">
-            <option value="1">1x</option><option value="2">2x</option>
-            <option value="4" selected>4x</option><option value="8">8x</option><option value="16">16x</option>
+          <select id="wfSpeed" style="height:28px" title="Tốc độ phát lại">
+            <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option><option value="2">2x</option>
+            <option value="4">4x</option><option value="8">8x</option>
           </select>
           <span id="wfNow" class="muted" style="min-width:140px;text-align:right"></span>
           <button class="btn ghost sm" id="wfStop">✕</button>
         </div>
       </div>
-      <div style="overflow:auto;max-height:70vh;background:var(--panel)">
-        <div style="padding:10px 12px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);background:var(--panel2)">Sessions — click để replay</div>
-        <div id="wfSessList">${sessListHtml}</div>
+      <div style="overflow:auto;background:var(--panel)">
+        <div style="padding:10px 12px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);background:var(--panel2)">${rightTitle}</div>
+        <div id="wfSessList">${rightBody}</div>
       </div>
-    </div>`;
+    </div>
+   </div>`;
+
+  // User selector + mode toggle handlers.
+  const usel=document.getElementById('userSelect');
+  if(usel) usel.onchange=()=>{ _userFilter=usel.value; renderWireframe(pid); };
+  const mf=document.getElementById('wfModeFlow'), mh=document.getElementById('wfModeHeat');
+  if(mf) mf.onclick=()=>{ _wfMode='flow'; renderWireframe(pid); };
+  if(mh) mh.onclick=()=>{ _wfMode='heat'; renderWireframe(pid); };
+
+  // ── Pan / zoom on the graph + fullscreen toggle ─────────────────────────
+  const pan = document.getElementById('wfPan');
+  const svgEl = document.getElementById('wfSvg');
+  const wrap = document.getElementById('wfWrap');
+  let tx=0, ty=0, scale=1;
+  const applyTransform = ()=>{ svgEl.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+  const fit = ()=>{
+    // Fit the whole graph into the pan viewport.
+    const vw = pan.clientWidth, vh = pan.clientHeight;
+    const gw = svgEl.width.baseVal.value || cw, gh = svgEl.height.baseVal.value || ch;
+    scale = Math.min(1, Math.min(vw/gw, vh/gh) * 0.96) || 1;
+    tx = Math.max(0, (vw - gw*scale)/2); ty = 16;
+    applyTransform();
+  };
+  const zoomBy = (factor, cxPx, cyPx)=>{
+    const prev = scale;
+    scale = Math.max(0.2, Math.min(3, scale*factor));
+    // Zoom toward the cursor point (keep that point stable).
+    if(cxPx!=null){ tx = cxPx - (cxPx - tx) * (scale/prev); ty = cyPx - (cyPx - ty) * (scale/prev); }
+    applyTransform();
+  };
+  document.getElementById('wfZoomIn').onclick  = ()=> zoomBy(1.2, pan.clientWidth/2, pan.clientHeight/2);
+  document.getElementById('wfZoomOut').onclick = ()=> zoomBy(1/1.2, pan.clientWidth/2, pan.clientHeight/2);
+  document.getElementById('wfZoomFit').onclick = fit;
+  // Drag to pan.
+  let dragging=false, sx=0, sy=0, stx=0, sty=0;
+  pan.addEventListener('mousedown',(e)=>{
+    if(e.target.closest('.wf-zoom') || e.target.closest('#wfCtrl')) return;
+    dragging=true; pan.classList.add('dragging'); sx=e.clientX; sy=e.clientY; stx=tx; sty=ty;
+  });
+  window.addEventListener('mousemove',(e)=>{ if(!dragging)return; tx=stx+(e.clientX-sx); ty=sty+(e.clientY-sy); applyTransform(); });
+  window.addEventListener('mouseup',()=>{ dragging=false; pan.classList.remove('dragging'); });
+  // Wheel to zoom (ctrl/cmd not required); plain wheel scrolls vertically too.
+  pan.addEventListener('wheel',(e)=>{
+    e.preventDefault();
+    const r = pan.getBoundingClientRect();
+    zoomBy(e.deltaY<0?1.1:1/1.1, e.clientX-r.left, e.clientY-r.top);
+  }, { passive:false });
+  // Fullscreen toggle (also fits the graph when entering).
+  const fsBtn = document.getElementById('wfFsBtn');
+  const setFs = (on)=>{
+    wrap.classList.toggle('wf-fs', on);
+    if(fsBtn) fsBtn.textContent = on ? '✕ Thu gọn' : '⛶ Toàn màn hình';
+    setTimeout(fit, 30);
+  };
+  if(fsBtn) fsBtn.onclick = ()=> setFs(!wrap.classList.contains('wf-fs'));
+  // ESC exits fullscreen.
+  const escFs = (e)=>{ if(e.key==='Escape' && wrap.classList.contains('wf-fs')) setFs(false); };
+  document.addEventListener('keydown', escFs);
+  // Initial fit so the whole graph is visible.
+  setTimeout(fit, 30);
 
   // ── tooltip handlers ─────────────────────────────────────────────────────
   const tip = document.getElementById('wfTip');
@@ -667,12 +1089,14 @@ async function renderWireframe(pid){
     g.addEventListener('mousemove',(ev)=>{
       const d=g.dataset;
       const dwell = d.dwell>0 ? fmtDur(+d.dwell) : '—';
-      showTip(`<b>${esc(d.screen)}</b><br>
+      const lblTip = screenLabel(d.screen);
+      showTip(`<b>${esc(d.screen)}</b>${lblTip?`<br><span style="color:var(--accent2)">${esc(lblTip)}</span>`:''}<br>
         Visits: ${d.visits}<br>
+        Tap: ${d.taps||0}<br>
         Thoát tại đây: ${d.exits} (${d.exitPct}%)<br>
         ${d.crash>0?'<span style="color:var(--danger)">⚠ Crash: '+d.crash+'</span><br>':''}
         Dwell TB: ${dwell}<br>
-        Stuck score: ${d.stuck}`, ev);
+        ${_wfMode==='heat'?'Mức dùng (heat): '+Math.round((+d.heat)*100)+'%':'Stuck score: '+d.stuck}`, ev);
     });
     g.addEventListener('mouseleave', hideTip);
   });
@@ -749,9 +1173,18 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
   const tEnd = segs[segs.length-1].last_ts;
   const totalMs = Math.max(1, tEnd - t0);
 
+  // Auto-pick a watchable starting speed: short sessions (a few seconds across
+  // many screens) would whip by at 1x, so slow down until each screen gets
+  // ~1.5s of viewing time. The user can still change speed with the dropdown.
+  const wantWatchMs = segs.length * 1500;
+  let autoSpeed = totalMs / wantWatchMs;            // <1 = play slower than real time
+  autoSpeed = Math.min(1, Math.max(0.25, Math.round(autoSpeed*4)/4));
+  const speedSel = document.getElementById('wfSpeed');
+  if(speedSel){ speedSel.value = String(autoSpeed); }
+
   _wfReplayState = {
     segs, nodePos, dwellBaseline, totalMs,
-    paused: false, speed: parseFloat(document.getElementById('wfSpeed').value)||4,
+    paused: false, speed: autoSpeed,
     sessionStartedAt: s.started_at || t0,
     startedWallClock: performance.now(),
     pausedAt: 0, raf: null,
@@ -921,27 +1354,49 @@ function sessionReasonBadge(r){
 const fmtDur=(ms)=>{ if(ms==null)return'—'; const s=Math.round(ms/1000); if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; };
 
 async function renderSessions(pid){
-  const resp=await api(`/api/projects/${pid}/sessions`);
+  const users = await loadUsers(pid);
+  const qs = _userFilter ? `?user=${encodeURIComponent(_userFilter)}` : '';
+  const resp=await api(`/api/projects/${pid}/sessions${qs}`);
   const rows=resp.sessions||[];
   const warn=resp.reconstruct_failed?' <span style="color:var(--danger)">⚠ reconstruct lỗi, dữ liệu có thể cũ</span>':'';
+  // Info card for the selected user (or a hint to pick one).
+  const selUser = users.find(u=>u.user_id===_userFilter);
+  const userCard = selUser ? `
+    <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+      <div><div class="muted" style="font-size:10px;text-transform:uppercase">User</div><b style="font-size:14px;color:var(--accent2)">${esc(selUser.username)}</b></div>
+      ${selUser.epcode?`<div><div class="muted" style="font-size:10px;text-transform:uppercase">Mã NV</div><span class="mono">${esc(selUser.epcode)}</span></div>`:''}
+      <div><div class="muted" style="font-size:10px;text-transform:uppercase">Sessions</div><b>${selUser.session_count}</b></div>
+      <div><div class="muted" style="font-size:10px;text-transform:uppercase">Events</div><b>${selUser.event_count}</b></div>
+      <div><div class="muted" style="font-size:10px;text-transform:uppercase">Lần đầu</div><span class="mono muted" style="font-size:12px">${selUser.first_seen?fmtTime(selUser.first_seen):'—'}</span></div>
+      <div><div class="muted" style="font-size:10px;text-transform:uppercase">Gần nhất</div><span class="mono muted" style="font-size:12px">${selUser.last_seen?fmtTime(selUser.last_seen):'—'}</span></div>
+      <a class="btn ghost sm" style="margin-left:auto" onclick="go({tab:'wireframe'})">📊 Xem hành trình & heatmap</a>
+    </div>` : '';
   $('#tabBody').innerHTML=`
-    <div class="filter-bar"><span class="muted" style="font-size:12px;align-self:center">${rows.length} session — click để xem hành trình${warn}</span></div>
-    <div style="max-height:58vh;overflow:auto"><table>
-      <thead><tr><th>Session</th><th>Bắt đầu</th><th>Flow</th><th>Thời lượng</th><th>Events</th><th>Màn</th><th>Platform</th><th>Kết thúc</th><th>Crash</th></tr></thead>
+    <div class="filter-bar" style="gap:10px;align-items:center">
+      <span class="muted" style="font-size:12px">👤 Lọc theo user:</span>
+      ${userSelectHtml(users)}
+      <span class="muted" style="font-size:12px;align-self:center;margin-left:auto">${rows.length} session — click để xem hành trình${warn}</span>
+    </div>
+    ${userCard}
+    <div style="max-height:54vh;overflow:auto"><table>
+      <thead><tr><th>Session</th><th>User</th><th>Bắt đầu</th><th>Flow</th><th>Thời lượng</th><th>Events</th><th>Màn</th><th>Platform</th><th>Kết thúc</th><th>Crash</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`
         <tr class="click sess" data-sid="${esc(r.session_id)}">
           <td class="mono" style="color:var(--accent2)" title="${esc(r.session_id)}">${shortSid(r.session_id)}</td>
+          <td class="mono muted" style="font-size:11px">${esc(r.user_id||'—')}</td>
           <td class="mono muted">${r.started_at?fmtTime(r.started_at):'—'}</td>
-          <td class="mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.flow_signature)||'<span class=muted>—</span>'}</td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.flow_signature||'')}">${esc(flowDisplay(r.flow_signature))||'<span class=muted>—</span>'}</td>
           <td>${fmtDur(r.duration_ms)}</td>
           <td>${r.event_count}</td>
           <td>${r.screen_count}</td>
           <td class="muted">${esc(r.platform)||'—'}</td>
           <td>${sessionReasonBadge(r.ended_reason)}</td>
           <td>${r.crashed?'<span style="color:var(--danger)">⚠</span>':''}</td>
-        </tr>`).join(''):'<tr><td colspan=9 class=empty>Chưa có session. Chạy app (đã bật journeyCapture) để thu hành trình.</td></tr>'}
+        </tr>`).join(''):'<tr><td colspan=10 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
       </tbody></table></div>`;
-  document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionDrawer(pid,tr.dataset.sid));
+  document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionIDE(pid,tr.dataset.sid));
+  const sel=document.getElementById('userSelect');
+  if(sel) sel.onchange=()=>{ _userFilter=sel.value; renderSessions(pid); };
 }
 
 // Build a structured tree from a session journey:
@@ -971,6 +1426,9 @@ function buildSessionTree(journey){
   for(const seg of segs){
     seg.actions = [];
     seg.crashed = false;
+    // Segment time span (for the real-time timeline).
+    seg.started_at = seg.steps.length ? seg.steps[0].ts : null;
+    seg.ended_at   = seg.steps.length ? seg.steps[seg.steps.length-1].ts : null;
     let lastAction = null;
     let lastTap = null;   // most recent button tap, to attribute errors/crashes
     for(const st of seg.steps){
@@ -993,6 +1451,9 @@ function buildSessionTree(journey){
         seg.actions.push(action);
       }
     }
+    // "passive" = the user merely passed through (only screen_view, no taps/
+    // network/custom events). Consecutive passive screens collapse into a stack.
+    seg.passive = seg.actions.length === 0 && !seg.crashed;
   }
   return segs;
 }
@@ -1141,26 +1602,241 @@ async function openSessionDrawer(pid,sid){
   $('#drawer').classList.add('open');$('#scrim').classList.add('open');
 }
 
+// ── Session IDE: full-screen 3-pane view (list | wireframe+timeline | detail) ──
+let _ideState = null;   // { pid, sid, sessions }
+async function openSessionIDE(pid, sid){
+  // Session list for the left pane (cached on state).
+  let sessions = _ideState && _ideState.pid===pid ? _ideState.sessions : null;
+  if(!sessions){
+    const resp = await api(`/api/projects/${pid}/sessions`).catch(()=>({sessions:[]}));
+    sessions = resp.sessions || [];
+  }
+  _ideState = { pid, sid, sessions };
+
+  let ov = document.getElementById('ideOverlay');
+  if(!ov){
+    ov = document.createElement('div'); ov.id='ideOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:40;background:var(--bg);display:grid;'
+      +'grid-template-rows:auto 1fr;';
+    document.body.appendChild(ov);
+  }
+  ov.style.display='grid';
+  ov.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
+      <b>Session ${shortSid(sid)}</b>
+      <span class="muted" style="font-size:12px" id="ideMeta"></span>
+      <span id="ideCrashBadge"></span>
+      <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
+      <button class="btn ghost sm" id="ideClose">✕ Đóng</button>
+    </div>
+    <div style="display:grid;grid-template-columns:260px 1fr 380px;overflow:hidden">
+      <div id="ideList" style="border-right:1px solid var(--line);overflow:auto;background:var(--panel)"></div>
+      <div id="ideMain" style="overflow:auto;background:var(--bg);position:relative"></div>
+      <div id="ideDetail" style="border-left:1px solid var(--line);overflow:auto;background:var(--panel);padding:16px">
+        <div class="muted" style="font-size:12px">Bấm một màn ở giữa để xem chi tiết event / network của màn đó.</div>
+      </div>
+    </div>`;
+  document.getElementById('ideClose').onclick = ()=>{ ov.style.display='none'; };
+  // Search box filters the middle pane (debounced); see renderIDEMain.
+  const searchEl = document.getElementById('ideSearch');
+  searchEl.oninput = ()=>{ clearTimeout(searchEl._h); searchEl._h=setTimeout(()=>applyIDEFilter(), 160); };
+
+  // ── left: session list ──
+  const listEl = document.getElementById('ideList');
+  listEl.innerHTML = sessions.map(s=>{
+    const active = s.session_id===sid;
+    const dot = s.crashed ? '#dc2626' : (s.ended_reason==='inferred_terminate' ? '#f59e0b' : '#5b8cff');
+    return `<div class="ide-sess" data-sid="${esc(s.session_id)}" style="padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px;${active?'background:var(--panel2);border-left:3px solid var(--accent)':'border-left:3px solid transparent'}">
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="color:${dot}">●</span>
+        <span class="mono" style="color:var(--accent2)">${shortSid(s.session_id)}</span>
+        <span class="muted" style="margin-left:auto;font-size:10px">${fmtDur(s.duration_ms)}</span>
+      </div>
+      <div class="muted" style="font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.flow_signature||'')}">${esc(flowDisplay(s.flow_signature)||'')}</div>
+      <div class="muted" style="font-size:10px">${s.started_at?fmtTime(s.started_at):''}</div>
+    </div>`;
+  }).join('') || '<div class="empty" style="font-size:12px">Chưa có session</div>';
+  listEl.querySelectorAll('.ide-sess').forEach(el=>{
+    el.onclick = ()=> openSessionIDE(pid, el.dataset.sid);
+  });
+
+  // ── center: load journey → wireframe + timeline ──
+  await renderIDEMain(pid, sid);
+}
+
+// Filter mode for the middle pane: '' = show all, 'crash' = only crash/bug
+// screens, or a free-text query from the search box.
+let _ideFilter = { mode:'', q:'' };
+// Apply the current search query + crash filter to the rendered rows.
+function applyIDEFilter(){
+  const main = document.getElementById('ideMain'); if(!main) return;
+  const q = (document.getElementById('ideSearch')?.value || '').trim().toLowerCase();
+  _ideFilter.q = q;
+  const onlyCrash = _ideFilter.mode==='crash';
+  let shown = 0;
+  main.querySelectorAll('.ide-row').forEach(row=>{
+    const hay = row.dataset.search || '';
+    const isCrash = row.dataset.crash === '1';
+    const ok = (!q || hay.includes(q)) && (!onlyCrash || isCrash);
+    row.style.display = ok ? '' : 'none';
+    if(ok) shown++;
+  });
+  const empty = main.querySelector('#ideNoMatch');
+  if(empty) empty.style.display = shown? 'none':'block';
+}
+
+// Render the middle pane: a vertical timeline (real-time scaled) with screen
+// cards; consecutive "passed-through" screens collapse into one stack card.
+async function renderIDEMain(pid, sid){
+  const main = document.getElementById('ideMain');
+  main.innerHTML = '<div class="muted" style="padding:20px;font-size:12px">Đang tải…</div>';
+  let s;
+  try { s = await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`); }
+  catch(e){ main.innerHTML='<div style="color:var(--danger);padding:20px">Không tải được session</div>'; return; }
+  const segs = buildSessionTree(s.journey||[]);
+  window._ideSegs = segs;
+
+  // A screen has a "bug" if it crashed, or any action on it is an error/parse
+  // failure (json_parse_error doesn't set seg.crashed but is still a code bug).
+  const ERR = new Set(['crash','application_error','json_parse_error']);
+  const hasBug = (seg)=> seg.crashed || seg.actions.some(a=>ERR.has(a.event_name));
+  let bugCount = 0;
+
+  // Reversed timeline: newest screen on top, the session's first screen at the
+  // bottom. Between screens runs a thin animated arrow that flows upward (back
+  // toward the start). data-i keeps the ORIGINAL index so clicks map correctly.
+
+  const order = segs.map((_, i)=>i).reverse();   // last → first
+  const rows = order.map((i, pos)=>{
+    const seg = segs[i];
+    const ts = seg.started_at;
+    const bug = hasBug(seg);
+    if(bug) bugCount++;
+    const dot = bug ? 'var(--danger)' : (seg.passive ? 'var(--muted)' : 'var(--accent)');
+    const nActs = seg.actions.filter(a=>!a.standaloneNet).length;
+    const nNet = seg.actions.reduce((a,x)=>a+x.networks.length,0);
+    const isTop = pos===0;                 // newest (visually first)
+    const isBottom = pos===order.length-1; // oldest / session start
+    const lbl = screenLabel(seg.screen);
+    const meta = seg.passive
+      ? `<span class="muted" style="font-size:11px">lướt qua · ${fmtDur((seg.ended_at||ts)-(seg.started_at||ts))}</span>`
+      : `<span class="muted" style="font-size:11px">${nActs} hành động${nNet?` · ${nNet} network`:''} · ${fmtDur((seg.ended_at||ts)-(seg.started_at||ts))}</span>`;
+    // Build the searchable haystack: class name, label, element keys, API urls,
+    // event names — so the search box matches across the whole screen.
+    const hayParts = [seg.screen, lbl];
+    for(const a of seg.actions){
+      if(a.element_key) hayParts.push(a.element_key);
+      if(a.event_name) hayParts.push(a.event_name);
+      for(const n of a.networks){ if(n.url) hayParts.push(n.url); if(n.status) hayParts.push(String(n.status)); }
+    }
+    const hay = hayParts.join(' ').toLowerCase();
+    const time = ts ? new Date(ts).toLocaleTimeString('vi-VN',{hour12:false}) : '';
+    // Row = [time] [connector rail w/ animated arrows + dot] [screen card].
+    // The rail is a fixed-width flex column whose height stretches to the row,
+    // so the repeating-chevron background always shows between the dots.
+    return `<div class="ide-row" data-i="${i}" data-crash="${bug?'1':'0'}" data-search="${esc(hay)}" style="display:flex;align-items:stretch;cursor:pointer;min-height:64px">
+      <div class="mono muted" style="flex:0 0 70px;font-size:11px;text-align:right;padding:22px 8px 0 0">${time}</div>
+      <div class="ide-conn" style="flex:0 0 24px;display:flex;justify-content:center;align-items:center">
+        <div style="width:11px;height:11px;border-radius:50%;background:${dot};box-shadow:0 0 0 4px var(--bg);position:relative;z-index:1"></div>
+      </div>
+      <div style="flex:1 1 auto;padding:7px 0 7px 8px;min-width:0">
+        <div class="ide-card" style="background:var(--panel);border:1.5px solid ${bug?'var(--danger)':'var(--line)'};border-radius:10px;padding:9px 12px;${seg.passive?'opacity:.72':''}">
+          <b style="font-size:13px">${bug?'⚠ ':''}📱 ${esc(seg.screen)}</b>${lbl?`<span class="muted" style="font-size:11px;font-weight:400"> - ${esc(lbl)}</span>`:''}
+          ${isTop?'<span style="font-size:9px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 6px;margin-left:6px">mới nhất</span>':''}${isBottom?'<span style="font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 6px;margin-left:6px">bắt đầu</span>':''}
+          <div style="margin-top:3px">${meta}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  main.innerHTML = `<div style="padding:18px 16px 40px">${rows||'<div class="muted">— không có màn —</div>'}
+    <div id="ideNoMatch" class="muted" style="display:none;padding:20px;font-size:12px">Không có màn nào khớp bộ lọc.</div></div>`;
+
+  document.getElementById('ideMeta').textContent =
+    `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;
+
+  // Crash/bug badge in the header — click toggles the "only buggy screens" filter.
+  const badge = document.getElementById('ideCrashBadge');
+  if(badge){
+    if(bugCount){
+      const on = _ideFilter.mode==='crash';
+      badge.innerHTML = `<span id="ideCrashToggle" title="Bấm để lọc màn crash/bug" style="cursor:pointer;user-select:none;font-size:12px;font-weight:600;border-radius:20px;padding:3px 11px;background:${on?'var(--danger)':'var(--danger)22'};color:${on?'#fff':'var(--danger)'};border:1px solid var(--danger)">⚠ ${bugCount} crash/bug${on?' ✕':''}</span>`;
+      document.getElementById('ideCrashToggle').onclick = ()=>{
+        _ideFilter.mode = _ideFilter.mode==='crash' ? '' : 'crash';
+        renderIDEMain(pid, sid);   // re-render to refresh the badge state + rows
+      };
+    } else { badge.innerHTML = ''; }
+  }
+
+  // Click a row → highlight + show that screen's detail in the right pane.
+  main.querySelectorAll('.ide-row').forEach(el=>{
+    el.onclick = ()=>{
+      main.querySelectorAll('.ide-row .ide-card').forEach(c=>c.style.outline='');
+      el.querySelector('.ide-card').style.outline = '2px solid var(--accent)';
+      showIDEDetailScreen(segs[+el.dataset.i]);
+    };
+  });
+
+  // Re-apply any active search query + crash filter to the freshly rendered rows.
+  applyIDEFilter();
+}
+
+// Right pane: detail of one screen — its actions + nested network calls.
+function showIDEDetailScreen(seg){
+  const d = document.getElementById('ideDetail');
+  const _acts=[], _nets=[];
+  const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
+  const netChip = (networks, ctx)=>{
+    const gid=_nets.length; _nets.push({networks, action:ctx});
+    const hasErr = networks.some(n=>n.net_error||(n.status>=400));
+    const c = hasErr?'var(--warn)':'#79c0ff';
+    return `<span class="ide-net" data-gid="${gid}" style="display:inline-block;cursor:pointer;background:${c}22;border:1px solid ${c}66;color:${c};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600">🌐 network [${networks.length}]${hasErr?' ⚠':''}</span>`;
+  };
+  const screenNets=[]; const realActs=[];
+  for(const a of seg.actions){ if(a.standaloneNet) screenNets.push(...a.networks); else realActs.push(a); }
+  const actHtml = realActs.map(a=>{
+    const isTap=a.event_name==='tap';
+    const danger=a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+    let icon,label,color;
+    if(isTap){icon='👆';label=a.element_key||'(button)';color='#5b8cff';}
+    else {icon=danger?'⚠':'•';label=a.event_name;color=danger?'var(--danger)':'var(--text)';}
+    const hasDetail = danger || (a.props && Object.keys(a.props).length);
+    const aid=_acts.length; if(hasDetail)_acts.push(a);
+    const childNet=a.networks.length?`<div style="padding:3px 0 1px 20px">${netChip(a.networks,label)}</div>`:'';
+    return `<div style="padding:5px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+        <span class="${hasDetail?'ide-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'chi tiết'} ⓘ</span>`:''}</span>
+        <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
+      </div>${childNet}</div>`;
+  }).join('');
+  const screenNetHtml = screenNets.length?`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>`:'';
+  const lbl = screenLabel(seg.screen);
+  d.innerHTML = `<h3 style="margin:0 0 2px;font-size:14px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</h3>
+    ${lbl?`<div style="font-size:12px;color:var(--accent2);margin-bottom:4px">${esc(lbl)}</div>`:''}
+    <div class="muted" style="font-size:11px;margin-bottom:10px">${fmtTime(seg.started_at)} → ${fmtTime(seg.ended_at)} · ${fmtDur((seg.ended_at||0)-(seg.started_at||0))}</div>
+    ${screenNetHtml}${actHtml||'<div class="muted" style="font-size:12px">— không có hành động —</div>'}`;
+  d.querySelectorAll('.ide-act').forEach(el=>el.onclick=(e)=>{e.stopPropagation();showActionDetail(_acts[+el.dataset.aid]);});
+  d.querySelectorAll('.ide-net').forEach(el=>el.onclick=(e)=>{e.stopPropagation();showSwfNetGroup(_nets[+el.dataset.gid]);});
+}
+
 // Popup showing an action's properties, or — for crash/error/parse failures —
 // a human-readable cause + which button triggered it + bad-data preview.
-// Close any UniTrack detail dialogs that are still open, so we never stack two
-// modals (the bug: closing the top one left a second behind it).
+// Tear down EVERY action/network detail dialog in the DOM (not just the first
+// match by id) and REMOVE the elements — a non-modal fallback box or a stray
+// duplicate left a second popup behind the modal that couldn't be closed.
 function closeAllUtilDialogs(){
-  for(const id of ['actDlg','netListDlg']){
-    const d = document.getElementById(id);
-    if(d && d.open) d.close();
-  }
+  document.querySelectorAll('#actDlg, #netListDlg, dialog.ut-util-dlg').forEach(d=>{
+    try { if(d.open) d.close(); } catch(_){}
+    d.remove();
+  });
 }
 
 function showActionDetail(a){
   if(!a) return;
+  // Tear down all util dialogs first, then build fresh (see closeAllUtilDialogs).
   closeAllUtilDialogs();
-  let dlg = document.getElementById('actDlg');
-  if(!dlg){
-    dlg = document.createElement('dialog'); dlg.id='actDlg';
-    dlg.style.width='460px';
-    document.body.appendChild(dlg);
-  }
+  const dlg = document.createElement('dialog'); dlg.id='actDlg'; dlg.className='ut-util-dlg';
+  dlg.style.cssText='width:460px;z-index:100';
+  document.body.appendChild(dlg);
   const p = a.props || {};
   const isCrash = a.event_name==='crash';
   const isParse = a.event_name==='json_parse_error';
@@ -1211,9 +1887,13 @@ function showActionDetail(a){
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
   dlg.innerHTML = `
     <div class="dlg-h" style="color:${titleColor}">${isErr?'⚠ ':''}${esc(a.event_name)}${a.element_key?` · ${esc(a.element_key)}`:''}
-      <button onclick="document.getElementById('actDlg').close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+      <button class="act-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
     <div class="dlg-b">${body}</div>`;
-  dlg.showModal();
+  try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
+  // Close = remove element (✕ + backdrop), so no stray dialog lingers in the DOM.
+  const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
+  dlg.querySelector('.act-close').onclick = kill;
+  dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };
 }
 
 // ── Per-session wireframe: a detailed flow graph of ONE session ────────────
@@ -1408,19 +2088,25 @@ function showSwfNetGroup(group){
   // Always use a single modal dialog (works from the session drawer AND from
   // the wireframe overlay). One source of truth → no stacked/stuck popups, and
   // the ✕ / backdrop always closes it.
+  // Tear down ALL existing util dialogs first (modal + any stray non-modal box),
+  // then build one fresh. Reusing a still-`open` <dialog> makes showModal() throw
+  // InvalidStateError → the browser drops it into the page flow as an
+  // un-closeable box behind the modal (the two-popup bug).
   closeAllUtilDialogs();
-  let dlg = document.getElementById('netListDlg');
-  if(!dlg){ dlg=document.createElement('dialog'); dlg.id='netListDlg'; document.body.appendChild(dlg); }
-  // Fixed-header / scrollable-body column constrained to the viewport.
-  dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;'
+  const dlg = document.createElement('dialog'); dlg.id='netListDlg'; dlg.className='ut-util-dlg';
+  // High z-index + appended to <body> so it sits on the top layer above the IDE
+  // overlay (z-index 40) regardless of where it was triggered from.
+  dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;z-index:100;'
     +'display:flex;flex-direction:column;overflow:hidden';
   dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">🌐 ${group.networks.length} network call
     <button class="swf-net-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
     <div class="dlg-b" style="flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto">${inner}</div>`;
-  dlg.showModal();
-  // Close on ✕ and on backdrop click.
-  dlg.querySelector('.swf-net-close').onclick = ()=> dlg.close();
-  dlg.onclick = (e)=>{ if(e.target === dlg) dlg.close(); };  // click outside (backdrop)
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
+  // Close = remove the element entirely (✕ button and backdrop click).
+  const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
+  dlg.querySelector('.swf-net-close').onclick = kill;
+  dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };  // click outside (backdrop)
   const container = dlg;
   container.querySelectorAll('.swf-netrow').forEach(r=>{
     r.onclick = ()=>{

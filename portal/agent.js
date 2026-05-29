@@ -51,6 +51,15 @@ const cleanScreen = (s) => (s ? String(s).split('.').pop() : '');
 // 30-min session timeout — a session idle longer than this never resumes.
 const TERMINATE_GAP_MS = 30 * 60 * 1000;
 
+// Image / media fetches (loading a photo, video, icon by URL the API returned)
+// are HTTP requests but NOT business API calls. They flood each screen's
+// "network call" count with noise, so we drop them from the journey entirely.
+// Matched by file extension OR known media-serving endpoints.
+const MEDIA_URL_RE = /(\.(png|jpe?g|gif|webp|bmp|svg|ico|heic|heif|mp4|mov|m4v|webm|avif|tiff?)(\?|#|$))|(\/view-file(\?|\/|$))|(\/mypt-ho-media-api\/)/i;
+function isMediaUrl(u) {
+  return typeof u === 'string' && MEDIA_URL_RE.test(u);
+}
+
 // ── Phase 1: reconstruction ──────────────────────────────────────────────────
 
 // Build the ordered journey + summary for one session's events (asc by ts).
@@ -109,6 +118,10 @@ function buildSessionRow(events) {
       // Prefer the full URL; fall back to host+path (older SDKs only sent those).
       step.url = props.url
         || (props.host ? (props.host + (props.path || '') + (props.query ? '?' + props.query : '')) : null);
+      // Skip image/media downloads — they're not API calls and just inflate the
+      // per-screen network count. (Keep them in the events table; only excluded
+      // from the reconstructed journey.)
+      if (isMediaUrl(step.url)) continue;
       step.method   = props.method || null;
       step.status   = (props.status != null ? props.status : props.status_code) ?? null;
       step.duration_ms = props.duration_ms ?? null;
@@ -281,25 +294,27 @@ function computeFlows(projectId, { refresh = true } = {}) {
 //   edge.count         # times users moved screen A → B
 //   edge.avg_ms        avg transition time A → B
 // Returns { nodes, edges, entry_screen, totals }. Pure read of app_sessions.
-function computeFlowGraph(projectId, { refresh = true } = {}) {
+function computeFlowGraph(projectId, { refresh = true, userId = null } = {}) {
   if (refresh) {
     try { reconstructSessions(projectId); }
     catch (err) { console.error('[flowgraph] reconstruct failed', err); }
   }
 
-  const rows = db.prepare(
-    'SELECT journey, crashed, ended_reason FROM app_sessions WHERE project_id = ?'
-  ).all(projectId);
+  // Optionally restrict to one user's sessions (per-user journey + heatmap).
+  const rows = userId
+    ? db.prepare('SELECT journey, crashed, ended_reason FROM app_sessions WHERE project_id = ? AND user_id = ?').all(projectId, userId)
+    : db.prepare('SELECT journey, crashed, ended_reason FROM app_sessions WHERE project_id = ?').all(projectId);
 
   const nodes = new Map();   // screen → metrics accumulator
   const edges = new Map();   // "A B" → { from, to, count, ms_sum }
   const entryCounts = new Map();
+  const elements = new Map();   // "screen|element_key" -> tap heatmap accumulator
   let sessionCount = 0;
 
   const node = (s) => {
     if (!nodes.has(s)) nodes.set(s, {
       screen: s, visits: 0, events: 0, dwell_sum: 0, dwell_n: 0,
-      exits: 0, crash_count: 0,
+      exits: 0, crash_count: 0, tap_count: 0,
     });
     return nodes.get(s);
   };
@@ -308,6 +323,20 @@ function computeFlowGraph(projectId, { refresh = true } = {}) {
     const journey = parseJSON(r.journey, []);
     if (!Array.isArray(journey) || !journey.length) continue;
     sessionCount++;
+
+    // Tap heatmap: count taps per (screen, element_key). Network/lifecycle steps
+    // carry no screen, so track the current screen as we scan.
+    let curScreen = null;
+    for (const step of journey) {
+      if (step.screen) curScreen = step.screen;
+      if (step.event_name === 'tap' && step.element_key) {
+        const scr = curScreen || '(unknown)';
+        const key = scr + '|' + step.element_key;
+        if (!elements.has(key)) elements.set(key, { screen: scr, element_key: step.element_key, taps: 0 });
+        elements.get(key).taps++;
+        node(scr).tap_count++;
+      }
+    }
 
     // Collapse the journey into a screen timeline (consecutive same-screen steps
     // merged), tracking when each screen segment started so we can measure dwell.
@@ -358,20 +387,34 @@ function computeFlowGraph(projectId, { refresh = true } = {}) {
     if (r.crashed) node(lastScreen).crash_count++;
   }
 
-  // Finalize node metrics + stuck_score.
+  // Heatmap normalization: hottest screen by combined engagement (visits +
+  // events + taps) maps to heat=1; the rest scale relative to it.
+  const maxEngage = Math.max(1, ...[...nodes.values()].map((n) => n.visits + n.events + n.tap_count));
+
+  // Finalize node metrics + stuck_score + heat.
   const nodeList = [...nodes.values()].map((n) => {
     const avg_dwell_ms = n.dwell_n ? Math.round(n.dwell_sum / n.dwell_n) : 0;
     const exit_ratio = n.visits ? n.exits / n.visits : 0;
     const crash_ratio = n.visits ? n.crash_count / n.visits : 0;
     // Stuck = sessions tend to end here (exit) or crash here. Weight crashes more.
     const stuck_score = Math.min(1, exit_ratio * 0.6 + crash_ratio * 1.0);
+    const heat = Math.round(((n.visits + n.events + n.tap_count) / maxEngage) * 100) / 100;
     return {
-      screen: n.screen, visits: n.visits, events: n.events,
+      screen: n.screen, visits: n.visits, events: n.events, tap_count: n.tap_count,
       avg_dwell_ms, exits: n.exits, crash_count: n.crash_count,
       exit_pct: Math.round(exit_ratio * 1000) / 10,
       stuck_score: Math.round(stuck_score * 100) / 100,
+      heat,
     };
   }).sort((a, b) => b.visits - a.visits);
+
+  // Element (button) heatmap, hottest first, with heat normalized to the most
+  // tapped element.
+  const maxTaps = Math.max(1, ...[...elements.values()].map((e) => e.taps));
+  const elementList = [...elements.values()].map((e) => ({
+    screen: e.screen, element_key: e.element_key, taps: e.taps,
+    heat: Math.round((e.taps / maxTaps) * 100) / 100,
+  })).sort((a, b) => b.taps - a.taps);
 
   const edgeList = [...edges.values()].map((e) => ({
     from: e.from, to: e.to, count: e.count,
@@ -383,8 +426,9 @@ function computeFlowGraph(projectId, { refresh = true } = {}) {
   return {
     nodes: nodeList,
     edges: edgeList,
+    elements: elementList,
     entry_screen,
-    totals: { sessions: sessionCount, screens: nodeList.length, transitions: edgeList.length },
+    totals: { sessions: sessionCount, screens: nodeList.length, transitions: edgeList.length, taps: elementList.reduce((s, e) => s + e.taps, 0) },
   };
 }
 

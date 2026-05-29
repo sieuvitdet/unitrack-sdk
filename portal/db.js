@@ -206,6 +206,9 @@ for (const [col, type] of [
 ensureColumn('projects', 'owner_id', 'INTEGER');
 ensureColumn('projects', 'sp_forward_url', 'TEXT');
 ensureColumn('projects', 'providers', 'TEXT');
+// JSON map { "HomeScreen": "Trang chủ", ... } — friendly screen labels shown
+// in the portal (Sessions/wireframe) and searchable in the IDE.
+ensureColumn('projects', 'screen_labels', 'TEXT');
 ensureColumn('project_config', 'rules', 'TEXT');
 // agent_config may predate the llm_model column (added when wiring the
 // OpenAI-compatible endpoint). Add it to existing databases.

@@ -100,6 +100,28 @@ router.put('/projects/:id/providers', ownProject, (req, res) => {
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id));
 });
 
+// Friendly screen-name labels (JSON map class→Vietnamese). Shown across the
+// portal and searchable in the session IDE. GET returns {} if none set.
+router.get('/projects/:id/screen-labels', ownProject, (req, res) => {
+  let map = {};
+  try { map = JSON.parse(req.project.screen_labels || '{}') || {}; } catch (_) { map = {}; }
+  res.json({ labels: map });
+});
+router.put('/projects/:id/screen-labels', ownProject, (req, res) => {
+  const body = req.body || {};
+  // Accept either {labels:{...}} or a bare {...} map. Keep only string→string.
+  const raw = body.labels && typeof body.labels === 'object' ? body.labels : body;
+  const map = {};
+  if (raw && typeof raw === 'object') {
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof k === 'string' && k && v != null) map[k] = String(v);
+    }
+  }
+  db.prepare('UPDATE projects SET screen_labels = ? WHERE id = ?')
+    .run(JSON.stringify(map), req.params.id);
+  res.json({ labels: map });
+});
+
 // Remote config: the editor reads the full resolved config; PUT saves any subset
 // of sections and bumps the version (the app re-downloads when version changes).
 router.get('/projects/:id/config', ownProject, (req, res) => {
@@ -293,22 +315,65 @@ router.get('/projects/:id/stats', ownProject, (req, res) => {
   });
 });
 
+// ----------------------------------------------------------------- users
+// Identified users for a project: id + traits (from the latest `identify`
+// event's properties, e.g. username/epcode) + session/event counts + last seen.
+router.get('/projects/:id/users', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const rows = db.prepare(`
+    SELECT user_id,
+           COUNT(*)                      AS event_count,
+           COUNT(DISTINCT session_id)    AS session_count,
+           MIN(timestamp)                AS first_seen,
+           MAX(timestamp)                AS last_seen,
+           MAX(CASE WHEN event_name='identify' THEN properties END) AS traits_json
+    FROM events
+    WHERE project_id = ? AND user_id IS NOT NULL AND user_id <> ''
+    GROUP BY user_id
+    ORDER BY last_seen DESC
+  `).all(pid);
+  const users = rows.map((r) => {
+    let traits = {};
+    try { traits = JSON.parse(r.traits_json || '{}') || {}; } catch (_) { traits = {}; }
+    // The identify payload wraps traits under "traits" on some platforms; flatten.
+    if (traits.traits && typeof traits.traits === 'object') traits = { ...traits, ...traits.traits };
+    delete traits.traits;
+    return {
+      user_id: r.user_id,
+      username: traits.username || traits.user_name || r.user_id,
+      epcode: traits.epcode || traits.epCode || null,
+      traits,
+      session_count: r.session_count,
+      event_count: r.event_count,
+      first_seen: r.first_seen,
+      last_seen: r.last_seen,
+    };
+  });
+  res.json({ users });
+});
+
 // --------------------------------------------------------------- sessions
 // List reconstructed sessions (newest first). Refreshes the materialized
 // app_sessions view from the raw events stream before returning, so the
-// timeline reflects events that arrived since the last view.
+// timeline reflects events that arrived since the last view. Optional ?user=
+// filters to one user's sessions.
 router.get('/projects/:id/sessions', ownProject, (req, res) => {
   const pid = req.params.id;
   let reconstruct_failed = false;
   try { reconstructSessions(pid); }
   catch (err) { reconstruct_failed = true; console.error('[sessions] reconstruct failed', err); }
-  const rows = db.prepare(`
-    SELECT id, session_id, user_id, platform, app_version, started_at, ended_at,
-           ended_reason, duration_ms, event_count, screen_count, crashed,
-           flow_signature
-    FROM app_sessions WHERE project_id = ?
-    ORDER BY started_at DESC LIMIT 500
-  `).all(pid);
+  const user = (req.query.user || '').trim();   // optional filter by user_id
+  const rows = user
+    ? db.prepare(`
+        SELECT id, session_id, user_id, platform, app_version, started_at, ended_at,
+               ended_reason, duration_ms, event_count, screen_count, crashed, flow_signature
+        FROM app_sessions WHERE project_id = ? AND user_id = ?
+        ORDER BY started_at DESC LIMIT 500`).all(pid, user)
+    : db.prepare(`
+        SELECT id, session_id, user_id, platform, app_version, started_at, ended_at,
+               ended_reason, duration_ms, event_count, screen_count, crashed, flow_signature
+        FROM app_sessions WHERE project_id = ?
+        ORDER BY started_at DESC LIMIT 500`).all(pid);
   // Surface reconstruction failure so the client knows the list may be stale,
   // rather than silently returning old data with a 200.
   res.json({ reconstructed_at: Date.now(), reconstruct_failed, sessions: rows });
@@ -322,7 +387,8 @@ router.get('/projects/:id/flows', ownProject, (req, res) => {
 
 // Wireframe flow graph: screen nodes + transition edges with heatmap metrics.
 router.get('/projects/:id/flowgraph', ownProject, (req, res) => {
-  try { res.json(computeFlowGraph(req.params.id)); }
+  const userId = (req.query.user || '').trim() || null;
+  try { res.json(computeFlowGraph(req.params.id, { userId })); }
   catch (err) { console.error('[flowgraph] failed', err); res.status(500).json({ error: 'flowgraph_failed' }); }
 });
 
