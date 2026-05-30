@@ -351,22 +351,66 @@ class UniTrack {
 ///     ...
 ///   )
 class UniTrackNavigatorObserver extends NavigatorObserver {
-  String? _lastRoute;
+  /// Routes whose name matches any of these patterns are NOT emitted as
+  /// screen_view. Useful for wrapper/container routes that aren't real screens
+  /// from a user's perspective (e.g. MobiX's `DashboardSuppliesWrapperPageRoute`
+  /// which only nests another route inside itself). Default skips anything
+  /// ending in `WrapperPageRoute`.
+  final List<Pattern> skipRoutePatterns;
 
-  void _track(Route<dynamic>? r) {
+  /// During a `popUntil` / `pushAndRemoveUntil`, the navigator fires many
+  /// didPush/didPop in quick succession; observers see one screen per pop
+  /// instead of just the final landing route. We coalesce: only the LAST route
+  /// to settle within this window is emitted as screen_view.
+  final Duration coalesceWindow;
+
+  UniTrackNavigatorObserver({
+    List<Pattern>? skipRoutePatterns,
+    this.coalesceWindow = const Duration(milliseconds: 120),
+  }) : skipRoutePatterns = skipRoutePatterns ?? [RegExp(r'WrapperPageRoute$')];
+
+  String? _lastEmitted;
+  String? _pending;
+  Timer? _coalesceTimer;
+
+  bool _shouldSkip(String name) {
+    for (final p in skipRoutePatterns) {
+      if (p is RegExp) { if (p.hasMatch(name)) return true; }
+      else if (name.contains(p.toString())) return true;
+    }
+    return false;
+  }
+
+  void _track(Route<dynamic>? r, {required bool fromPop}) {
     if (r is! PageRoute) return;
+    // didPop fires for every removed route in a popUntil chain — only the route
+    // that's actually on top after the pop is the real landing screen.
+    if (fromPop && r.isCurrent != true) return;
     final name = r.settings.name ?? r.runtimeType.toString();
-    if (name == _lastRoute) return;
-    _lastRoute = name;
+    if (_shouldSkip(name)) return;
+    if (name == _lastEmitted && _pending == null) return;
+
+    // Coalesce: remember the most recent target, and only emit when the
+    // navigator has stopped churning for `coalesceWindow`.
+    _pending = name;
+    _coalesceTimer?.cancel();
+    _coalesceTimer = Timer(coalesceWindow, _flushPending);
+  }
+
+  void _flushPending() {
+    final name = _pending;
+    _pending = null;
+    if (name == null || name == _lastEmitted) return;
+    _lastEmitted = name;
     UniTrack.instance.setScreen(name);
   }
 
   @override
-  void didPush(Route route, Route? previousRoute)         => _track(route);
+  void didPush(Route route, Route? previousRoute)     => _track(route, fromPop: false);
   @override
-  void didReplace({Route? newRoute, Route? oldRoute})     => _track(newRoute);
+  void didReplace({Route? newRoute, Route? oldRoute}) => _track(newRoute, fromPop: false);
   @override
-  void didPop(Route route, Route? previousRoute)          => _track(previousRoute);
+  void didPop(Route route, Route? previousRoute)      => _track(previousRoute, fromPop: true);
 }
 
 /// Safely parse JSON, reporting failures to UniTrack.

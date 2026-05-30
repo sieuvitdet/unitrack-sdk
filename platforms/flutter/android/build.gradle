@@ -36,13 +36,18 @@ android {
         minSdk 21
         externalNativeBuild {
             cmake {
-                cppFlags '-std=c++17', '-fvisibility=hidden', '-fno-exceptions'
+                // capi.cpp uses try/catch — exceptions must stay enabled.
+                cppFlags '-std=c++17', '-fvisibility=hidden'
                 arguments '-DCMAKE_BUILD_TYPE=Release'
             }
         }
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
         }
+        // Ship our proguard keep rules with the plugin so any release/staging
+        // app that consumes us inherits them (otherwise R8 minifies
+        // NativeBridge.httpPost → `d` and JNI_OnLoad crashes the app).
+        consumerProguardFiles 'consumer-rules.pro'
     }
 
     // Build the SDK's JNI shared library (libunitrack_jni) from its CMakeLists.

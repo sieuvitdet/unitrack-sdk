@@ -20,16 +20,20 @@
   [hidden]{display:none !important;}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,215,150,.5)}70%{box-shadow:0 0 0 8px rgba(39,215,150,0)}100%{box-shadow:0 0 0 0 rgba(39,215,150,0)}}
-  /* Animated thin arrow connector between timeline screens: a chevron (▲) tiled
-     vertically that scrolls upward continuously (newest screen is at the top, so
-     the flow points back toward the start). Drawn as a repeating SVG background
-     on the dot column itself, so it always spans the full row height. */
-  .ide-conn{
-    background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M8%204%20L13%2010%20L11.3%2011.2%20L8%207.2%20L4.7%2011.2%20L3%2010%20Z'%20fill='%235b8cff'/%3E%3C/svg%3E");
-    background-repeat:repeat-y;background-position:center top;background-size:16px 16px;
-    animation:ideFlowUp 0.8s linear infinite}
-  @keyframes ideFlowUp{from{background-position-y:0}to{background-position-y:-16px}}
-  @media (prefers-reduced-motion: reduce){.ide-conn{animation:none}}
+  /* Big animated chevron drawn BETWEEN two screen cards in the IDE timeline.
+     The arrow is centered under the dot of the row ABOVE it. Because the row
+     layout can shift (3-pane IDE vs fullscreen vs narrow window), we don't
+     guess CSS widths — JS measures the dot at render time and sets the spacer
+     width so the chevron lands exactly under it. */
+  .ide-arrow{display:flex;align-items:center;pointer-events:none;
+    animation:ideArrowBob 1.2s ease-in-out infinite}
+  /* flex:0 0 auto so the inline `width:Npx` set by JS actually takes effect
+     (flex-basis 0 would override `width`). */
+  .ide-arrow .ide-arrow-spacer{flex:0 0 auto;width:0}
+  .ide-arrow .ide-arrow-chevron{color:var(--accent);font-size:16px;line-height:1;
+    text-shadow:0 0 4px rgba(91,140,255,.45)}
+  @keyframes ideArrowBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @media (prefers-reduced-motion: reduce){.ide-arrow{animation:none}}
   /* Wireframe (flow/heatmap) fullscreen + pan/zoom. */
   #wfWrap.wf-fs{position:fixed;inset:0;z-index:45;background:var(--bg);max-height:none!important;padding:0}
   #wfWrap.wf-fs .wf-grid{height:100vh;max-height:none!important}
@@ -216,11 +220,15 @@ const screenDisplay = (name)=>{
 const screenSearchText = (name)=> ((name||'') + ' ' + screenLabel(name)).toLowerCase();
 // A flow signature "A>B>C" → label each hop ("Trang chủ>..."), keeping the
 // leading "/>" route prefix intact. Falls back to the raw name when unmapped.
+// Friendly flow signature. Each hop is the screen label (if mapped) else the
+// raw route name. Hops are joined with a small accent arrow so the journey
+// reads naturally left → right.
+const FLOW_ARROW = '<span style="color:var(--accent);font-weight:600;margin:0 4px">→</span>';
 const flowDisplay = (sig)=> String(sig||'').split('>').map(seg=>{
   const name = seg.replace(/^\/?>?/,'').trim();
   const lbl = screenLabel(name);
-  return lbl ? lbl : seg;
-}).join(' › ');
+  return esc(lbl ? lbl : seg);
+}).join(FLOW_ARROW);
 function evTag(r){
   let p=r.properties; if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){p={};}}
   p=p||{};
@@ -968,7 +976,7 @@ async function renderWireframe(pid){
       <span class="muted" style="font-size:12px;margin-left:auto">${g.totals.sessions} session · ${g.totals.screens} màn · ${g.totals.taps||0} tap · entry: <b>${esc(g.entry_screen)||'—'}</b></span>
       ${legend}
     </div>
-    <div class="wf-grid" style="display:grid;grid-template-columns:1fr 300px;gap:0;max-height:70vh">
+    <div class="wf-grid" style="display:grid;grid-template-columns:1fr 300px;grid-template-rows:1fr auto;gap:0;max-height:70vh">
       <div class="wf-pan" id="wfPan" style="border-right:1px solid var(--line)">
         <div class="wf-zoom">
           <button id="wfZoomIn" title="Phóng to">+</button>
@@ -994,23 +1002,25 @@ async function renderWireframe(pid){
           </g>
         </svg>
         <div id="wfTip" style="position:absolute;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none;z-index:7;max-width:240px"></div>
-        <!-- Replay controls (visible only during replay), pinned to the pan area bottom -->
-        <div id="wfCtrl" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:7;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:12px">
-          <button class="btn sm" id="wfPlay" style="min-width:60px">▶ Play</button>
-          <span id="wfTime" class="mono muted" style="min-width:80px">0.0s / 0.0s</span>
-          <input id="wfSeek" type="range" min="0" max="1000" value="0" style="flex:1"/>
-          <select id="wfSpeed" style="height:28px" title="Tốc độ phát lại">
-            <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
-            <option value="1" selected>1x</option><option value="2">2x</option>
-            <option value="4">4x</option><option value="8">8x</option>
-          </select>
-          <span id="wfNow" class="muted" style="min-width:140px;text-align:right"></span>
-          <button class="btn ghost sm" id="wfStop">✕</button>
-        </div>
       </div>
       <div style="overflow:auto;background:var(--panel)">
         <div style="padding:10px 12px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);background:var(--panel2)">${rightTitle}</div>
         <div id="wfSessList">${rightBody}</div>
+      </div>
+      <!-- Replay control bar — ALWAYS visible at the bottom of the grid (full
+           width across both columns). Disabled when no session is selected. -->
+      <div id="wfCtrl" style="grid-column:1/-1;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:12px;flex-wrap:wrap">
+        <button class="btn sm" id="wfPlay" style="min-width:64px" disabled>▶ Play</button>
+        <span id="wfTime" class="mono muted" style="min-width:90px">0.0s / 0.0s</span>
+        <input id="wfSeek" type="range" min="0" max="1000" value="0" style="flex:1;min-width:160px" disabled/>
+        <span class="muted" style="font-size:11px">Tốc độ:</span>
+        <select id="wfSpeed" style="height:28px" title="Tốc độ phát lại">
+          <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option><option value="2">2x</option>
+          <option value="4">4x</option><option value="8">8x</option>
+        </select>
+        <span id="wfNow" class="muted" style="min-width:160px;text-align:right;font-size:11px">— chọn 1 session để replay —</span>
+        <button class="btn ghost sm" id="wfStop" disabled>✕</button>
       </div>
     </div>
    </div>`;
@@ -1133,11 +1143,185 @@ function stopReplay(){
   if(_wfReplayState && _wfReplayState.raf) cancelAnimationFrame(_wfReplayState.raf);
   _wfReplayState = null;
   const r = document.getElementById('wfReplay'); if(r) r.style.display='none';
-  const c = document.getElementById('wfCtrl');   if(c) c.style.display='none';
+  // Disable (don't hide) the control bar so it stays visible.
+  for(const id of ['wfPlay','wfSeek','wfStop']) {
+    const el = document.getElementById(id); if(el) el.disabled = true;
+  }
+  const t = document.getElementById('wfTime'); if(t) t.textContent = '0.0s / 0.0s';
+  const n = document.getElementById('wfNow'); if(n) n.textContent = '— chọn 1 session để replay —';
+  const p = document.getElementById('wfPlay'); if(p) p.textContent = '▶ Play';
+  const seek = document.getElementById('wfSeek'); if(seek) seek.value = 0;
+  // Also clear the per-session journey overlay (see drawJourneyOverlay).
+  clearSessionJourneyOverlay();
   // Clear any stuck highlight applied to nodes during replay.
   document.querySelectorAll('#wfSvg .wf-node rect').forEach(rect=>{
     rect.style.filter = '';
   });
+}
+
+// ── Per-session journey overlay drawn underneath the aggregate flow graph ─
+// The aggregate (overview) graph still shows all sessions. When a single
+// session is picked, render its own compact chain — its OWN nodes + arrows —
+// below the overview so the focused session is visible separately from the
+// crowd. Clicking a node opens the detail drawer.
+let _wfSessionOverlayPid = null;
+function clearSessionJourneyOverlay(){
+  const g = document.getElementById('wfSessionJourney');
+  if(g) g.remove();
+}
+function drawSessionJourneyOverlay(replaySegs, sid){
+  clearSessionJourneyOverlay();
+  const svg = document.getElementById('wfSvg'); if(!svg) return;
+  const cw  = svg.width.baseVal.value;
+  const ch  = svg.height.baseVal.value;
+  // Collapse adjacent same-screen steps so the chain has 1 node per screen.
+  const screens = [];
+  for(const s of replaySegs){
+    if(!screens.length || screens[screens.length-1].screen !== s.screen)
+      screens.push({ screen: s.screen, idx: replaySegs.indexOf(s) });
+  }
+  if(!screens.length) return;
+  const NODE_W = 150, NODE_H = 44, GAP = 26;
+  const perRow = Math.max(1, Math.floor((cw - 60) / (NODE_W + GAP)));
+  // Lay nodes left→right, wrapping into multiple rows; row stack flows downward.
+  const baseY = ch - 30;                // first row sits just above the bottom
+  const rowH = NODE_H + 22;
+  const place = (i)=>{
+    const row = Math.floor(i/perRow);
+    const col = i % perRow;
+    return { x: 30 + col*(NODE_W+GAP), y: baseY - row*rowH };
+  };
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const layer = document.createElementNS(ns, 'g');
+  layer.setAttribute('id','wfSessionJourney');
+  // A faint backdrop band so the overlay reads as a separate "lane".
+  const bandRows = Math.ceil(screens.length / perRow);
+  const bandTop = baseY - (bandRows-1)*rowH - NODE_H/2 - 18;
+  const bandH = bandRows*rowH + 12;
+  const band = document.createElementNS(ns,'rect');
+  band.setAttribute('x','12'); band.setAttribute('y', bandTop);
+  band.setAttribute('width', cw-24); band.setAttribute('height', bandH);
+  band.setAttribute('rx','12');
+  band.setAttribute('fill','#27d79611'); band.setAttribute('stroke','#27d79655');
+  band.setAttribute('stroke-dasharray','6,4');
+  layer.appendChild(band);
+  const title = document.createElementNS(ns,'text');
+  title.setAttribute('x','22'); title.setAttribute('y', bandTop+16);
+  title.setAttribute('font-size','11'); title.setAttribute('fill','#27d796');
+  title.setAttribute('font-weight','700');
+  title.textContent = `Hành trình session ${shortSid(sid)} (${screens.length} màn)`;
+  layer.appendChild(title);
+
+  // Arrows between consecutive screens (forward).
+  for(let i=1;i<screens.length;i++){
+    const a=place(i-1), b=place(i);
+    const path = document.createElementNS(ns,'path');
+    let d;
+    if(Math.abs(a.y - b.y) < 1){
+      // Same row → straight horizontal arrow.
+      d = `M${a.x+NODE_W},${a.y} L${b.x-4},${b.y}`;
+    } else {
+      // Row wrap → S-curve down.
+      const mx = (a.x + NODE_W + b.x) / 2;
+      d = `M${a.x+NODE_W/2},${a.y+NODE_H/2} C${mx},${a.y+NODE_H/2} ${mx},${b.y-NODE_H/2} ${b.x+NODE_W/2},${b.y-NODE_H/2}`;
+    }
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', '#27d796'); path.setAttribute('stroke-width','2');
+    path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#arrow)');
+    layer.appendChild(path);
+  }
+  // Nodes.
+  screens.forEach((sc,i)=>{
+    const p = place(i);
+    const g = document.createElementNS(ns,'g');
+    g.setAttribute('class','wf-sj-node');
+    g.style.cursor = 'pointer';
+    const rect = document.createElementNS(ns,'rect');
+    rect.setAttribute('x', p.x); rect.setAttribute('y', p.y - NODE_H/2);
+    rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
+    rect.setAttribute('rx','8'); rect.setAttribute('fill','#27d79622');
+    rect.setAttribute('stroke','#27d796'); rect.setAttribute('stroke-width','1.5');
+    g.appendChild(rect);
+    const lbl = screenLabel(sc.screen) || sc.screen;
+    const shown = lbl.length>18 ? lbl.slice(0,17)+'…' : lbl;
+    const t = document.createElementNS(ns,'text');
+    t.setAttribute('x', p.x+NODE_W/2); t.setAttribute('y', p.y+4);
+    t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','12');
+    t.setAttribute('font-weight','600'); t.setAttribute('fill','var(--text)');
+    t.textContent = shown;
+    g.appendChild(t);
+    g.addEventListener('click', (ev)=>{ ev.stopPropagation(); openSessionDetailDrawer(sc.screen, replaySegs); });
+    layer.appendChild(g);
+  });
+  svg.appendChild(layer);
+  // Expand SVG height if overlay went past the bottom (rare with single-row).
+  if (bandTop < 0) {
+    const newH = ch + Math.abs(bandTop) + 20;
+    svg.setAttribute('height', newH);
+  }
+}
+
+// Drawer with one screen's actions + network — reuses showIDEDetailScreen.
+function openSessionDetailDrawer(screen, replaySegs){
+  // Build a buildSessionTree-shaped seg for the clicked screen by collecting
+  // every replay segment with the same screen name.
+  const events = [];
+  for(const s of replaySegs) if(s.screen===screen) events.push(...(s.events||[]));
+  if(!events.length) return;
+  // Sort by ts (replay segs may interleave) and rebuild via buildSessionTree.
+  events.sort((a,b)=>(a.ts||0)-(b.ts||0));
+  const tree = buildSessionTree(events);
+  const seg = tree.find(t=>t.screen===screen) || tree[0];
+  if(!seg) return;
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id='wfDetailDlg'; dlg.className='ut-util-dlg';
+  dlg.style.cssText='width:520px;max-width:92vw;max-height:80vh;padding:0;z-index:100;'
+    +'display:flex;flex-direction:column;overflow:hidden';
+  dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">📱 Chi tiết màn
+      <button class="wfd-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div id="wfDetailBody" class="dlg-b" style="flex:1 1 auto;min-height:0;overflow-y:auto"></div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
+  const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
+  dlg.querySelector('.wfd-close').onclick = kill;
+  dlg.onclick = (e)=>{ if(e.target===dlg) kill(); };
+  // Render inline (same shape as showIDEDetailScreen — actions + network chips).
+  const body = document.getElementById('wfDetailBody');
+  const _acts=[], _nets=[];
+  const tEvt = (n)=>new Date(n).toLocaleTimeString('vi-VN',{hour12:false});
+  const netChip = (networks, ctx)=>{
+    const gid=_nets.length; _nets.push({networks, action: ctx});
+    const hasErr = networks.some(n=>n.net_error||(n.status>=400));
+    const c = hasErr?'var(--warn)':'#79c0ff';
+    return `<span class="wfd-net" data-gid="${gid}" style="display:inline-block;cursor:pointer;background:${c}22;border:1px solid ${c}66;color:${c};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600">🌐 network [${networks.length}]${hasErr?' ⚠':''}</span>`;
+  };
+  const screenNets=[]; const realActs=[];
+  for(const a of seg.actions){ if(a.standaloneNet) screenNets.push(...a.networks); else realActs.push(a); }
+  const actHtml = realActs.map(a=>{
+    const isTap=a.event_name==='tap';
+    const danger=a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
+    let icon,label,color;
+    if(isTap){icon='👆';label=a.element_key||'(button)';color='#5b8cff';}
+    else {icon=danger?'⚠':'•';label=a.event_name;color=danger?'var(--danger)':'var(--text)';}
+    const hasDetail = danger || (a.props && Object.keys(a.props).length);
+    const aid=_acts.length; if(hasDetail)_acts.push(a);
+    const childNet=a.networks.length?`<div style="padding:3px 0 1px 20px">${netChip(a.networks,label)}</div>`:'';
+    return `<div style="padding:5px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+        <span class="${hasDetail?'wfd-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'chi tiết'} ⓘ</span>`:''}</span>
+        <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
+      </div>${childNet}</div>`;
+  }).join('');
+  const screenNetHtml = screenNets.length?`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>`:'';
+  const lbl = screenLabel(seg.screen);
+  body.innerHTML = `
+    <h3 style="margin:0 0 2px;font-size:14px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</h3>
+    ${lbl?`<div style="font-size:12px;color:var(--accent2);margin-bottom:6px">${esc(lbl)}</div>`:''}
+    <div class="muted" style="font-size:11px;margin-bottom:10px">${fmtTime(seg.started_at)} → ${fmtTime(seg.ended_at)} · ${fmtDur((seg.ended_at||0)-(seg.started_at||0))}</div>
+    ${screenNetHtml}${actHtml||'<div class="muted" style="font-size:12px">— không có hành động —</div>'}`;
+  body.querySelectorAll('.wfd-act').forEach(el=>el.onclick=(e)=>{e.stopPropagation();showActionDetail(_acts[+el.dataset.aid]);});
+  body.querySelectorAll('.wfd-net').forEach(el=>el.onclick=(e)=>{e.stopPropagation();showSwfNetGroup(_nets[+el.dataset.gid]);});
 }
 
 async function startReplay(pid, sid, nodePos, dwellBaseline){
@@ -1191,8 +1375,13 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
   };
 
   document.getElementById('wfReplay').style.display = '';
-  const ctrl = document.getElementById('wfCtrl');
-  ctrl.style.display = 'flex';
+  // Draw a session-specific journey on TOP of the overview graph so the focused
+  // session is visible separately from the aggregate flow.
+  drawSessionJourneyOverlay(segs, sid);
+  // Enable the always-visible control bar.
+  for(const id of ['wfPlay','wfSeek','wfStop']) {
+    const el = document.getElementById(id); if(el) el.disabled = false;
+  }
   document.getElementById('wfPlay').textContent = '⏸ Pause';
   document.getElementById('wfSeek').value = 0;
   document.getElementById('wfTime').textContent = `0.0s / ${(totalMs/1000).toFixed(1)}s`;
@@ -1385,7 +1574,7 @@ async function renderSessions(pid){
           <td class="mono" style="color:var(--accent2)" title="${esc(r.session_id)}">${shortSid(r.session_id)}</td>
           <td class="mono muted" style="font-size:11px">${esc(r.user_id||'—')}</td>
           <td class="mono muted">${r.started_at?fmtTime(r.started_at):'—'}</td>
-          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.flow_signature||'')}">${esc(flowDisplay(r.flow_signature))||'<span class=muted>—</span>'}</td>
+          <td style="max-width:420px;font-size:14px;line-height:1.45;white-space:normal;word-break:break-word" title="${esc(r.flow_signature||'')}">${flowDisplay(r.flow_signature)||'<span class=muted>—</span>'}</td>
           <td>${fmtDur(r.duration_ms)}</td>
           <td>${r.event_count}</td>
           <td>${r.screen_count}</td>
@@ -1655,7 +1844,7 @@ async function openSessionIDE(pid, sid){
         <span class="mono" style="color:var(--accent2)">${shortSid(s.session_id)}</span>
         <span class="muted" style="margin-left:auto;font-size:10px">${fmtDur(s.duration_ms)}</span>
       </div>
-      <div class="muted" style="font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.flow_signature||'')}">${esc(flowDisplay(s.flow_signature)||'')}</div>
+      <div class="muted" style="font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.flow_signature||'')}">${flowDisplay(s.flow_signature)||''}</div>
       <div class="muted" style="font-size:10px">${s.started_at?fmtTime(s.started_at):''}</div>
     </div>`;
   }).join('') || '<div class="empty" style="font-size:12px">Chưa có session</div>';
@@ -1734,25 +1923,59 @@ async function renderIDEMain(pid, sid){
     }
     const hay = hayParts.join(' ').toLowerCase();
     const time = ts ? new Date(ts).toLocaleTimeString('vi-VN',{hour12:false}) : '';
-    // Row = [time] [connector rail w/ animated arrows + dot] [screen card].
-    // The rail is a fixed-width flex column whose height stretches to the row,
-    // so the repeating-chevron background always shows between the dots.
-    return `<div class="ide-row" data-i="${i}" data-crash="${bug?'1':'0'}" data-search="${esc(hay)}" style="display:flex;align-items:stretch;cursor:pointer;min-height:64px">
-      <div class="mono muted" style="flex:0 0 70px;font-size:11px;text-align:right;padding:22px 8px 0 0">${time}</div>
-      <div class="ide-conn" style="flex:0 0 24px;display:flex;justify-content:center;align-items:center">
-        <div style="width:11px;height:11px;border-radius:50%;background:${dot};box-shadow:0 0 0 4px var(--bg);position:relative;z-index:1"></div>
-      </div>
-      <div style="flex:1 1 auto;padding:7px 0 7px 8px;min-width:0">
-        <div class="ide-card" style="background:var(--panel);border:1.5px solid ${bug?'var(--danger)':'var(--line)'};border-radius:10px;padding:9px 12px;${seg.passive?'opacity:.72':''}">
+    // Row = [time] [rail anchor — invisible, kept so arrows align under it]
+    // [screen card]. The dot was removed for a tighter look; the arrow itself
+    // is the visible connector.
+    const rowHtml = `<div class="ide-row" data-i="${i}" data-crash="${bug?'1':'0'}" data-search="${esc(hay)}" style="display:flex;align-items:stretch;cursor:pointer">
+      <div class="mono muted" style="flex:0 0 70px;font-size:11px;text-align:right;padding:6px 8px 0 0">${time}</div>
+      <div class="ide-row-rail" style="flex:0 0 24px"></div>
+      <div style="flex:1 1 auto;padding:1px 0 1px 8px;min-width:0">
+        <div class="ide-card" style="background:var(--panel);border:1.5px solid ${bug?'var(--danger)':'var(--line)'};border-radius:8px;padding:6px 10px;${seg.passive?'opacity:.72':''}">
           <b style="font-size:13px">${bug?'⚠ ':''}📱 ${esc(seg.screen)}</b>${lbl?`<span class="muted" style="font-size:11px;font-weight:400"> - ${esc(lbl)}</span>`:''}
           ${isTop?'<span style="font-size:9px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 6px;margin-left:6px">mới nhất</span>':''}${isBottom?'<span style="font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 6px;margin-left:6px">bắt đầu</span>':''}
           <div style="margin-top:3px">${meta}</div>
         </div>
       </div>
     </div>`;
+    // Arrow ▲ between this row and the next (skip on the bottom = oldest row).
+    // Points UP because the timeline is reversed: newer screens are above, so
+    // the arrow says "the row above me happened AFTER this one". The spacer's
+    // width is set by JS (alignArrows) post-render so the chevron lands exactly
+    // under the dot of the row above, regardless of surrounding layout.
+    return rowHtml + (isBottom ? '' :
+      '<div class="ide-arrow"><div class="ide-arrow-spacer"></div><div class="ide-arrow-chevron">▲</div></div>');
   }).join('');
   main.innerHTML = `<div style="padding:18px 16px 40px">${rows||'<div class="muted">— không có màn —</div>'}
     <div id="ideNoMatch" class="muted" style="display:none;padding:20px;font-size:12px">Không có màn nào khớp bộ lọc.</div></div>`;
+
+  // Align each arrow EXACTLY under the rail anchor of the row above it.
+  // Measured from the DOM (no CSS box-model guessing), so it stays centered no
+  // matter what container wraps the IDE (3-pane, fullscreen, narrow window).
+  const alignArrows = () => {
+    main.querySelectorAll('.ide-arrow').forEach((arr) => {
+      const prevRow = arr.previousElementSibling;
+      if (!prevRow) return;
+      const rail = prevRow.querySelector('.ide-row-rail');
+      const spacer = arr.querySelector('.ide-arrow-spacer');
+      const chevron = arr.querySelector('.ide-arrow-chevron');
+      if (!rail || !spacer || !chevron) return;
+      const arrLeft = arr.getBoundingClientRect().left;
+      const railRect = rail.getBoundingClientRect();
+      const railCenter = railRect.left + railRect.width / 2;
+      const chevW = chevron.getBoundingClientRect().width;
+      const w = railCenter - arrLeft - chevW / 2;
+      spacer.style.width = Math.max(0, w) + 'px';
+    });
+  };
+  // First pass — fonts may not have loaded yet, so re-measure on next frame and
+  // again after fonts are ready (chevron width depends on font metrics).
+  alignArrows();
+  requestAnimationFrame(alignArrows);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(alignArrows);
+  // Re-align on window resize.
+  if (main._alignArrows) window.removeEventListener('resize', main._alignArrows);
+  main._alignArrows = alignArrows;
+  window.addEventListener('resize', alignArrows);
 
   document.getElementById('ideMeta').textContent =
     `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;

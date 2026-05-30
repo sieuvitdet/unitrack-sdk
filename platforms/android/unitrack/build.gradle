@@ -58,6 +58,8 @@ android {
 
 dependencies {
     implementation 'androidx.fragment:fragment:1.6.2'
+    // @Keep annotation for R8/ProGuard rules on JNI-called classes (NativeBridge).
+    implementation 'androidx.annotation:annotation:1.7.1'
     compileOnly    'com.squareup.okhttp3:okhttp:4.12.0'
 
     testImplementation 'junit:junit:4.13.2'

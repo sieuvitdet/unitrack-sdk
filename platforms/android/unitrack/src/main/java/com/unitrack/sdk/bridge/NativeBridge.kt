@@ -1,11 +1,18 @@
 package com.unitrack.sdk.bridge
 
 import android.util.Log
+import androidx.annotation.Keep
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
+// @Keep: the C JNI side (JNI_OnLoad in jni_bridge.cpp) looks up `httpPost` and
+// `parseHeaders` by name via GetStaticMethodID, so R8/ProGuard MUST NOT rename
+// or remove this class or any of its members. Without @Keep, release builds
+// minify `httpPost` to `d` and JNI_OnLoad throws NoSuchMethodError, which
+// crashes the app the first time NativeBridge.load() runs.
+@Keep
 object NativeBridge {
 
     @Volatile private var loaded = false
