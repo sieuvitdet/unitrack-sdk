@@ -61,6 +61,13 @@ object UniTrack {
         // network type, root status, …) — collected once here.
         NativeBridge.setDeviceInfo(DeviceInfo.json(app))
 
+        // Mark initialized BEFORE installing auto-capture: install() may emit a
+        // setScreen for the already-resumed activity (when bootstrap is async),
+        // and a guard checking `initialized` would silently drop that first
+        // screen — losing every screen_view + the start-of-journey marker.
+        initialized = true
+        appRef = app
+
         if (config.autoCapture) {
             if (config.trackScreens) ActivityTracker.install(app)
             if (config.trackTaps)    ClickTracker.install(app)
@@ -68,8 +75,6 @@ object UniTrack {
             AppLifecycleObserver.install(app)
         }
 
-        initialized = true
-        appRef = app
         NativeBridge.logAppStart(0L)
 
         // Bring up any providers registered before initialize().
@@ -180,6 +185,9 @@ object UniTrack {
         obj.put("auto_capture",      c.autoCapture)
         obj.put("journey_capture",   c.journeyCapture)
         obj.put("session_timeout_ms", c.sessionTimeoutMs)
+        obj.put("screen_lifecycle",   c.screenLifecycle)
+        obj.put("screen_start_event", c.screenStartEvent)
+        obj.put("screen_end_event",   c.screenEndEvent)
         obj.put("db_path",
                 ctx.filesDir.absolutePath + "/unitrack_queue.db")
         return obj.toString()

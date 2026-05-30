@@ -16,4 +16,11 @@ data class UniTrackConfig(
     // inactivity/background window after which a session is considered closed.
     val journeyCapture: Boolean = true,
     val sessionTimeoutMs: Int = 1_800_000,  // 30 min
+    // Screen lifecycle: on screen change, core also emits screen_end (with
+    // dwell_ms) for the screen being left and screen_start for the new one.
+    // Both event names are renameable so a team can map them onto its own
+    // taxonomy (e.g. "page_enter" / "page_leave") via remote config.
+    val screenLifecycle: Boolean = true,
+    val screenStartEvent: String = "screen_start",
+    val screenEndEvent: String = "screen_end",
 )

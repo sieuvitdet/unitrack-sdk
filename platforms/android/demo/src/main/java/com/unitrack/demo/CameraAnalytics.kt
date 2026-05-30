@@ -83,6 +83,12 @@ object CameraAnalytics {
                 trackTaps = s.optBoolean("trackTaps", true),
                 trackNetwork = s.optBoolean("trackNetwork", true),
                 journeyCapture = true,
+                // Screen lifecycle (renameable). Pull names from remote config
+                // so a team can map them onto their own taxonomy without an
+                // app rebuild.
+                screenLifecycle = s.optBoolean("screen_lifecycle", true),
+                screenStartEvent = s.optString("screen_start_event", "screen_start"),
+                screenEndEvent = s.optString("screen_end_event", "screen_end"),
             ),
         )
         ready = true   // native lib is now loaded + initialized
