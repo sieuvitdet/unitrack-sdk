@@ -182,6 +182,7 @@ db.exec(`
     firebase       TEXT,                  -- JSON: {enabled, options:{apiKey,appId,projectId,gcmSenderId,bundleId,storageBucket}, superProperties, userProperties}
     event_registry TEXT,                  -- JSON array: [{name, template, schema, forward}]
     rules          TEXT,                  -- JSON array: [{match_event,match_screen,match_element_key,to_name,add_props}]
+    tracing        TEXT,                  -- JSON: {enabled, header_name, allowlist_hosts:[...], sampled}
     version        INTEGER NOT NULL DEFAULT 1,
     updated_at     INTEGER NOT NULL
   );
@@ -210,6 +211,7 @@ ensureColumn('projects', 'providers', 'TEXT');
 // in the portal (Sessions/wireframe) and searchable in the IDE.
 ensureColumn('projects', 'screen_labels', 'TEXT');
 ensureColumn('project_config', 'rules', 'TEXT');
+ensureColumn('project_config', 'tracing', 'TEXT');
 // agent_config may predate the llm_model column (added when wiring the
 // OpenAI-compatible endpoint). Add it to existing databases.
 ensureColumn('agent_config', 'llm_model', 'TEXT');
