@@ -36,8 +36,13 @@ function normalize(e, projectId, ip, provider) {
     event_id:    String(e.event_id),
     event_name:  String(e.event_name),
     timestamp:   Number(e.timestamp),
-    session_id:  e.session_id ?? null,
-    user_id:     e.user_id ?? null,
+    // session_id and user_id may travel top-level (the native SDK injects
+    // them) OR nested inside `properties` (when the SDK fans an event out via
+    // a provider — Firebase / Snowplow mirrors only have the properties bag).
+    // Falling back to props lets provider-mirrored events line up with their
+    // unitrack twin under the same session in /event-detail.
+    session_id:  e.session_id ?? props.session_id ?? null,
+    user_id:     e.user_id ?? props.user_id ?? null,
     screen:      e.screen ?? props.screen ?? null,
     screen_name: e.screen_name ?? props.screen_name ?? props.screen ?? e.screen ?? null,
     class_name:  e.class_name ?? props.class_name ?? props.class ?? null,

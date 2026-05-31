@@ -490,7 +490,15 @@ router.get('/projects/:id/event-detail', ownProject, (req, res) => {
   const { session, name, ts } = req.query;
   if (!name) return res.status(400).json({ error: 'name_required' });
   const t = Number(ts) || 0;
-  const rows = db.prepare(`
+  // The unitrack event always has a session_id (native injects it); provider
+  // mirrors (firebase / snowplow forwards) may not — their HTTP post only
+  // carries the properties bag, and session_id isn't always in there. So we
+  // search in two passes and merge: strict session match for unitrack, and a
+  // looser match-by-name-and-time for any provider mirror within ±5s. This
+  // catches a Firebase mirror posted 50–200ms after the unitrack twin without
+  // pulling in some unrelated event with the same name from another session.
+  const NEAR_MS = 5_000;
+  const strict = db.prepare(`
     SELECT provider, properties, timestamp, screen_name, element_key
     FROM events
     WHERE project_id = ? AND event_name = ?
@@ -499,11 +507,30 @@ router.get('/projects/:id/event-detail', ownProject, (req, res) => {
     LIMIT 12
   `).all(...(session ? [req.params.id, name, session, t] : [req.params.id, name, t]));
 
-  // Pick the closest event per provider.
   const byProvider = {};
-  for (const r of rows) {
+  for (const r of strict) {
     const p = r.provider || 'unitrack';
     if (!byProvider[p]) {
+      let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
+      byProvider[p] = { properties: props, timestamp: r.timestamp,
+                        screen_name: r.screen_name, element_key: r.element_key };
+    }
+  }
+  // Fill in any missing provider mirror by relaxing the session filter — but
+  // only within the ±NEAR_MS window so we don't fetch a same-named event from
+  // a different session entirely.
+  if (session && t > 0) {
+    const loose = db.prepare(`
+      SELECT provider, properties, timestamp, screen_name, element_key
+      FROM events
+      WHERE project_id = ? AND event_name = ? AND provider <> 'unitrack'
+        AND timestamp BETWEEN ? AND ?
+      ORDER BY ABS(timestamp - ?) ASC
+      LIMIT 12
+    `).all(req.params.id, name, t - NEAR_MS, t + NEAR_MS, t);
+    for (const r of loose) {
+      const p = r.provider || 'unitrack';
+      if (byProvider[p]) continue;
       let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
       byProvider[p] = { properties: props, timestamp: r.timestamp,
                         screen_name: r.screen_name, element_key: r.element_key };

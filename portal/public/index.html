@@ -2746,12 +2746,117 @@ function showActionDetail(a){
   dlg.innerHTML = `
     <div class="dlg-h" style="color:${titleColor}">${isErr?'⚠ ':''}${esc(a.event_name)}${a.element_key?` · ${esc(a.element_key)}`:''}
       <button class="act-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-    <div class="dlg-b">${body}</div>`;
+    <div class="dlg-b">${body}<div id="actProvBlock" style="margin-top:14px"></div></div>`;
   try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
+  // Pull per-provider mirrors (Snowplow + Firebase) for this event so the
+  // operator sees EXACTLY what each provider received. Fire-and-forget — the
+  // dialog renders without it; this just augments when it lands.
+  loadProviderMirrors(a).catch((_)=>{});
   // Close = remove element (✕ + backdrop), so no stray dialog lingers in the DOM.
   const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
   dlg.querySelector('.act-close').onclick = kill;
   dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };
+}
+
+// Fetch + render the per-provider payload of this event ("what was forwarded
+// to Snowplow / Firebase next to what UniTrack stored"). Hits the existing
+// /event-detail endpoint which returns { event_name, providers: { unitrack,
+// snowplow, firebase } }. Renders inside #actProvBlock (created by
+// showActionDetail) so we don't need to know about the dialog plumbing.
+async function loadProviderMirrors(a) {
+  const block = document.getElementById('actProvBlock');
+  if (!block) return;
+  // Need a project context — route.pid is the same one the session was opened
+  // from (the IDE overlay always lives inside a project view).
+  const pid = route?.pid; if (!pid || !a || !a.event_name) return;
+  // Session id is plumbed onto the action by the IDE renderer (data-sid on
+  // the row); fall back to undefined so the endpoint at least filters by name.
+  const sid = a.sid || a.session_id || _ideState?.sid || '';
+  const qs = `session=${encodeURIComponent(sid)}&name=${encodeURIComponent(a.event_name)}&ts=${a.ts||0}`;
+
+  block.innerHTML = '<div class="muted" style="font-size:11px">Đang tải provider forwards…</div>';
+  let resp;
+  try { resp = await api(`/api/projects/${pid}/event-detail?${qs}`); }
+  catch (_) { block.innerHTML = ''; return; }
+
+  // Drop the "unitrack" entry — that's the row we're already showing as
+  // properties above. We only care about external mirrors (snowplow + firebase).
+  // Sort so Snowplow first, Firebase second (alphabetical works).
+  const provs = resp.providers || {};
+  const others = Object.keys(provs).filter((p) => p !== 'unitrack').sort();
+  if (!others.length) { block.innerHTML = ''; return; }
+
+  const colorFor = (p) => p === 'snowplow' ? '#f59e0b' : p === 'firebase' ? '#fbbc05' : 'var(--accent)';
+  const iconFor  = (p) => p === 'snowplow' ? '❄' : p === 'firebase' ? '🔥' : '•';
+
+  const tabs = others.map((p, i) => `
+    <button class="ap-tab" data-p="${p}"
+      style="background:none;border:none;border-bottom:2px solid ${i===0?colorFor(p):'transparent'};
+             color:${i===0?colorFor(p):'var(--muted)'};font-weight:600;font-size:12px;
+             padding:6px 10px;cursor:pointer;letter-spacing:.3px">
+      ${iconFor(p)} ${p}
+    </button>`).join('');
+  const panes = others.map((p, i) => {
+    const d = provs[p];
+    // Snowplow mirror has _sp_type/_sp_schema/_sp_category etc — pull them out
+    // into a clear header so the operator can see "this went out as a
+    // self_describing event with schema iglu:...".
+    const props = d.properties || {};
+    let header = '';
+    if (p === 'snowplow') {
+      const t = props._sp_type;
+      if (t === 'self_describing') {
+        header = `<div class="muted" style="font-size:11px;margin-bottom:6px">
+          gửi dưới dạng <b style="color:${colorFor(p)}">self-describing</b><br>
+          <span class="mono" style="word-break:break-all">${esc(props._sp_schema || '')}</span></div>`;
+      } else if (t === 'structured') {
+        header = `<div class="muted" style="font-size:11px;margin-bottom:6px">
+          gửi dưới dạng <b style="color:${colorFor(p)}">structured</b>
+          (category=${esc(props._sp_category||'')}, action=${esc(props._sp_action||'')})</div>`;
+      }
+    } else if (p === 'firebase') {
+      header = `<div class="muted" style="font-size:11px;margin-bottom:6px">
+        Firebase Analytics event — <span class="mono">${esc(d.event_name || a.event_name)}</span></div>`;
+    }
+    // Show every key/value the provider received as a kv table (skip the
+    // _sp_* meta we already surfaced in the header).
+    const rows = Object.entries(props)
+      .filter(([k]) => !(p === 'snowplow' && k.startsWith('_sp_')))
+      .map(([k, v]) => `<div class="key">${esc(k)}</div><div class="mono" style="word-break:break-all">${
+        esc(typeof v === 'object' ? JSON.stringify(v) : String(v))
+      }</div>`).join('');
+    const kvHtml = rows
+      ? `<div class="kv" style="grid-template-columns:140px 1fr;font-size:11px">${rows}</div>`
+      : '<div class="muted" style="font-size:11px">(không có properties)</div>';
+    return `<div class="ap-pane" data-p="${p}" style="display:${i===0?'block':'none'};padding-top:10px">
+      ${header}${kvHtml}
+      <div class="muted" style="font-size:10px;margin-top:8px">
+        Gửi lúc: <span class="mono">${d.timestamp ? fmtTime(d.timestamp) : '—'}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  block.innerHTML = `
+    <div class="key" style="margin-bottom:6px">📤 Đã forward tới ${others.length} provider</div>
+    <div style="border:1px solid var(--line);border-radius:8px;background:var(--bg);overflow:hidden">
+      <div style="display:flex;gap:0;border-bottom:1px solid var(--line)">${tabs}</div>
+      <div style="padding:8px 12px 12px">${panes}</div>
+    </div>`;
+
+  // Tab switching — flip borders + display in one pass so the user can compare
+  // snowplow vs firebase by clicking.
+  block.querySelectorAll('.ap-tab').forEach((btn) => {
+    btn.onclick = () => {
+      const p = btn.dataset.p;
+      block.querySelectorAll('.ap-tab').forEach((b) => {
+        b.style.borderBottomColor = b.dataset.p === p ? colorFor(b.dataset.p) : 'transparent';
+        b.style.color = b.dataset.p === p ? colorFor(b.dataset.p) : 'var(--muted)';
+      });
+      block.querySelectorAll('.ap-pane').forEach((pane) => {
+        pane.style.display = pane.dataset.p === p ? 'block' : 'none';
+      });
+    };
+  });
 }
 
 // ── Per-session wireframe: a detailed flow graph of ONE session ────────────

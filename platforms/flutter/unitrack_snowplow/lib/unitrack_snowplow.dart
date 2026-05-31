@@ -18,6 +18,8 @@
 // action = event name). The optional user context entity is attached to every
 // event, mirroring MobiX's snowplow_service.dart.
 
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:snowplow_tracker/snowplow_tracker.dart';
 import 'package:unitrack/unitrack.dart';
@@ -31,7 +33,16 @@ class SnowplowProvider extends AnalyticsProvider {
     this.userContextSchema,
     this.schemas = const {},
     this.options = const SnowplowOptions(),
+    this.portalEndpoint,
+    this.portalApiKey,
   });
+
+  /// When set, every event tracked through Snowplow is ALSO mirrored to the
+  /// UniTrack portal (tagged provider=snowplow) — so the session IDE shows
+  /// exactly what Snowplow received, side-by-side with the unitrack event.
+  /// Same mechanism FirebaseProvider uses.
+  final String? portalEndpoint;
+  final String? portalApiKey;
 
   /// Snowplow tracker flags the developer controls.
   final SnowplowOptions options;
@@ -101,6 +112,7 @@ class SnowplowProvider extends AnalyticsProvider {
     final t = _tracker;
     if (t == null) return;
     final schema = schemas[name];
+    Map<String, Object?> mirror;
     if (schema != null) {
       t.track(
         SelfDescribing(
@@ -109,22 +121,64 @@ class SnowplowProvider extends AnalyticsProvider {
         ),
         contexts: _contexts(),
       );
+      // Snowplow received this as a self-describing event — record both the
+      // schema and the original properties so the portal can show them
+      // exactly the way they went out on the wire.
+      mirror = {
+        '_sp_type': 'self_describing',
+        '_sp_schema': schema,
+        ...properties,
+      };
     } else {
       // No registered schema → Structured event. Snowplow Structured only has
       // category/action/label/property/value, so fold a couple of common
       // properties into label/property for visibility.
+      final label = properties['screen']?.toString() ??
+          properties['screen_name']?.toString();
+      final property = properties['element_key']?.toString() ??
+          properties['state']?.toString();
       t.track(
         Structured(
           category: 'unitrack',
           action: name,
-          label: properties['screen']?.toString() ??
-              properties['screen_name']?.toString(),
-          property: properties['element_key']?.toString() ??
-              properties['state']?.toString(),
+          label: label,
+          property: property,
         ),
         contexts: _contexts(),
       );
+      // Mirror reflects the Structured shape so the portal can show
+      // category/action/label/property like Snowplow's own UI would.
+      mirror = {
+        '_sp_type': 'structured',
+        '_sp_category': 'unitrack',
+        '_sp_action': name,
+        if (label != null) '_sp_label': label,
+        if (property != null) '_sp_property': property,
+        ...properties,
+      };
     }
+    _mirrorToPortal(name, mirror);
+  }
+
+  // Same fire-and-forget pattern as FirebaseProvider so the portal sees the
+  // event as `provider=snowplow`. session_id is pulled off the event's own
+  // properties when present (the SDK injects it on every event before fan-out).
+  void _mirrorToPortal(String name, Map<String, Object?> properties) {
+    final ep = portalEndpoint, key = portalApiKey;
+    if (ep == null || key == null || ep.isEmpty || key.isEmpty) return;
+    final uri = Uri.parse('$ep${ep.contains('?') ? '&' : '?'}provider=snowplow');
+    final body = jsonEncode({
+      'event_id': '${DateTime.now().microsecondsSinceEpoch}_$name',
+      'event_name': name,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'properties': properties,
+    });
+    HttpClient().postUrl(uri).then((req) {
+      req.headers.set('Content-Type', 'application/json');
+      req.headers.set('Authorization', 'Bearer $key');
+      req.add(utf8.encode(body));
+      return req.close();
+    }).then((resp) => resp.drain<void>()).catchError((_) {/* best effort */});
   }
 
   @override
