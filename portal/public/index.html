@@ -3045,6 +3045,12 @@ async function openCrashReportDialog(pid) {
 function renderCrashReport(pid, data, killFn) {
   const body = document.getElementById('crashBody');
   if (!body) return;
+  // Override the inherited `.dlg-b` flex-column on this container — flex
+  // siblings get height:0 by default in a vertical flex layout and that
+  // collapsed every crash row to a thin line (the "16 rows, no content"
+  // symptom). Block layout lets each row claim its natural height.
+  body.style.display = 'block';
+  body.style.gap = '0';
   if (!data.groups || !data.groups.length) {
     body.innerHTML = '<div class="muted">Không có crash nào (data.total_crashes = 0).</div>';
     return;
