@@ -1429,6 +1429,24 @@ function drawSessionJourneyOverlay(replaySegs, sid){
   const layer = document.createElementNS(ns, 'g');
   layer.setAttribute('id','wfSessionJourney');
 
+  // Dim green arrow marker for this overlay only. The aggregate graph's
+  // #arrow uses blue (#5b8cff); we keep it untouched and add our own so the
+  // session chain reads as a quieter secondary layer.
+  let svgDefs = svg.querySelector('defs');
+  if (svgDefs && !svgDefs.querySelector('#arrowSj')) {
+    const m = document.createElementNS(ns, 'marker');
+    m.setAttribute('id','arrowSj');
+    m.setAttribute('viewBox','0 0 10 10');
+    m.setAttribute('refX','9'); m.setAttribute('refY','5');
+    m.setAttribute('markerWidth','5'); m.setAttribute('markerHeight','5');
+    m.setAttribute('orient','auto-start-reverse');
+    const head = document.createElementNS(ns,'path');
+    head.setAttribute('d','M0,0 L10,5 L0,10 Z');
+    head.setAttribute('fill','#27d79699');
+    m.appendChild(head);
+    svgDefs.appendChild(m);
+  }
+
   // Faint backdrop band so the overlay reads as a separate "lane" below the
   // aggregate graph (instead of overlapping it like before).
   const band = document.createElementNS(ns,'rect');
@@ -1494,8 +1512,12 @@ function drawSessionJourneyOverlay(replaySegs, sid){
       ].join(' ');
     }
     path.setAttribute('d', d);
-    path.setAttribute('stroke','#27d796'); path.setAttribute('stroke-width','2');
-    path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#arrow)');
+    // Thinner + dashed + dimmer than the nodes — the chain is context, the
+    // cards are what the user reads. Dash 4-on-3-off so the line stays
+    // legible at small zoom without screaming for attention.
+    path.setAttribute('stroke','#27d79688'); path.setAttribute('stroke-width','1.2');
+    path.setAttribute('stroke-dasharray','4,3');
+    path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#arrowSj)');
     layer.appendChild(path);
   }
 
