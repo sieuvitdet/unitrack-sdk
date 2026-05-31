@@ -985,6 +985,10 @@ function heatColor(h){
 }
 let _wfMode = 'flow';   // 'flow' = stuck graph, 'heat' = engagement heatmap
 async function renderWireframe(pid){
+  // Each render builds a fresh SVG, so any cached "base height" from a
+  // previous render is stale — clear it so the next session overlay measures
+  // off the new SVG, not the old one.
+  _wfBaseSvgHeight = null;
   const users = await loadUsers(pid);
   const qs = _userFilter ? `?user=${encodeURIComponent(_userFilter)}` : '';
   const g = await api(`/api/projects/${pid}/flowgraph${qs}`);
@@ -1326,98 +1330,207 @@ let _wfSessionOverlayPid = null;
 function clearSessionJourneyOverlay(){
   const g = document.getElementById('wfSessionJourney');
   if(g) g.remove();
+  // Shrink the SVG back to its pre-overlay height so the canvas doesn't
+  // accumulate empty space across sessions. _wfBaseSvgHeight is null when no
+  // overlay has been drawn yet (or after renderWireframe reset it).
+  const svg = document.getElementById('wfSvg');
+  if (svg && _wfBaseSvgHeight != null) svg.setAttribute('height', _wfBaseSvgHeight);
 }
+// Cached SVG height before this overlay was added, so each redraw extends
+// from the same base instead of compounding the height every time a new
+// session is picked.
+let _wfBaseSvgHeight = null;
+
 function drawSessionJourneyOverlay(replaySegs, sid){
   clearSessionJourneyOverlay();
   const svg = document.getElementById('wfSvg'); if(!svg) return;
   const cw  = svg.width.baseVal.value;
-  const ch  = svg.height.baseVal.value;
+  // First overlay of this render establishes the base height; subsequent
+  // re-draws (different session) measure off it, not off the previous
+  // overlay's extended height.
+  if (_wfBaseSvgHeight == null) _wfBaseSvgHeight = svg.height.baseVal.value;
+  const ch = _wfBaseSvgHeight;
+
   // Collapse adjacent same-screen steps so the chain has 1 node per screen.
+  // Keep aggregated stats (events + networks + time range) per collapsed node
+  // — we render those as extra rows on the node and the replay engine uses
+  // them to highlight the active overlay node.
   const screens = [];
   for(const s of replaySegs){
-    if(!screens.length || screens[screens.length-1].screen !== s.screen)
-      screens.push({ screen: s.screen, idx: replaySegs.indexOf(s) });
+    const last = screens[screens.length-1];
+    if(last && last.screen === s.screen){
+      last.last_ts = s.last_ts || s.start_ts || last.last_ts;
+      // Track the segment object so the replay cursor can jump to its overlay node.
+      last.refs.push(s);
+    } else {
+      screens.push({
+        screen: s.screen,
+        start_ts: s.start_ts,
+        last_ts: s.last_ts || s.start_ts,
+        refs: [s],
+      });
+    }
   }
   if(!screens.length) return;
-  const NODE_W = 150, NODE_H = 44, GAP = 26;
-  const perRow = Math.max(1, Math.floor((cw - 60) / (NODE_W + GAP)));
-  // Lay nodes left→right, wrapping into multiple rows; row stack flows downward.
-  const baseY = ch - 30;                // first row sits just above the bottom
-  const rowH = NODE_H + 22;
-  const place = (i)=>{
-    const row = Math.floor(i/perRow);
+
+  // Count events + network per collapsed screen so each node card can show
+  // "N sự kiện · M network". Events = taps + business events (NOT screen_view
+  // itself which is just the entry marker). Networks = network_request /
+  // network_error count.
+  const isNetEvent = (n) => n === 'network_request' || n === 'network_error';
+  for (const sc of screens) {
+    let events = 0, nets = 0;
+    for (const r of sc.refs) {
+      for (const e of (r.events || [])) {
+        if (isNetEvent(e.event_name)) nets++;
+        else if (e.event_name !== 'screen_view' && e.event_name !== 'screen_load_completed') events++;
+      }
+    }
+    sc.eventCount = events;
+    sc.netCount   = nets;
+  }
+  // Compute the exit time for each screen: when the user moved on (i.e. the
+  // NEXT screen's start_ts). For the last screen, fall back to its last_ts.
+  for (let i = 0; i < screens.length; i++) {
+    screens[i].exit_ts = (i + 1 < screens.length) ? screens[i + 1].start_ts : screens[i].last_ts;
+  }
+
+  // Layout: a node card with 3 text rows (name / counts / time range) needs
+  // more vertical room than before. Width too — labels like "10:14:32 → 10:14:35"
+  // are wider than the screen name.
+  const NODE_W = 170, NODE_H = 70, GAP_X = 24, GAP_Y = 28;
+  const perRow = Math.max(1, Math.floor((cw - 60) / (NODE_W + GAP_X)));
+  const rows = Math.ceil(screens.length / perRow);
+
+  // Top padding inside the overlay band; the band starts at BAND_TOP_OFFSET
+  // BELOW the existing graph so the focused session sits in its own lane.
+  const BAND_TOP_OFFSET = 24;      // visual gap from the aggregate graph
+  const TITLE_H = 22;               // room for the "Hành trình session …" label
+  const BAND_PAD_Y = 14;            // padding inside the band, top+bottom each
+  const bandTop = ch + BAND_TOP_OFFSET;
+  const bandH = TITLE_H + BAND_PAD_Y + rows * NODE_H + (rows - 1) * GAP_Y + BAND_PAD_Y;
+
+  // place(i) → top-left of node i, relative to the SVG origin.
+  const place = (i) => {
+    const row = Math.floor(i / perRow);
     const col = i % perRow;
-    return { x: 30 + col*(NODE_W+GAP), y: baseY - row*rowH };
+    return {
+      x: 30 + col * (NODE_W + GAP_X),
+      y: bandTop + TITLE_H + BAND_PAD_Y + row * (NODE_H + GAP_Y),
+    };
+  };
+  // Node centre (used as the replay cursor target for the overlay row).
+  const centreOf = (i) => {
+    const p = place(i);
+    return { cx: p.x + NODE_W / 2, cy: p.y + NODE_H / 2 };
   };
 
   const ns = 'http://www.w3.org/2000/svg';
   const layer = document.createElementNS(ns, 'g');
   layer.setAttribute('id','wfSessionJourney');
-  // A faint backdrop band so the overlay reads as a separate "lane".
-  const bandRows = Math.ceil(screens.length / perRow);
-  const bandTop = baseY - (bandRows-1)*rowH - NODE_H/2 - 18;
-  const bandH = bandRows*rowH + 12;
+
+  // Faint backdrop band so the overlay reads as a separate "lane" below the
+  // aggregate graph (instead of overlapping it like before).
   const band = document.createElementNS(ns,'rect');
   band.setAttribute('x','12'); band.setAttribute('y', bandTop);
-  band.setAttribute('width', cw-24); band.setAttribute('height', bandH);
+  band.setAttribute('width', cw - 24); band.setAttribute('height', bandH);
   band.setAttribute('rx','12');
   band.setAttribute('fill','#27d79611'); band.setAttribute('stroke','#27d79655');
   band.setAttribute('stroke-dasharray','6,4');
   layer.appendChild(band);
+
   const title = document.createElementNS(ns,'text');
-  title.setAttribute('x','22'); title.setAttribute('y', bandTop+16);
+  title.setAttribute('x','22'); title.setAttribute('y', bandTop + 16);
   title.setAttribute('font-size','11'); title.setAttribute('fill','#27d796');
   title.setAttribute('font-weight','700');
   title.textContent = `Hành trình session ${shortSid(sid)} (${screens.length} màn)`;
   layer.appendChild(title);
 
-  // Arrows between consecutive screens (forward).
-  for(let i=1;i<screens.length;i++){
-    const a=place(i-1), b=place(i);
+  // Arrows between consecutive screens. Same-row = straight horizontal,
+  // row wrap = vertical-then-horizontal so the path doesn't cross other nodes.
+  for(let i = 1; i < screens.length; i++){
+    const a = place(i-1), b = place(i);
     const path = document.createElementNS(ns,'path');
     let d;
-    if(Math.abs(a.y - b.y) < 1){
-      // Same row → straight horizontal arrow.
-      d = `M${a.x+NODE_W},${a.y} L${b.x-4},${b.y}`;
+    const ay = a.y + NODE_H / 2;
+    const by = b.y + NODE_H / 2;
+    if (Math.abs(ay - by) < 1) {
+      d = `M${a.x + NODE_W},${ay} L${b.x - 4},${by}`;
     } else {
-      // Row wrap → S-curve down.
+      // Row wrap: bend down on the right, sweep left, come up on the left.
       const mx = (a.x + NODE_W + b.x) / 2;
-      d = `M${a.x+NODE_W/2},${a.y+NODE_H/2} C${mx},${a.y+NODE_H/2} ${mx},${b.y-NODE_H/2} ${b.x+NODE_W/2},${b.y-NODE_H/2}`;
+      d = `M${a.x + NODE_W / 2},${ay} C${mx},${ay} ${mx},${by} ${b.x + NODE_W / 2},${by}`;
     }
     path.setAttribute('d', d);
-    path.setAttribute('stroke', '#27d796'); path.setAttribute('stroke-width','2');
+    path.setAttribute('stroke','#27d796'); path.setAttribute('stroke-width','2');
     path.setAttribute('fill','none'); path.setAttribute('marker-end','url(#arrow)');
     layer.appendChild(path);
   }
-  // Nodes.
-  screens.forEach((sc,i)=>{
+
+  // Time formatter for the per-node "entered → exited" row. Show HH:mm:ss
+  // (sessions span minutes/hours, not days), and dash when missing.
+  const fmtHMS = (ms) => ms ? new Date(ms).toLocaleTimeString('vi-VN', { hour12: false }) : '—';
+
+  // Node cards with three rows of text.
+  screens.forEach((sc, i) => {
     const p = place(i);
-    const g = document.createElementNS(ns,'g');
+    const c = centreOf(i);
+    // Stash the centre on the source segments so the replay cursor knows
+    // where to land for THIS screen on the overlay.
+    for (const r of sc.refs) r.overlayPos = c;
+
+    const g = document.createElementNS(ns, 'g');
     g.setAttribute('class','wf-sj-node');
+    g.setAttribute('data-overlay-screen', sc.screen);
     g.style.cursor = 'pointer';
+
     const rect = document.createElementNS(ns,'rect');
-    rect.setAttribute('x', p.x); rect.setAttribute('y', p.y - NODE_H/2);
+    rect.setAttribute('x', p.x); rect.setAttribute('y', p.y);
     rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
     rect.setAttribute('rx','8'); rect.setAttribute('fill','#27d79622');
     rect.setAttribute('stroke','#27d796'); rect.setAttribute('stroke-width','1.5');
     g.appendChild(rect);
+
+    // Row 1: screen name (label resolved through screen_labels map).
     const lbl = screenLabel(sc.screen) || sc.screen;
-    const shown = lbl.length>18 ? lbl.slice(0,17)+'…' : lbl;
-    const t = document.createElementNS(ns,'text');
-    t.setAttribute('x', p.x+NODE_W/2); t.setAttribute('y', p.y+4);
-    t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','12');
-    t.setAttribute('font-weight','600'); t.setAttribute('fill','var(--text)');
-    t.textContent = shown;
-    g.appendChild(t);
-    g.addEventListener('click', (ev)=>{ ev.stopPropagation(); openSessionDetailDrawer(sc.screen, replaySegs); });
+    const shown = lbl.length > 20 ? lbl.slice(0, 19) + '…' : lbl;
+    const t1 = document.createElementNS(ns,'text');
+    t1.setAttribute('x', p.x + NODE_W / 2); t1.setAttribute('y', p.y + 18);
+    t1.setAttribute('text-anchor','middle'); t1.setAttribute('font-size','12');
+    t1.setAttribute('font-weight','600'); t1.setAttribute('fill','var(--text)');
+    t1.textContent = shown;
+    g.appendChild(t1);
+
+    // Row 2: event + network counts.
+    const t2 = document.createElementNS(ns,'text');
+    t2.setAttribute('x', p.x + NODE_W / 2); t2.setAttribute('y', p.y + 36);
+    t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','10.5');
+    t2.setAttribute('fill','#9fbcff');
+    t2.textContent = `${sc.eventCount} sự kiện · ${sc.netCount} network`;
+    g.appendChild(t2);
+
+    // Row 3: entered → exited time range. Dim grey so it doesn't fight with
+    // the counts above.
+    const t3 = document.createElementNS(ns,'text');
+    t3.setAttribute('x', p.x + NODE_W / 2); t3.setAttribute('y', p.y + 54);
+    t3.setAttribute('text-anchor','middle'); t3.setAttribute('font-size','10');
+    t3.setAttribute('fill','var(--muted)');
+    t3.setAttribute('font-family','ui-monospace,monospace');
+    t3.textContent = `${fmtHMS(sc.start_ts)} → ${fmtHMS(sc.exit_ts)}`;
+    g.appendChild(t3);
+
+    g.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openSessionDetailDrawer(sc.screen, replaySegs);
+    });
     layer.appendChild(g);
   });
+
   svg.appendChild(layer);
-  // Expand SVG height if overlay went past the bottom (rare with single-row).
-  if (bandTop < 0) {
-    const newH = ch + Math.abs(bandTop) + 20;
-    svg.setAttribute('height', newH);
-  }
+  // Always extend the SVG so the overlay band has room — the previous
+  // version drew on TOP of the aggregate graph, which is what made the
+  // session chain visually collide with the flow.
+  svg.setAttribute('height', bandTop + bandH + 20);
 }
 
 // Drawer with one screen's actions + network — reuses showIDEDetailScreen.
@@ -1615,16 +1728,27 @@ function renderReplayFrame(elapsedMs){
   }
   const cur = st.segs[i];
   const nxt = st.segs[i+1];
+  // Prefer the OVERLAY node centre (set by drawSessionJourneyOverlay so each
+  // collapsed screen has its own card) — that's what the user is actually
+  // looking at when they click a session. Fall back to the aggregate graph
+  // position if the overlay hasn't drawn this screen for some reason.
+  const posOf = (seg) => seg ? (seg.overlayPos || seg.pos) : null;
+  const curPos = posOf(cur);
+  const nxtPos = posOf(nxt);
   let cx, cy;
   // Transition window: animate the move during the last 600ms of the cursor's
   // time on `cur` before tNow reaches `nxt.start_ts`. Outside that, sit on the node.
   const TRANS_MS = 600;
-  if(nxt && (nxt.start_ts - tNow) < TRANS_MS && nxt.pos && cur.pos){
+  if(nxt && (nxt.start_ts - tNow) < TRANS_MS && nxtPos && curPos){
     const f = 1 - (nxt.start_ts - tNow)/TRANS_MS;
-    cx = cur.pos.cx + (nxt.pos.cx - cur.pos.cx) * f;
-    cy = cur.pos.cy + (nxt.pos.cy - cur.pos.cy) * f;
+    cx = curPos.cx + (nxtPos.cx - curPos.cx) * f;
+    cy = curPos.cy + (nxtPos.cy - curPos.cy) * f;
+  } else if (curPos) {
+    cx = curPos.cx; cy = curPos.cy;
   } else {
-    cx = cur.pos.cx; cy = cur.pos.cy;
+    // Defensive — no position resolved at all; hide the cursor for this frame.
+    cursor.setAttribute('cx', -100); cursor.setAttribute('cy', -100);
+    return;
   }
   cursor.setAttribute('cx', cx); cursor.setAttribute('cy', cy);
 
@@ -1636,11 +1760,11 @@ function renderReplayFrame(elapsedMs){
     const dt = tNow - ev.ts;
     if(dt >= 0 && dt < 400) rippleEv = ev;
   }
-  if(rippleEv){
+  if(rippleEv && curPos){
     const dt = tNow - rippleEv.ts;
     const f = dt/400;
-    ripple.setAttribute('cx', cur.pos.cx);
-    ripple.setAttribute('cy', cur.pos.cy);
+    ripple.setAttribute('cx', curPos.cx);
+    ripple.setAttribute('cy', curPos.cy);
     ripple.setAttribute('r', 12 + f*30);
     ripple.setAttribute('fill-opacity', (0.45*(1-f)).toFixed(2));
     ripple.setAttribute('stroke', rippleEv.event_name==='crash' ? '#dc2626' : '#27d796');
@@ -1655,10 +1779,10 @@ function renderReplayFrame(elapsedMs){
   const stuckThresh = Math.max(3000, baseline * 2);
   const isStuck = (baseline > 0 || onSegMs > 5000) && onSegMs > stuckThresh
                   && (!nxt || (nxt.start_ts - tNow) > TRANS_MS);
-  if(isStuck){
+  if(isStuck && curPos){
     stuckLabel.style.display = '';
-    stuckLabel.setAttribute('x', cur.pos.cx);
-    stuckLabel.setAttribute('y', cur.pos.cy - 32);
+    stuckLabel.setAttribute('x', curPos.cx);
+    stuckLabel.setAttribute('y', curPos.cy - 32);
     stuckLabel.textContent = `⚠ đứng ${(onSegMs/1000).toFixed(0)}s`;
     // Briefly outline the node red.
     const nodeG = document.querySelector(`#wfSvg .wf-node[data-screen="${cur.screen.replace(/"/g,'\\"')}"] rect`);
