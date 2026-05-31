@@ -1446,20 +1446,52 @@ function drawSessionJourneyOverlay(replaySegs, sid){
   title.textContent = `Hành trình session ${shortSid(sid)} (${screens.length} màn)`;
   layer.appendChild(title);
 
-  // Arrows between consecutive screens. Same-row = straight horizontal,
-  // row wrap = vertical-then-horizontal so the path doesn't cross other nodes.
+  // Arrows between consecutive screens.
+  // - Same row → straight horizontal line, right edge → left edge of next.
+  // - Row wrap → orthogonal "elbow" path that exits the right edge, travels
+  //   DOWN into the corridor between rows, then LEFT along the corridor's
+  //   midline (so it can't overlap any node), then comes UP into the next
+  //   row's first node. The previous Bezier was a single curve through the
+  //   diagonal middle and chopped right across the row beneath it.
+  const CORNER_R = 8;                          // visual corner radius
   for(let i = 1; i < screens.length; i++){
     const a = place(i-1), b = place(i);
-    const path = document.createElementNS(ns,'path');
-    let d;
     const ay = a.y + NODE_H / 2;
     const by = b.y + NODE_H / 2;
+    const path = document.createElementNS(ns,'path');
+    let d;
     if (Math.abs(ay - by) < 1) {
+      // Same-row straight arrow.
       d = `M${a.x + NODE_W},${ay} L${b.x - 4},${by}`;
     } else {
-      // Row wrap: bend down on the right, sweep left, come up on the left.
-      const mx = (a.x + NODE_W + b.x) / 2;
-      d = `M${a.x + NODE_W / 2},${ay} C${mx},${ay} ${mx},${by} ${b.x + NODE_W / 2},${by}`;
+      // Wrap path uses the inter-row corridor: vertical midpoint between this
+      // node's row bottom and the next row's top is guaranteed to be empty
+      // (place() spaces rows with GAP_Y).
+      const rowGapTop = a.y + NODE_H;          // bottom of source node
+      const rowGapBot = b.y;                   // top of dest node
+      const corrY = (rowGapTop + rowGapBot) / 2;   // midline of the corridor
+
+      // Exit the right edge of the source, run a bit further right (so the
+      // arrow head clears the card), then drop into the corridor.
+      const exitX = a.x + NODE_W + 18;
+      // Enter the left edge of the destination from a tiny bit to its left.
+      const enterX = b.x - 18;
+
+      // Orthogonal polyline with rounded corners. Q (quadratic bezier) corners
+      // use the rowGap midline as the control point so the bend reads as a
+      // smooth 90° arc instead of a sharp angle.
+      d = [
+        `M${a.x + NODE_W},${ay}`,
+        `L${exitX - CORNER_R},${ay}`,
+        `Q${exitX},${ay} ${exitX},${ay + CORNER_R}`,    // top-right corner
+        `L${exitX},${corrY - CORNER_R}`,
+        `Q${exitX},${corrY} ${exitX - CORNER_R},${corrY}`,   // bottom-right corner
+        `L${enterX + CORNER_R},${corrY}`,
+        `Q${enterX},${corrY} ${enterX},${corrY + CORNER_R}`, // bottom-left corner
+        `L${enterX},${by - CORNER_R}`,
+        `Q${enterX},${by} ${enterX + CORNER_R},${by}`,       // top-left corner
+        `L${b.x - 4},${by}`,
+      ].join(' ');
     }
     path.setAttribute('d', d);
     path.setAttribute('stroke','#27d796'); path.setAttribute('stroke-width','2');
