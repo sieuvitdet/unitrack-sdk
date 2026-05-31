@@ -53,18 +53,34 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
         /**
          * Fetch config in the background; [callback] is always called once with a
          * usable config (fresh, cached, or default). Never throws.
+         *
+         * [flavor] selects a per-build override block on the portal
+         * (dev / staging / beta / production). Pass `BuildConfig.FLAVOR` from
+         * the consuming app so debug/release builds get the right overrides
+         * without juggling separate api_keys per flavor.
          */
         @JvmStatic
         @JvmOverloads
         fun fetch(ctx: Context, apiKey: String, configURL: String,
+                  flavor: String? = null,
                   timeoutMs: Int = 3000,
                   callback: (UniTrackRemoteConfig) -> Unit) {
+            // Append ?flavor=... onto the configured URL. URL.openConnection
+            // handles existing query strings already on the URL (e.g. portal
+            // setups that pass api_key as a query param).
+            val urlStr = if (flavor.isNullOrBlank()) configURL
+                else configURL + (if (configURL.contains('?')) "&" else "?") +
+                    "flavor=" + java.net.URLEncoder.encode(flavor, "UTF-8")
             Thread {
                 var result: UniTrackRemoteConfig? = null
                 try {
-                    val conn = (URL(configURL).openConnection() as HttpURLConnection).apply {
+                    val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
                         setRequestProperty("Authorization", "Bearer $apiKey")
+                        // Header form too — useful when a CDN strips query strings.
+                        if (!flavor.isNullOrBlank()) {
+                            setRequestProperty("X-UniTrack-Flavor", flavor)
+                        }
                         connectTimeout = timeoutMs
                         readTimeout = timeoutMs
                     }

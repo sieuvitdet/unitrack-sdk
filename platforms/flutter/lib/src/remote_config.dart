@@ -63,16 +63,33 @@ class UniTrackRemoteConfig {
 
   /// Fetch config from the portal. Always completes with a usable config
   /// (fresh, cached, or [fallback]/default). Never throws.
+  ///
+  /// [flavor] selects a per-build override block on the portal (dev /
+  /// staging / beta / production). Apps usually wire this from their build
+  /// flavor (e.g. `String.fromEnvironment('FLAVOR')` or a `--dart-define`).
   static Future<UniTrackRemoteConfig> fetch({
     required String apiKey,
     required String configURL,
+    String? flavor,
     Duration timeout = const Duration(seconds: 3),
     Map<String, dynamic>? fallback,
   }) async {
+    // Append ?flavor=... — Uri.replace handles existing query strings cleanly.
+    Uri url = Uri.parse(configURL);
+    if (flavor != null && flavor.isNotEmpty) {
+      url = url.replace(queryParameters: {
+        ...url.queryParameters,
+        'flavor': flavor,
+      });
+    }
     try {
       final client = HttpClient()..connectionTimeout = timeout;
-      final req = await client.getUrl(Uri.parse(configURL)).timeout(timeout);
+      final req = await client.getUrl(url).timeout(timeout);
       req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
+      // Header form too — survives a CDN that strips query strings.
+      if (flavor != null && flavor.isNotEmpty) {
+        req.headers.set('X-UniTrack-Flavor', flavor);
+      }
       final resp = await req.close().timeout(timeout);
       if (resp.statusCode == 200) {
         final body = await resp.transform(utf8.decoder).join();

@@ -76,21 +76,38 @@ export const UniTrackRemoteConfig = {
   },
 
   /** Fetch config from the portal. Always resolves with a usable config
-   *  (fresh, cached, or fallback/default). Never throws. */
+   *  (fresh, cached, or fallback/default). Never throws.
+   *
+   *  `flavor` selects a per-build override block (dev / staging / beta /
+   *  production). Apps usually wire this from their build flavor — for RN
+   *  use `__DEV__` or expose your bundler's env variable. */
   async fetch(
     apiKey: string,
     configURL: string,
+    flavor?: string,
     timeoutMs = 3000,
     fallback?: RemoteConfigData,
   ): Promise<RemoteConfigData> {
+    // Append ?flavor=... to the URL. URL constructor handles existing query
+    // strings cleanly; fall back to string concat if URL isn't available
+    // (very old RN runtimes).
+    let url = configURL;
+    if (flavor) {
+      try {
+        const u = new URL(configURL);
+        u.searchParams.set('flavor', flavor);
+        url = u.toString();
+      } catch (_) {
+        url = configURL + (configURL.includes('?') ? '&' : '?') +
+              'flavor=' + encodeURIComponent(flavor);
+      }
+    }
     try {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), timeoutMs);
-      const resp = await fetch(configURL, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: controller.signal,
-      });
+      const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+      if (flavor) headers['X-UniTrack-Flavor'] = flavor;
+      const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
       clearTimeout(t);
       if (resp.ok) {
         const cfg = (await resp.json()) as RemoteConfigData;

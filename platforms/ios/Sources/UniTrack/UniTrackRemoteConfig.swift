@@ -155,19 +155,40 @@ public struct UniTrackRemoteConfig: Codable {
 
     /// Fetch config from the portal. Always calls `completion` exactly once with a
     /// usable config (fresh, cached, or `fallback`). Never blocks the main thread.
+    ///
+    /// `flavor` selects a per-build override block on the portal (dev /
+    /// staging / beta / production). Pass it via build config so debug builds
+    /// get staging endpoints, release builds get production, etc., without
+    /// shipping different api_keys per flavor.
     public static func fetch(apiKey: String,
                              configURL: String,
+                             flavor: String? = nil,
                              timeout: TimeInterval = 3,
                              fallback: UniTrackRemoteConfig? = nil,
                              completion: @escaping (UniTrackRemoteConfig) -> Void) {
         let resolveFailure: () -> UniTrackRemoteConfig = {
             cached(apiKey: apiKey) ?? fallback ?? .builtinDefault()
         }
-        guard let url = URL(string: configURL) else {
+        // Append ?flavor=... if provided. URLComponents handles existing query
+        // strings (some operators paste configURL with ?api_key=... already).
+        var finalURL = URL(string: configURL)
+        if let flavor = flavor, !flavor.isEmpty,
+           var comps = URLComponents(string: configURL) {
+            var items = comps.queryItems ?? []
+            items.append(URLQueryItem(name: "flavor", value: flavor))
+            comps.queryItems = items
+            finalURL = comps.url
+        }
+        guard let url = finalURL else {
             completion(resolveFailure()); return
         }
         var req = URLRequest(url: url, timeoutInterval: timeout)
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        // Header form too — apps behind a CDN that strips query strings still
+        // get the right flavor block.
+        if let flavor = flavor, !flavor.isEmpty {
+            req.setValue(flavor, forHTTPHeaderField: "X-UniTrack-Flavor")
+        }
         URLSession.shared.dataTask(with: req) { data, _, _ in
             var result: UniTrackRemoteConfig
             if let data = data,
