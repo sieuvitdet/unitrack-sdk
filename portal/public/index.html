@@ -975,6 +975,44 @@ function stuckColor(score){
   return '#16a34a';                    // green
 }
 
+// Health classification for a screen node — used to colour the *label* of a
+// node (in both the aggregate graph and the per-session overlay) so the
+// visual scan answers "where's the problem?" without reading numbers.
+//
+// Inputs aren't always all known (e.g. the overlay has crash_count + per-card
+// duration, the aggregate has stuck_score + crash_count). Both call sites pass
+// what they have and let the helper fall back gracefully.
+//
+//   crash/stuck → red   (#ef4444)  — known crash on this screen OR strong stuck signal
+//   nghẽn       → amber (#fbbf24)  — taking unusually long / mid stuck score
+//   theo dõi    → cyan  (#7dd3fc)  — engaged screen worth watching (mid usage)
+//   ổn          → text  (default)  — healthy
+function nodeLabelColor({ crashed = false, stuckScore = 0, dwellMs = 0,
+                          screenAvgDwellMs = 0, eventCount = 0 } = {}){
+  if (crashed || stuckScore >= 0.5) return '#ef4444';
+  // "Nghẽn" — user is stuck on the screen significantly longer than that
+  // screen's typical dwell (or > 8s when we have no baseline), AND the
+  // screen has some activity (not just an idle background tab).
+  const longDwell = dwellMs > 0 &&
+    ((screenAvgDwellMs > 0 && dwellMs > screenAvgDwellMs * 2)
+      || (screenAvgDwellMs === 0 && dwellMs > 8000));
+  if (longDwell || stuckScore >= 0.2) return '#fbbf24';
+  // "Theo dõi" — busy screen that's still healthy. Bumps it visually so a 12
+  // sự kiện · 8 network screen stands out from a flyover.
+  if (eventCount >= 6) return '#7dd3fc';
+  return 'var(--text)';
+}
+
+// Tiny legend chip — reused by the aggregate filter-bar AND the overlay band
+// so both views speak the same language (theo dõi / nghẽn / crash·stuck).
+function nodeLabelLegendHtml(){
+  const chip = (color, txt) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);margin-right:10px">
+       <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>${txt}
+     </span>`;
+  return chip('#7dd3fc','theo dõi') + chip('#fbbf24','nghẽn') + chip('#ef4444','crash / stuck');
+}
+
 // Heatmap color: cold (blue) → warm (orange) → hot (red) by a 0..1 score.
 function heatColor(h){
   if(h >= 0.75) return '#dc2626';   // hot
@@ -1071,9 +1109,16 @@ async function renderWireframe(pid){
     const sub = heatMode
       ? `${n.tap_count} tap · ${n.visits} session`
       : `${n.visits} session · exit ${n.exit_pct}%`;
+    // Tint the title by health (crash → red, stuck → amber, busy → cyan,
+    // else default). Aggregate has stuck_score + crash_count + tap_count.
+    const lblColor = nodeLabelColor({
+      crashed:    n.crash_count > 0,
+      stuckScore: n.stuck_score || 0,
+      eventCount: n.tap_count || 0,
+    });
     return `<g class="wf-node" data-screen="${esc(n.screen)}" data-visits="${n.visits}" data-exits="${n.exits}" data-exit-pct="${n.exit_pct}" data-crash="${n.crash_count}" data-stuck="${n.stuck_score}" data-dwell="${n.avg_dwell_ms}" data-taps="${n.tap_count||0}" data-heat="${n.heat||0}" style="cursor:pointer">
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${fill}" fill-opacity="${fillOp.toFixed(2)}" stroke="${fill}" stroke-width="2"/>
-      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2-4}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">${badge}${esc(label)}</text>
+      <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2-4}" text-anchor="middle" fill="${lblColor}" font-size="13" font-weight="600">${badge}${esc(label)}</text>
       <text x="${p.x+NODE_W/2}" y="${p.y+NODE_H/2+14}" text-anchor="middle" fill="var(--muted)" font-size="11">${sub}</text>
     </g>`;
   }).join('');
@@ -1113,6 +1158,9 @@ async function renderWireframe(pid){
     }).join('') : '<div class="empty" style="padding:20px;font-size:12px">Chưa có session</div>';
   }
 
+  // Legend reflects the SAME palette nodeLabelColor uses, so a red label on
+  // a card means the same thing as a red dot in the legend. Heatmap mode
+  // keeps its own scale (cold → hot) because that's about traffic, not health.
   const legend = heatMode
     ? `<span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">Mức dùng:
         <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:50%;vertical-align:middle"></span> ít</span>
@@ -1121,10 +1169,10 @@ async function renderWireframe(pid){
         <span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:50%;vertical-align:middle"></span> rất nhiều</span>
       </span>`
     : `<span class="muted" style="font-size:11px;display:flex;gap:10px;align-items:center">
-        <span><span style="display:inline-block;width:10px;height:10px;background:#16a34a;border-radius:50%;vertical-align:middle"></span> ổn</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:#facc15;border-radius:50%;vertical-align:middle"></span> theo dõi</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;vertical-align:middle"></span> nghẽn</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:#dc2626;border-radius:50%;vertical-align:middle"></span> crash/stuck</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#94a3b8;border-radius:50%;vertical-align:middle"></span> ổn</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#7dd3fc;border-radius:50%;vertical-align:middle"></span> theo dõi</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#fbbf24;border-radius:50%;vertical-align:middle"></span> nghẽn</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;vertical-align:middle"></span> crash/stuck</span>
       </span>`;
 
   $('#tabBody').innerHTML = `
@@ -1378,22 +1426,39 @@ function drawSessionJourneyOverlay(replaySegs, sid){
   // itself which is just the entry marker). Networks = network_request /
   // network_error count.
   const isNetEvent = (n) => n === 'network_request' || n === 'network_error';
+  const ERR_EVENTS = new Set(['crash','application_error','json_parse_error']);
   for (const sc of screens) {
-    let events = 0, nets = 0;
+    let events = 0, nets = 0, crashed = false;
     for (const r of sc.refs) {
       for (const e of (r.events || [])) {
-        if (isNetEvent(e.event_name)) nets++;
-        else if (e.event_name !== 'screen_view' && e.event_name !== 'screen_load_completed') events++;
+        if (isNetEvent(e.event_name)) {
+          nets++;
+          // status >= 400 / explicit error → treat as a problem on this screen
+          if (e.event_name === 'network_error') crashed = true;
+        } else if (e.event_name !== 'screen_view' && e.event_name !== 'screen_load_completed') {
+          events++;
+          if (ERR_EVENTS.has(e.event_name)) crashed = true;
+        }
       }
     }
     sc.eventCount = events;
     sc.netCount   = nets;
+    sc.crashed    = crashed;
   }
   // Compute the exit time for each screen: when the user moved on (i.e. the
   // NEXT screen's start_ts). For the last screen, fall back to its last_ts.
+  // dwell_ms (how long the user stayed on this screen) feeds nodeLabelColor's
+  // "nghẽn" decision when a screen takes unusually long compared to the
+  // session's other screens.
   for (let i = 0; i < screens.length; i++) {
     screens[i].exit_ts = (i + 1 < screens.length) ? screens[i + 1].start_ts : screens[i].last_ts;
+    screens[i].dwell_ms = Math.max(0, (screens[i].exit_ts || screens[i].start_ts) - screens[i].start_ts);
   }
+  // Median dwell of this session — used as "normal" baseline; a screen
+  // significantly above it is the "nghẽn" candidate. Median (not mean) so a
+  // single 30-minute background event doesn't poison the baseline.
+  const dwells = screens.map(s => s.dwell_ms).filter(d => d > 0).sort((a,b)=>a-b);
+  const medianDwell = dwells.length ? dwells[Math.floor(dwells.length / 2)] : 0;
 
   // Layout: a node card with 3 text rows (name / counts / time range) needs
   // more vertical room than before. Width too — labels like "10:14:32 → 10:14:35"
@@ -1463,6 +1528,31 @@ function drawSessionJourneyOverlay(replaySegs, sid){
   title.setAttribute('font-weight','700');
   title.textContent = `Hành trình session ${shortSid(sid)} (${screens.length} màn)`;
   layer.appendChild(title);
+  // Inline legend on the right of the title — same colours nodeLabelColor uses.
+  // SVG <text> can't easily host dots so we render small <circle> + <text>
+  // pairs inline, each at its own x offset (anchored to the band's right edge).
+  const legendItems = [
+    { color: '#7dd3fc', label: 'theo dõi' },
+    { color: '#fbbf24', label: 'nghẽn' },
+    { color: '#ef4444', label: 'crash / stuck' },
+  ];
+  // Right-align: place from the right edge, walking leftward. Each item gets
+  // (text width estimate + 6px gap + 6px dot + 6px text gap) ~= label.length*6+18.
+  let xRight = cw - 22;
+  for (let i = legendItems.length - 1; i >= 0; i--) {
+    const it = legendItems[i];
+    const slot = it.label.length * 6 + 22;
+    xRight -= slot;
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('cx', xRight); dot.setAttribute('cy', bandTop + 12);
+    dot.setAttribute('r', 4); dot.setAttribute('fill', it.color);
+    layer.appendChild(dot);
+    const txt = document.createElementNS(ns, 'text');
+    txt.setAttribute('x', xRight + 8); txt.setAttribute('y', bandTop + 16);
+    txt.setAttribute('font-size','10.5'); txt.setAttribute('fill','var(--muted)');
+    txt.textContent = it.label;
+    layer.appendChild(txt);
+  }
 
   // Arrows between consecutive screens.
   // - Same row → straight horizontal line, right edge → left edge of next.
@@ -1538,11 +1628,23 @@ function drawSessionJourneyOverlay(replaySegs, sid){
     g.setAttribute('data-overlay-screen', sc.screen);
     g.style.cursor = 'pointer';
 
+    // Health-tinted label (red = crash/stuck, amber = nghẽn, cyan = theo dõi).
+    // Pass medianDwell as the per-screen baseline so the comparison is
+    // intra-session — a 5s screen in a session of 1s-screens reads as "nghẽn"
+    // even when 5s wouldn't qualify in absolute terms.
+    const lblColor = nodeLabelColor({
+      crashed:           sc.crashed,
+      dwellMs:           sc.dwell_ms,
+      screenAvgDwellMs:  medianDwell,
+      eventCount:        sc.eventCount + sc.netCount,
+    });
+    const borderColor = sc.crashed ? '#ef4444' : '#27d796';
+
     const rect = document.createElementNS(ns,'rect');
     rect.setAttribute('x', p.x); rect.setAttribute('y', p.y);
     rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
-    rect.setAttribute('rx','8'); rect.setAttribute('fill','#27d79622');
-    rect.setAttribute('stroke','#27d796'); rect.setAttribute('stroke-width','1.5');
+    rect.setAttribute('rx','8'); rect.setAttribute('fill', sc.crashed ? '#ef444422' : '#27d79622');
+    rect.setAttribute('stroke', borderColor); rect.setAttribute('stroke-width','1.5');
     g.appendChild(rect);
 
     // Row 1: screen name (label resolved through screen_labels map).
@@ -1551,8 +1653,8 @@ function drawSessionJourneyOverlay(replaySegs, sid){
     const t1 = document.createElementNS(ns,'text');
     t1.setAttribute('x', p.x + NODE_W / 2); t1.setAttribute('y', p.y + 18);
     t1.setAttribute('text-anchor','middle'); t1.setAttribute('font-size','12');
-    t1.setAttribute('font-weight','600'); t1.setAttribute('fill','var(--text)');
-    t1.textContent = shown;
+    t1.setAttribute('font-weight','600'); t1.setAttribute('fill', lblColor);
+    t1.textContent = (sc.crashed ? '⚠ ' : '') + shown;
     g.appendChild(t1);
 
     // Row 2: event + network counts.
