@@ -34,6 +34,10 @@
     text-shadow:0 0 4px rgba(91,140,255,.45)}
   @keyframes ideArrowBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
   @media (prefers-reduced-motion: reduce){.ide-arrow{animation:none}}
+  /* Replay highlight on the currently-playing row. Animated outline so it
+     reads as a moving spotlight even when scrolling is instant. */
+  .ide-card.ide-replay-on{outline:2px solid var(--accent);outline-offset:1px;
+    box-shadow:0 0 0 4px rgba(91,140,255,.18);transition:box-shadow .15s}
   /* Wireframe (flow/heatmap) fullscreen + pan/zoom. */
   #wfWrap.wf-fs{position:fixed;inset:0;z-index:45;background:var(--bg);max-height:none!important;padding:0}
   #wfWrap.wf-fs .wf-grid{height:100vh;max-height:none!important}
@@ -504,10 +508,20 @@ async function renderSpMaps(pid){
 }
 
 // ---------- remote config editor (Snowplow / Firebase / SDK) ----------
+//
+// Per-flavor overrides: each provider block carries an optional
+// `flavor_overrides: { dev|staging|beta|production: { … } }`. The editor
+// shows the BASE values + a "Override per flavor" expander; the app side
+// resolves the right block by passing ?flavor=… to /config.
+const FLAVORS = ['dev', 'staging', 'beta', 'production'];
+
 async function renderConfig(pid){
   const c = await api(`/api/projects/${pid}/config`);
-  const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{});
+  const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{}), tr=c.tracing||{};
   const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
+  // Pull existing overrides so the override UI starts populated. Block-level
+  // helper: returns the override object for `flavor` or {}.
+  const ovGet = (block, flavor) => (block && block.flavor_overrides && block.flavor_overrides[flavor]) || {};
   $('#tabBody').innerHTML = `
     <div style="padding:16px;max-width:760px">
       <div class="muted" style="font-size:12px;margin-bottom:14px">
@@ -539,6 +553,7 @@ async function renderConfig(pid){
       </div>
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
+      ${flavorOverrideHtml('Sp', sp)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}> Firebase</label></h3>
@@ -557,6 +572,18 @@ async function renderConfig(pid){
       <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
       <label>userProperties (audience)</label>
       <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
+      ${flavorOverrideHtml('Fb', fb)}
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}> W3C Tracing (traceparent)</label></h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Inject header W3C vào outbound HTTP. Allowlist trống = không inject (fail-closed, không leak trace_id ra Firebase/Maps/CDN).</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px"><label>Header name</label><input id="cfTrHdr" style="width:100%" value="${esc(tr.header_name||'traceparent')}"/></div>
+        <label class="row" style="gap:5px;align-self:flex-end;padding-bottom:6px"><input type="checkbox" id="cfTrSampled" ${tr.sampled!==false?'checked':''}> sampled (flags=01)</label>
+      </div>
+      <label style="margin-top:8px">Allowlist hosts (1 dòng / pattern; <span class="mono">*.suffix.com</span> hỗ trợ wildcard)</label>
+      <textarea id="cfTrHosts" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
+      ${flavorOverrideHtml('Tr', tr)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 4px;font-size:14px">Event registry</h3>
@@ -571,6 +598,55 @@ async function renderConfig(pid){
     </div>`;
 
   const parseKV=(id)=>{const o={};$(id).value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();});return o;};
+
+  // Per-flavor override panel for a block. Each flavor gets a JSON textarea so
+  // the operator can override any keys for that build flavor (matches the
+  // server-side mergeFlavor: shallow merge for primitives/arrays, one-level
+  // deep merge for nested objects like firebase.options). Kept as raw JSON
+  // (not split into N typed inputs) because the override shape is open-ended
+  // and a textarea is robust against future fields being added to a block.
+  function flavorOverrideHtml(prefix, block){
+    const ov = (block && block.flavor_overrides) || {};
+    const rows = FLAVORS.map(f => {
+      const cur = ov[f];
+      const val = cur ? JSON.stringify(cur, null, 2) : '';
+      const tag = f === 'production' ? 'var(--accent2)' : (f === 'beta' ? 'var(--warn)' : (f === 'staging' ? 'var(--accent)' : 'var(--muted)'));
+      return `<div style="margin-top:6px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px">
+          <span style="color:${tag};font-weight:600;min-width:80px">${f}</span>
+          <span class="muted" style="font-size:10px">JSON các trường ghi đè (rỗng = dùng base)</span>
+        </label>
+        <textarea id="cf${prefix}Ov_${f}" placeholder='{"enabled":true,"endpoint":"..."}'
+          style="width:100%;height:54px;font-family:ui-monospace,monospace;font-size:11px">${esc(val)}</textarea>
+      </div>`;
+    }).join('');
+    return `<details style="margin-top:10px;border:1px dashed var(--line);border-radius:6px;padding:8px 12px">
+      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">⚙ Override per flavor (dev / staging / beta / production)</summary>
+      <div class="muted" style="font-size:11px;margin:6px 0">App truyền <span class="mono">?flavor=staging</span> tới <span class="mono">/config</span> → portal merge override này lên base. Bỏ trống = dùng base.</div>
+      ${rows}
+    </details>`;
+  }
+
+  // Read overrides back out of the panel. Returns { dev?, staging?, beta?, production? }
+  // with only the flavors that have non-empty, valid JSON. Invalid JSON keeps
+  // the SAVE handler going (toast warns) so an operator's typo doesn't wipe
+  // the rest of the form.
+  function collectFlavorOverrides(prefix){
+    const out = {};
+    let badFlavor = null;
+    for (const f of FLAVORS) {
+      const raw = $('#cf' + prefix + 'Ov_' + f).value.trim();
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          out[f] = parsed;
+        }
+      } catch (_) { badFlavor = badFlavor || (prefix + '/' + f); }
+    }
+    if (badFlavor) toast('JSON override không hợp lệ ở ' + badFlavor + ' (bỏ qua)', 'err');
+    return Object.keys(out).length ? out : undefined;
+  }
 
   // Firebase file drag-drop → parse json/plist, fill inputs.
   const drop=$('#cfFbDrop');
@@ -602,16 +678,34 @@ async function renderConfig(pid){
   }
 
   $('#cfSave').onclick=async()=>{
-    const body={
+    // Build the base block then attach flavor_overrides if any flavor box has
+    // content. The server treats flavor_overrides as opaque JSON and only
+    // strips it on the app-facing read.
+    const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
+      userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx') };
+    const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
+
+    const firebase = { enabled:$('#cfFbOn').checked,
+      options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
+        projectId:$('#cfFbProj').value.trim(), bundleId:$('#cfFbBundle').value.trim() },
+      superProperties:parseKV('#cfFbSuper'), userProperties:parseKV('#cfFbUser') };
+    const fbOv = collectFlavorOverrides('Fb'); if (fbOv) firebase.flavor_overrides = fbOv;
+
+    // Tracing block (was missing from the save handler before this commit —
+    // editing it on the portal had no effect).
+    const tracing = {
+      enabled: $('#cfTrOn').checked,
+      header_name: $('#cfTrHdr').value.trim() || 'traceparent',
+      allowlist_hosts: $('#cfTrHosts').value.split('\n').map(s=>s.trim()).filter(Boolean),
+      sampled: $('#cfTrSampled').checked,
+    };
+    const trOv = collectFlavorOverrides('Tr'); if (trOv) tracing.flavor_overrides = trOv;
+
+    const body = {
       endpoint: $('#cfEndpoint').value.trim(),
-      sdk_config:{ batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
+      sdk_config: { batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
         autoCapture:$('#cfAuto').checked, trackScreens:$('#cfScreens').checked, trackTaps:$('#cfTaps').checked, trackNetwork:$('#cfNet').checked },
-      snowplow:{ enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
-        userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx') },
-      firebase:{ enabled:$('#cfFbOn').checked,
-        options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
-          projectId:$('#cfFbProj').value.trim(), bundleId:$('#cfFbBundle').value.trim() },
-        superProperties:parseKV('#cfFbSuper'), userProperties:parseKV('#cfFbUser') },
+      snowplow, firebase, tracing,
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
@@ -1877,6 +1971,26 @@ async function openSessionIDE(pid, sid){
       <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
       <button class="btn ghost sm" id="ideClose">✕ Đóng</button>
     </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px">
+      <!-- Replay controls — drive the middle timeline at user-chosen speed.
+           Auto speed picks a target total of ~12s so even a 3-hour session is
+           watchable; raw "real time" is in the dropdown if you want it. -->
+      <button class="btn sm" id="idePlay" style="min-width:74px" disabled>▶ Play</button>
+      <button class="btn ghost sm" id="ideStop" disabled>⏹</button>
+      <label style="display:flex;align-items:center;gap:5px">Tốc độ
+        <select id="ideSpeed" style="background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px">
+          <option value="auto" selected>Auto (~12s)</option>
+          <option value="1">1× (thời gian thật)</option>
+          <option value="2">2×</option>
+          <option value="5">5×</option>
+          <option value="10">10×</option>
+          <option value="50">50×</option>
+          <option value="200">200×</option>
+        </select>
+      </label>
+      <input id="ideSeek" type="range" min="0" max="100" value="0" step="0.1" disabled style="flex:1;accent-color:var(--accent)">
+      <span id="ideNow" class="muted mono" style="min-width:120px;text-align:right">— chọn play để chạy lại session —</span>
+    </div>
     <div style="display:grid;grid-template-columns:260px 1fr 380px;overflow:hidden">
       <div id="ideList" style="border-right:1px solid var(--line);overflow:auto;background:var(--panel)"></div>
       <div id="ideMain" style="overflow:auto;background:var(--bg);position:relative"></div>
@@ -1884,7 +1998,15 @@ async function openSessionIDE(pid, sid){
         <div class="muted" style="font-size:12px">Bấm một màn ở giữa để xem chi tiết event / network của màn đó.</div>
       </div>
     </div>`;
-  document.getElementById('ideClose').onclick = ()=>{ ov.style.display='none'; };
+  // Switch the overlay to 3-row grid (header / replay bar / panes) — replay
+  // bar was added between, so the grid template needs the extra row.
+  ov.style.gridTemplateRows = 'auto auto 1fr';
+  document.getElementById('ideClose').onclick = ()=>{
+    // Stop any running replay so its animation frames don't keep firing after
+    // the overlay is hidden (cheap leak otherwise — RAF survives display:none).
+    ideReplayCleanup();
+    ov.style.display = 'none';
+  };
   // Search box filters the middle pane (debounced); see renderIDEMain.
   const searchEl = document.getElementById('ideSearch');
   searchEl.oninput = ()=>{ clearTimeout(searchEl._h); searchEl._h=setTimeout(()=>applyIDEFilter(), 160); };
@@ -2050,16 +2172,180 @@ async function renderIDEMain(pid, sid){
   }
 
   // Click a row → highlight + show that screen's detail in the right pane.
+  // Also pause any running replay so manual exploration doesn't get yanked
+  // away by the next replay tick.
   main.querySelectorAll('.ide-row').forEach(el=>{
     el.onclick = ()=>{
       main.querySelectorAll('.ide-row .ide-card').forEach(c=>c.style.outline='');
       el.querySelector('.ide-card').style.outline = '2px solid var(--accent)';
       showIDEDetailScreen(segs[+el.dataset.i]);
+      if (_ideReplay && !_ideReplay.paused) ideReplayPause();
     };
   });
 
   // Re-apply any active search query + crash filter to the freshly rendered rows.
   applyIDEFilter();
+
+  // Wire the replay bar to this session's segments. Replay drives the SAME DOM
+  // rows the user can also click — no parallel timeline, no separate cursor —
+  // so search/filter highlights stay consistent.
+  ideReplayBind(pid, sid, segs);
+}
+
+// ── IDE session replay engine ─────────────────────────────────────────────
+// Drives the middle timeline at real (or scaled) timing so the operator can
+// "watch the session happen" without scrubbing manually. The user can pause
+// with the Play button (toggles to Pause), jump with the seek slider, or pick
+// a fixed speed. "Auto" targets a total play time of ~12s regardless of
+// session length so 3-hour sessions become watchable.
+let _ideReplay = null;   // { segs, dur, t0, accum, paused, speedRaw, raf, pid, sid }
+const IDE_AUTO_TARGET_MS = 12_000;   // tune to taste
+
+function ideReplayBind(pid, sid, segs) {
+  // Reset any prior replay state attached to the previous session.
+  ideReplayCleanup();
+
+  const playable = segs.filter(s => s.started_at != null);
+  const enable = playable.length >= 2;   // single-screen session = nothing to "play"
+  const playBtn = document.getElementById('idePlay');
+  const stopBtn = document.getElementById('ideStop');
+  const seekEl  = document.getElementById('ideSeek');
+  const speedEl = document.getElementById('ideSpeed');
+  const nowEl   = document.getElementById('ideNow');
+  if (!playBtn) return;
+
+  for (const el of [playBtn, stopBtn, seekEl]) el.disabled = !enable;
+  if (!enable) {
+    nowEl.textContent = playable.length ? '— phiên 1 màn, không có gì để replay —'
+                                        : '— chưa có timestamp —';
+    return;
+  }
+
+  // Real-time duration of the journey (last segment start – first segment start).
+  const t0 = playable[0].started_at;
+  const tN = playable[playable.length - 1].started_at;
+  const dur = Math.max(1, tN - t0);
+
+  _ideReplay = { pid, sid, segs: playable, t0, dur, accum: 0,
+                 paused: true, speedRaw: speedEl.value, raf: 0, lastFrame: 0 };
+  nowEl.textContent = '0% · 0ms / ' + fmtDur(dur);
+  seekEl.value = 0;
+
+  playBtn.onclick = () => {
+    if (!_ideReplay) return;
+    if (_ideReplay.paused) ideReplayResume();
+    else                   ideReplayPause();
+  };
+  stopBtn.onclick = () => ideReplayStop();
+  speedEl.onchange = () => {
+    if (!_ideReplay) return;
+    _ideReplay.speedRaw = speedEl.value;
+  };
+  // Dragging the seek bar pauses + jumps; release continues if was playing.
+  seekEl.oninput = () => {
+    if (!_ideReplay) return;
+    const pct = parseFloat(seekEl.value) / 100;
+    _ideReplay.accum = pct * _ideReplay.dur;
+    ideReplayApply();   // visual update without advancing time
+  };
+}
+
+// Pick the scale: "auto" maps total real duration → IDE_AUTO_TARGET_MS, with
+// a floor of 1× (don't slow down short sessions) and a ceiling of 500× (very
+// long sessions stay at 500× rather than blurring past). Numeric values use
+// the dropdown verbatim (1× = real time, 50× = 50ms per real second, …).
+function ideReplaySpeed() {
+  if (!_ideReplay) return 1;
+  const raw = _ideReplay.speedRaw;
+  if (raw === 'auto') {
+    return Math.max(1, Math.min(500, _ideReplay.dur / IDE_AUTO_TARGET_MS));
+  }
+  return Math.max(0.1, parseFloat(raw) || 1);
+}
+
+function ideReplayResume() {
+  if (!_ideReplay || !_ideReplay.paused) return;
+  _ideReplay.paused = false;
+  _ideReplay.lastFrame = performance.now();
+  document.getElementById('idePlay').textContent = '⏸ Pause';
+  const tick = (now) => {
+    const st = _ideReplay; if (!st || st.paused) return;
+    const dt = now - st.lastFrame;
+    st.lastFrame = now;
+    st.accum = Math.min(st.dur, st.accum + dt * ideReplaySpeed());
+    ideReplayApply();
+    if (st.accum >= st.dur) { ideReplayPause(); return; }
+    st.raf = requestAnimationFrame(tick);
+  };
+  _ideReplay.raf = requestAnimationFrame(tick);
+}
+function ideReplayPause() {
+  if (!_ideReplay) return;
+  _ideReplay.paused = true;
+  if (_ideReplay.raf) cancelAnimationFrame(_ideReplay.raf);
+  _ideReplay.raf = 0;
+  const btn = document.getElementById('idePlay');
+  if (btn) btn.textContent = '▶ Play';
+}
+function ideReplayStop() {
+  if (!_ideReplay) return;
+  ideReplayPause();
+  _ideReplay.accum = 0;
+  ideReplayApply();
+}
+function ideReplayCleanup() {
+  if (_ideReplay && _ideReplay.raf) cancelAnimationFrame(_ideReplay.raf);
+  _ideReplay = null;
+  // Drop any replay highlight so a re-render doesn't show stale outlines.
+  document.querySelectorAll('.ide-row .ide-card.ide-replay-on')
+    .forEach(el => el.classList.remove('ide-replay-on'));
+}
+
+// Find the segment that's "active" at the current accumulated time, update
+// the seek slider + label, highlight that row, and scroll it into view.
+// The timeline is rendered newest-on-top, so the active row moves UP as
+// replay advances — natural reading order for "watch what just happened".
+function ideReplayApply() {
+  const st = _ideReplay; if (!st) return;
+  const tNow = st.t0 + st.accum;
+  // Pick the latest segment whose started_at <= tNow. Binary-search would be
+  // cleaner but segs here are <100 in practice; linear is fast enough.
+  let idx = 0;
+  for (let i = 0; i < st.segs.length; i++) {
+    if (st.segs[i].started_at <= tNow) idx = i; else break;
+  }
+  const main = document.getElementById('ideMain');
+  if (!main) return;
+  // The middle pane is rendered from window._ideSegs (full segment array).
+  // `st.segs` is the subset with timestamps; map back by object identity
+  // because filter() preserved the references.
+  const seg = st.segs[idx];
+  const row = [...main.querySelectorAll('.ide-row')].find(r => {
+    const i = +r.dataset.i;
+    return window._ideSegs && window._ideSegs[i] === seg;
+  });
+
+  main.querySelectorAll('.ide-row .ide-card.ide-replay-on')
+    .forEach(el => el.classList.remove('ide-replay-on'));
+  if (row) {
+    const card = row.querySelector('.ide-card');
+    if (card) card.classList.add('ide-replay-on');
+    // Keep the active row centred-ish in view; behavior:smooth would lag at
+    // high speed, so jump instantly and let the eye track.
+    row.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }
+
+  const seekEl = document.getElementById('ideSeek');
+  if (seekEl && document.activeElement !== seekEl) {
+    seekEl.value = (st.accum / st.dur * 100).toFixed(1);
+  }
+  const nowEl = document.getElementById('ideNow');
+  if (nowEl) {
+    const speed = ideReplaySpeed();
+    const speedTxt = st.speedRaw === 'auto' ? `${speed.toFixed(0)}× (auto)` : `${st.speedRaw}×`;
+    nowEl.textContent =
+      `${Math.round(st.accum / st.dur * 100)}% · ${fmtDur(st.accum)} / ${fmtDur(st.dur)} · ${speedTxt}`;
+  }
 }
 
 // Right pane: detail of one screen — its actions + nested network calls.
