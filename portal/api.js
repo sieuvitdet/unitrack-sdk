@@ -559,6 +559,16 @@ router.get('/projects/:id/export', ownProject, async (req, res) => {
   res.send(buf);
 });
 
+// Distinct event names observed for a project — used by the config tab to
+// auto-seed the Snowplow schemas map (one iglu URI per known event).
+router.get('/projects/:id/event-names', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const rows = db.prepare(
+    'SELECT DISTINCT event_name FROM events WHERE project_id = ? AND event_name IS NOT NULL ORDER BY event_name'
+  ).all(pid);
+  res.json({ names: rows.map((r) => r.event_name) });
+});
+
 // ---------------------------------------------------------- health (1 project)
 router.get('/projects/:id/health', ownProject, (req, res) => {
   res.json(projectHealth(req.params.id));

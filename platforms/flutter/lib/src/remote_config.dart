@@ -44,6 +44,32 @@ class UniTrackRemoteConfig {
     );
   }
 
+  /// Map of UniTrack event name → iglu schema URI for Snowplow self-describing
+  /// events. Sourced from `snowplow.schemas` on the wire — an empty map (or
+  /// missing block) means everything stays Structured.
+  ///
+  /// Apps wire it like:
+  ///   final cfg = await UniTrackRemoteConfig.fetch(...);
+  ///   snowplowProvider.setSchemas(cfg.snowplowSchemas);
+  Map<String, String> get snowplowSchemas {
+    final raw = snowplow['schemas'];
+    if (raw is Map) {
+      return {
+        for (final e in raw.entries)
+          if (e.key is String && e.value is String) e.key as String: e.value as String,
+      };
+    }
+    return const {};
+  }
+
+  /// Default iglu schema URI for an event name — used by the portal when
+  /// auto-seeding the schemas map. Pattern matches the FTel convention
+  ///   iglu:vn.fpt.ftel.snowplow/<event_name>/jsonschema/1-0-0
+  /// Apps can override per-event via the snowplow.schemas map.
+  static String defaultIgluSchema(String eventName, {String version = '1-0-0'}) {
+    return 'iglu:vn.fpt.ftel.snowplow/$eventName/jsonschema/$version';
+  }
+
   /// Map config rules → SDK rules and install them on UniTrack.
   List<UniTrackEventRule> toEventRules() => rules.map((r) {
         final m = Map<String, dynamic>.from(r as Map);

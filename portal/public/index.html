@@ -562,6 +562,26 @@ async function renderConfig(pid){
       </div>
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
+
+      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <b style="font-size:13px">Iglu schemas</b>
+          <span class="muted" style="font-size:11px">map <span class="mono">event_name</span> → <span class="mono">iglu:vn.fpt.ftel.snowplow/&lt;event&gt;/jsonschema/&lt;version&gt;</span></span>
+          <span style="flex:1"></span>
+          <button class="btn ghost sm" id="cfSpSchemaSeed" type="button"
+            title="Sinh schemas mặc định cho mọi event đã thấy + các event registry">
+            ✨ Tự sinh từ event đang có
+          </button>
+        </div>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">
+          Event có schema → Snowplow nhận dưới dạng <b>self-describing</b> (theo URI iglu).
+          Event không có → fallback Structured. Một dòng / event:
+          <span class="mono">event_name = iglu:vn.fpt.ftel.snowplow/event_name/jsonschema/1-0-0</span>
+        </div>
+        <textarea id="cfSpSchemas" placeholder="ev_click_check_in = iglu:vn.fpt.ftel.snowplow/ev_click_check_in/jsonschema/1-0-0"
+          style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px">${esc(kvText(sp.schemas))}</textarea>
+      </div>
+
       ${flavorOverrideHtml('Sp', sp)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
@@ -657,6 +677,46 @@ async function renderConfig(pid){
     return Object.keys(out).length ? out : undefined;
   }
 
+  // ── Snowplow schemas auto-seed ────────────────────────────────────────
+  // Click ✨ → pull every distinct event_name seen for this project, build a
+  // default iglu URI per event (iglu:vn.fpt.ftel.snowplow/<event>/jsonschema/1-0-0),
+  // and merge into the textarea WITHOUT overwriting entries the operator
+  // already typed. Saves a lot of repetitive typing for a 21-event project.
+  const seedBtn = document.getElementById('cfSpSchemaSeed');
+  if (seedBtn) seedBtn.onclick = async () => {
+    seedBtn.disabled = true; seedBtn.textContent = '⏳ Đang lấy event…';
+    try {
+      const data = await api(`/api/projects/${pid}/event-names`);
+      const names = (data && data.names) || [];
+      // Filter to BUSINESS events: skip the SDK auto-capture names
+      // (tap / network_request / screen_view / session_*) — those don't
+      // need iglu schemas.
+      const SKIP = new Set([
+        'tap','network_request','network_error','screen_view','screen_start','screen_end',
+        'screen_load_completed','session_start','session_end','session_started','session_ended',
+        'app_start','app_foreground','app_background','crash','application_error','json_parse_error',
+        'memory_warning','identify','reset',
+      ]);
+      const business = names.filter((n) => n && !SKIP.has(n));
+      // Merge into existing textarea (don't overwrite already-set URIs).
+      const existing = parseKV('#cfSpSchemas');
+      let added = 0;
+      for (const n of business) {
+        if (!existing[n] || !existing[n].trim()) {
+          existing[n] = `iglu:vn.fpt.ftel.snowplow/${n}/jsonschema/1-0-0`;
+          added++;
+        }
+      }
+      document.getElementById('cfSpSchemas').value =
+        Object.entries(existing).map(([k, v]) => `${k}=${v}`).join('\n');
+      toast(added > 0 ? `Đã thêm ${added} schema mới (chưa lưu — bấm Lưu config)` : 'Mọi event đã có schema');
+    } catch (e) {
+      toast('Lỗi lấy event: ' + (e.message || e), 'err');
+    } finally {
+      seedBtn.disabled = false; seedBtn.textContent = '✨ Tự sinh từ event đang có';
+    }
+  };
+
   // Firebase file drag-drop → parse json/plist, fill inputs.
   const drop=$('#cfFbDrop');
   ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
@@ -691,7 +751,11 @@ async function renderConfig(pid){
     // content. The server treats flavor_overrides as opaque JSON and only
     // strips it on the app-facing read.
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
-      userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx') };
+      userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx'),
+      // schemas map: parsed from the kv textarea ("event_name = iglu:..."). Drop
+      // empty values so the SDK doesn't try to register a self-describing call
+      // with an empty URI.
+      schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)) };
     const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 
     const firebase = { enabled:$('#cfFbOn').checked,

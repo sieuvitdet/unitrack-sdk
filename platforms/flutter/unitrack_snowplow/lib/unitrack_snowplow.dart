@@ -64,8 +64,19 @@ class SnowplowProvider extends AnalyticsProvider {
   final String? userContextSchema;
 
   /// Map of UniTrack event name -> iglu schema URI. Matching events become
-  /// self-describing events; others fall back to Structured events.
-  final Map<String, String> schemas;
+  /// self-describing events; others fall back to Structured events. Mutable
+  /// because the typical wiring is: provider is created at app init (sync)
+  /// but the remote config is fetched a beat later — applyFromRemoteConfig()
+  /// rewrites this map without forcing a re-init of the underlying tracker.
+  Map<String, String> schemas;
+
+  /// Replace the schemas map at runtime (e.g. from remote config). Existing
+  /// entries are dropped; pass an empty map to disable self-describing
+  /// fan-out and fall back to Structured for everything.
+  void setSchemas(Map<String, String> next) {
+    schemas = Map<String, String>.from(next);
+    debugPrint('[unitrack_snowplow] schemas updated: ${schemas.length} entries');
+  }
 
   SnowplowTracker? _tracker;
 
