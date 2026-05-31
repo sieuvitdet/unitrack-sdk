@@ -17,6 +17,48 @@ const parse = (s, fallback) => {
   try { return JSON.parse(s); } catch (_) { return fallback; }
 };
 
+// Per-flavor overrides live inside any block under the reserved key
+// `flavor_overrides` ({ dev: {...}, staging: {...}, beta: {...}, production: {...} }).
+// Apps pass ?flavor=staging (or send X-UniTrack-Flavor) so the portal merges
+// the matching override on top of the base block before returning. This is
+// what lets one project serve dev/staging/beta/prod from one config row
+// without 4 separate projects (and 4 api_keys to juggle).
+const KNOWN_FLAVORS = ['dev', 'staging', 'beta', 'production'];
+const FLAVOR_KEY = 'flavor_overrides';
+
+// Shallow-merge override onto base, dropping the overrides container so the
+// SDK never sees flavor_overrides leaked into its resolved settings. Deep
+// nested objects (firebase.options, snowplow.userContext) merge by spreading
+// their inner keys too — one level deep is enough for the shapes we use.
+function mergeFlavor(base, flavor) {
+  if (!base || typeof base !== 'object') return base;
+  const overrides = base[FLAVOR_KEY];
+  // Clone shallow, drop the overrides container — it's a config-time concept.
+  const out = { ...base };
+  delete out[FLAVOR_KEY];
+  if (!flavor || !overrides || typeof overrides !== 'object') return out;
+  const ov = overrides[flavor];
+  if (!ov || typeof ov !== 'object') return out;
+  for (const [k, v] of Object.entries(ov)) {
+    // Merge nested objects (e.g. firebase.options) shallowly, replace primitives/arrays.
+    if (v && typeof v === 'object' && !Array.isArray(v)
+        && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k])) {
+      out[k] = { ...out[k], ...v };
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+// Sanitize a flavor name: only known values are honoured, anything else falls
+// back to "no override" so a typo doesn't silently downgrade to dev.
+function resolveFlavor(name) {
+  if (!name) return null;
+  const v = String(name).toLowerCase().trim();
+  return KNOWN_FLAVORS.includes(v) ? v : null;
+}
+
 // Sensible defaults so an app with no saved config still tracks to this portal.
 function defaults(project) {
   return {
@@ -47,18 +89,38 @@ function defaults(project) {
 }
 
 // Full config object for a project id (defaults merged with saved sections).
-function configForProject(project) {
+//
+// If `flavor` is one of KNOWN_FLAVORS, every block's `flavor_overrides[<flavor>]`
+// is merged on top before returning. `flavor=null` returns the raw blocks
+// (the portal SPA uses this form so an operator sees + edits the overrides).
+function configForProject(project, flavor = null) {
   const row = getRow.get(project.id) || {};
   const def = defaults(project);
+  const resolved = resolveFlavor(flavor);
+  const blocks = {
+    sdk_config: parse(row.sdk_config, def.sdk_config),
+    snowplow:   parse(row.snowplow,   def.snowplow),
+    firebase:   parse(row.firebase,   def.firebase),
+    tracing:    parse(row.tracing,    def.tracing),
+  };
+  // For the app-facing call (resolved flavor set), strip flavor_overrides from
+  // every block + apply the matching override. For the editor call (no flavor),
+  // hand back the raw blocks so the UI can render the overrides as fields.
+  const out = resolved
+    ? {
+        sdk_config: mergeFlavor(blocks.sdk_config, resolved),
+        snowplow:   mergeFlavor(blocks.snowplow,   resolved),
+        firebase:   mergeFlavor(blocks.firebase,   resolved),
+        tracing:    mergeFlavor(blocks.tracing,    resolved),
+      }
+    : blocks;
   return {
     version:        row.version || 1,
     endpoint:       row.endpoint || def.endpoint,
-    sdk_config:     parse(row.sdk_config, def.sdk_config),
-    snowplow:       parse(row.snowplow, def.snowplow),
-    firebase:       parse(row.firebase, def.firebase),
+    flavor:         resolved,
+    ...out,
     event_registry: parse(row.event_registry, def.event_registry),
     rules:          parse(row.rules, def.rules),
-    tracing:        parse(row.tracing, def.tracing),
     updated_at:     row.updated_at || 0,
   };
 }
@@ -93,18 +155,30 @@ function saveConfig(projectId, body) {
 
 // Open app-facing endpoint: GET {BASE}/config  (auth = project api_key).
 // Returns the resolved config the SDK consumes, with a version-based ETag.
+//
+// Flavor selection (optional): apps pass ?flavor=dev|staging|beta|production
+// or the X-UniTrack-Flavor header. The ETag includes the resolved flavor so
+// switching builds (debug → release) doesn't reuse a stale cached response.
 function handleConfig(req, res) {
   const m = (req.headers.authorization || '').match(/^Bearer\s+(.+)$/);
   const key = m ? m[1] : (req.query.api_key || null);
   const project = key ? projByKey.get(key) : null;
   if (!project) return res.status(401).json({ error: 'unknown_api_key' });
 
-  const cfg = configForProject(project);
-  const etag = `"cfg-${project.id}-v${cfg.version}"`;
+  const flavor = resolveFlavor(req.query.flavor || req.headers['x-unitrack-flavor']);
+  const cfg = configForProject(project, flavor);
+  const etag = `"cfg-${project.id}-v${cfg.version}-${flavor || 'base'}"`;
   if (req.headers['if-none-match'] === etag) return res.status(304).end();
   res.set('ETag', etag);
   res.set('Cache-Control', 'no-cache');
   res.json(cfg);
 }
 
-module.exports = { configForProject, saveConfig, handleConfig, projById };
+module.exports = {
+  configForProject, saveConfig, handleConfig, projById,
+  // Exported for the agent / SPA-side helpers that need to know which flavors
+  // the portal recognises (keeps the list in one place).
+  KNOWN_FLAVORS,
+  mergeFlavor,
+  resolveFlavor,
+};
