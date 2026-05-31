@@ -14,6 +14,7 @@ exports.safeJsonParse = exports.createNavigationTracker = exports.tapState = exp
 exports.installDeeplinkAutoCapture = installDeeplinkAutoCapture;
 const react_native_1 = require("react-native");
 const tapState_1 = require("./tapState");
+const traceContext_1 = require("./traceContext");
 // Strip query strings for privacy — log scheme://host/path only.
 function hostPath(url) {
     const m = /^([a-z][a-z0-9+.-]*:\/\/[^/?#]+)([^?#]*)/i.exec(url);
@@ -83,6 +84,28 @@ class UniTrackClass {
         return native.reset();
     }
     setEventRules(rules) { this.eventRules = rules; }
+    /**
+     * Apply W3C distributed-tracing settings. The fetch interceptor reads this
+     * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
+     * fetch).
+     *
+     * `allowlistHosts` is fail-closed: empty list ⇒ never inject, so the
+     * `traceparent` header doesn't leak to Firebase/Maps/CDNs by default. Each
+     * entry is either an exact host (`api.example.com`) or a wildcard suffix
+     * (`*.example.com`, which matches every subdomain plus the bare apex).
+     */
+    setTracing(opts) {
+        var _a, _b, _c;
+        traceContext_1.tracingState.current = {
+            enabled: opts.enabled,
+            headerName: (_a = opts.headerName) !== null && _a !== void 0 ? _a : 'traceparent',
+            allowlistHosts: (_b = opts.allowlistHosts) !== null && _b !== void 0 ? _b : [],
+            sampled: (_c = opts.sampled) !== null && _c !== void 0 ? _c : true,
+        };
+    }
+    /** Mint a fresh (trace_id, span_id) — exposed so app code can correlate
+     *  push payloads or deep-links with backend logs by trace_id. */
+    newTrace() { return (0, traceContext_1.newTrace)(); }
     applyRules(event, props) {
         var _a;
         const screen = ((_a = props['screen']) !== null && _a !== void 0 ? _a : props['screen_name']);
@@ -150,8 +173,23 @@ class UniTrackClass {
                 input instanceof URL ? input.toString() : input.url;
             const method = (_a = init === null || init === void 0 ? void 0 : init.method) !== null && _a !== void 0 ? _a : 'GET';
             let status = 0, respBytes = 0, errMsg = '';
+            // W3C tracing: mint a (trace_id, span_id) if enabled AND host is
+            // allowlisted AND the caller hasn't already set the header. We mutate a
+            // local headers Map (Headers constructor handles all 3 input shapes:
+            // plain object, [string,string][], or another Headers).
+            const tc = traceContext_1.tracingState.current;
+            let traceIds;
+            let nextInit = init;
+            if (tc.enabled && (0, traceContext_1.shouldInjectTrace)((0, traceContext_1.hostOf)(input), tc.allowlistHosts)) {
+                const headers = new Headers(init === null || init === void 0 ? void 0 : init.headers);
+                if (!headers.has(tc.headerName)) {
+                    traceIds = (0, traceContext_1.newTrace)();
+                    headers.set(tc.headerName, (0, traceContext_1.traceparentHeader)(traceIds, tc.sampled));
+                    nextInit = { ...(init !== null && init !== void 0 ? init : {}), headers };
+                }
+            }
             try {
-                const res = await orig(input, init);
+                const res = await orig(input, nextInit);
                 status = res.status;
                 const cl = res.headers.get('content-length');
                 if (cl)
@@ -178,6 +216,9 @@ class UniTrackClass {
                     req_bytes: reqBytes,
                     resp_bytes: respBytes,
                     error: errMsg,
+                    // Carry trace ids on the event so the portal can offer a "copy
+                    // trace_id → grep backend logs" affordance per request.
+                    ...(traceIds ? { trace_id: traceIds.traceId, span_id: traceIds.spanId } : {}),
                     ...(mirrored
                         ? { triggered_by_element: tap.element, triggered_by_screen: tap.screen }
                         : {}),

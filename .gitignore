@@ -69,3 +69,4 @@ platforms/ios/.build/
 
 # Portal local database (runtime data, not source)
 portal/data/
+.claude/

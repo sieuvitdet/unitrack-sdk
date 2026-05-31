@@ -25,9 +25,24 @@ class UniTrackRemoteConfig {
   Map<String, dynamic> get firebase => _obj(raw['firebase']);
   List<dynamic> get eventRegistry => (raw['event_registry'] as List?) ?? const [];
   List<dynamic> get rules => (raw['rules'] as List?) ?? const [];
+  /// W3C distributed-tracing settings (may be absent — treat as disabled).
+  Map<String, dynamic> get tracing => _obj(raw['tracing']);
 
   static Map<String, dynamic> _obj(dynamic v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  /// Apply the tracing block (if present) to UniTrack so the HTTP interceptor
+  /// picks it up. Safe no-op when the portal didn't send a `tracing` section.
+  void applyTracing() {
+    if (tracing.isEmpty) return;
+    UniTrack.instance.setTracing(
+      enabled: tracing['enabled'] == true,
+      headerName: (tracing['header_name'] as String?) ?? 'traceparent',
+      allowlistHosts: ((tracing['allowlist_hosts'] as List?) ?? const [])
+          .whereType<String>().toList(),
+      sampled: tracing['sampled'] != false,   // default true
+    );
+  }
 
   /// Map config rules → SDK rules and install them on UniTrack.
   List<UniTrackEventRule> toEventRules() => rules.map((r) {

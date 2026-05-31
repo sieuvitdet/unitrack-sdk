@@ -6,7 +6,7 @@
 // on failure/timeout returns the last value or a built-in default. Uses RN's
 // global fetch — no extra dependency.
 
-import type { EventProperties, EventRule } from './index';
+import UniTrack, { type EventProperties, type EventRule } from './index';
 
 export interface RemoteConfigRule {
   match_event: string;
@@ -14,6 +14,13 @@ export interface RemoteConfigRule {
   match_element_key?: string;
   to_name: string;
   add_props?: EventProperties;
+}
+
+export interface RemoteConfigTracing {
+  enabled?: boolean;
+  header_name?: string;
+  allowlist_hosts?: string[];
+  sampled?: boolean;
 }
 
 export interface RemoteConfigData {
@@ -24,6 +31,8 @@ export interface RemoteConfigData {
   firebase?: Record<string, unknown>;
   event_registry?: unknown[];
   rules?: RemoteConfigRule[];
+  /** W3C distributed-tracing block — apply via applyTracing(). */
+  tracing?: RemoteConfigTracing;
 }
 
 const cache: Record<string, RemoteConfigData> = {};
@@ -42,6 +51,19 @@ function builtinDefault(): RemoteConfigData {
 }
 
 export const UniTrackRemoteConfig = {
+  /** Apply the tracing block (if present) to UniTrack so the fetch
+   *  interceptor picks it up. No-op when the portal didn't send `tracing`. */
+  applyTracing(cfg: RemoteConfigData): void {
+    const t = cfg.tracing;
+    if (!t) return;
+    UniTrack.setTracing({
+      enabled: t.enabled === true,
+      headerName: t.header_name ?? 'traceparent',
+      allowlistHosts: t.allowlist_hosts ?? [],
+      sampled: t.sampled !== false,
+    });
+  },
+
   /** Map config rules → SDK EventRule[]. */
   toEventRules(cfg: RemoteConfigData): EventRule[] {
     return (cfg.rules ?? []).map((r) => ({

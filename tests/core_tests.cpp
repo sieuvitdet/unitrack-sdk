@@ -9,6 +9,7 @@
 #include "../core/src/config.h"
 #include "../core/src/crash_handler.h"
 #include "../core/src/session_manager.h"
+#include "../core/src/trace_context.h"
 
 #include <sqlite3.h>
 #include <sys/stat.h>
@@ -39,6 +40,61 @@ static void test_uuid() {
     CHECK(a.size() == 36, "uuid length 36");
     CHECK(a != b, "uuids unique");
     CHECK(a[14] == '4', "uuid v4 marker");
+}
+
+// Helper: chuỗi chỉ chứa hex chữ thường?
+static bool is_lower_hex(const char* s, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        char c = s[i];
+        bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        if (!ok) return false;
+    }
+    return true;
+}
+
+static void test_trace_context() {
+    printf("test_trace_context\n");
+
+    // C++ helper trực tiếp.
+    auto a = unitrack::new_trace();
+    auto b = unitrack::new_trace();
+    CHECK(std::strlen(a.trace_id) == 32, "trace_id 32 hex chars");
+    CHECK(std::strlen(a.span_id)  == 16, "span_id 16 hex chars");
+    CHECK(is_lower_hex(a.trace_id, 32),  "trace_id is lowercase hex");
+    CHECK(is_lower_hex(a.span_id,  16),  "span_id is lowercase hex");
+    CHECK(std::string(a.trace_id) != std::string(b.trace_id), "trace_ids unique");
+    CHECK(std::string(a.span_id)  != std::string(b.span_id),  "span_ids unique");
+
+    // W3C cấm all-zero — kiểm tra trace_id KHÔNG phải toàn '0'.
+    CHECK(std::string(a.trace_id) != std::string(32, '0'), "trace_id not all-zero");
+    CHECK(std::string(a.span_id)  != std::string(16, '0'), "span_id not all-zero");
+
+    // Header format: "00-<trace>-<span>-<flags>" — đúng 55 ký tự, sampled=01.
+    auto hdr = unitrack::traceparent_header(a, /*sampled=*/true);
+    CHECK(hdr.size() == 55, "traceparent length 55");
+    CHECK(hdr.substr(0, 3) == "00-", "starts with version 00");
+    CHECK(hdr.substr(3, 32) == std::string(a.trace_id), "embeds trace_id");
+    CHECK(hdr[35] == '-' && hdr.substr(36, 16) == std::string(a.span_id), "embeds span_id");
+    CHECK(hdr.substr(53, 2) == "01", "flags 01 when sampled");
+    CHECK(unitrack::traceparent_header(a, /*sampled=*/false).substr(53, 2) == "00",
+          "flags 00 when not sampled");
+
+    // C API: ut_new_trace + ut_format_traceparent.
+    ut_trace_ids ids = ut_new_trace();
+    CHECK(std::strlen(ids.trace_id) == 32, "C API: trace_id 32 hex");
+    CHECK(std::strlen(ids.span_id)  == 16, "C API: span_id 16 hex");
+
+    char buf[64] = {0};
+    size_t n = ut_format_traceparent(&ids, /*sampled=*/1, buf, sizeof(buf));
+    CHECK(n == 55, "ut_format_traceparent returns 55");
+    CHECK(std::string(buf).size() == 55, "buffer contains 55-char header");
+    CHECK(std::string(buf).find(ids.trace_id) == 3, "header embeds id at offset 3");
+
+    // Buffer quá nhỏ ⇒ trả 0, không ghi đè (an toàn cho binding lỡ truyền 32).
+    char tiny[32] = {0};
+    size_t m = ut_format_traceparent(&ids, 1, tiny, sizeof(tiny));
+    CHECK(m == 0, "ut_format_traceparent refuses small buffer");
+    CHECK(tiny[0] == 0, "small buffer untouched");
 }
 
 static void test_event_json() {
@@ -365,6 +421,7 @@ int main() {
     printf("UniTrack core tests\n");
     printf("===================\n");
     test_uuid();
+    test_trace_context();
     test_event_json();
     test_event_json_escape();
     test_config_parse();

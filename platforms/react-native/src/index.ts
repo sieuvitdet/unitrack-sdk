@@ -7,6 +7,10 @@
 
 import { NativeModules, Platform } from 'react-native';
 import { tapState } from './tapState';
+import {
+  tracingState, newTrace, traceparentHeader, shouldInjectTrace, hostOf,
+  type UniTrackTraceIds, type UniTrackTracingConfig,
+} from './traceContext';
 
 // Strip query strings for privacy — log scheme://host/path only.
 function hostPath(url: string): string {
@@ -128,6 +132,29 @@ class UniTrackClass {
   private eventRules: EventRule[] = [];
   setEventRules(rules: EventRule[]) { this.eventRules = rules; }
 
+  /**
+   * Apply W3C distributed-tracing settings. The fetch interceptor reads this
+   * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
+   * fetch).
+   *
+   * `allowlistHosts` is fail-closed: empty list ⇒ never inject, so the
+   * `traceparent` header doesn't leak to Firebase/Maps/CDNs by default. Each
+   * entry is either an exact host (`api.example.com`) or a wildcard suffix
+   * (`*.example.com`, which matches every subdomain plus the bare apex).
+   */
+  setTracing(opts: Partial<UniTrackTracingConfig> & { enabled: boolean }) {
+    tracingState.current = {
+      enabled: opts.enabled,
+      headerName: opts.headerName ?? 'traceparent',
+      allowlistHosts: opts.allowlistHosts ?? [],
+      sampled: opts.sampled ?? true,
+    };
+  }
+
+  /** Mint a fresh (trace_id, span_id) — exposed so app code can correlate
+   *  push payloads or deep-links with backend logs by trace_id. */
+  newTrace(): UniTrackTraceIds { return newTrace(); }
+
   private applyRules(event: string, props: EventProperties): [string, EventProperties] | null {
     const screen = (props['screen'] ?? props['screen_name']) as string | undefined;
     const elem = props['element_key'] as string | undefined;
@@ -192,8 +219,24 @@ class UniTrackClass {
       const method = init?.method ?? 'GET';
       let status = 0, respBytes = 0, errMsg = '';
 
+      // W3C tracing: mint a (trace_id, span_id) if enabled AND host is
+      // allowlisted AND the caller hasn't already set the header. We mutate a
+      // local headers Map (Headers constructor handles all 3 input shapes:
+      // plain object, [string,string][], or another Headers).
+      const tc = tracingState.current;
+      let traceIds: UniTrackTraceIds | undefined;
+      let nextInit = init;
+      if (tc.enabled && shouldInjectTrace(hostOf(input), tc.allowlistHosts)) {
+        const headers = new Headers(init?.headers);
+        if (!headers.has(tc.headerName)) {
+          traceIds = newTrace();
+          headers.set(tc.headerName, traceparentHeader(traceIds, tc.sampled));
+          nextInit = { ...(init ?? {}), headers };
+        }
+      }
+
       try {
-        const res = await orig(input, init);
+        const res = await orig(input, nextInit);
         status = res.status;
         const cl = res.headers.get('content-length');
         if (cl) respBytes = parseInt(cl, 10) || 0;
@@ -217,6 +260,9 @@ class UniTrackClass {
           req_bytes:  reqBytes,
           resp_bytes: respBytes,
           error: errMsg,
+          // Carry trace ids on the event so the portal can offer a "copy
+          // trace_id → grep backend logs" affordance per request.
+          ...(traceIds ? { trace_id: traceIds.traceId, span_id: traceIds.spanId } : {}),
           ...(mirrored
             ? { triggered_by_element: tap!.element, triggered_by_screen: tap!.screen }
             : {}),

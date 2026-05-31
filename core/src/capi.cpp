@@ -7,9 +7,11 @@
 #include "tracker.h"
 #include "config.h"
 #include "logger.h"
+#include "trace_context.h"
 
 #include <new>
 #include <string>
+#include <cstring>
 
 #define UT_VERSION_STRING "1.0.0"
 
@@ -135,6 +137,35 @@ int ut_is_enabled(ut_context* ctx) {
 
 void ut_set_http_transport(ut_context* ctx, ut_http_send_fn fn, void* user_data) {
     if (ctx && ctx->tracker) ctx->tracker->set_http_transport(fn, user_data);
+}
+
+// ── W3C Trace Context bridge ───────────────────────────────────────────────
+// Pure helpers — không cần ut_context, để binding gọi được sớm trước khi init
+// xong (ví dụ wrap HTTP interceptor cài đặt ở class loader / app delegate).
+
+ut_trace_ids ut_new_trace(void) {
+    ut_trace_ids out{};
+    auto ids = unitrack::new_trace();
+    // Cấu trúc C và C++ trùng layout (cùng kích thước mảng), nên copy bytewise
+    // an toàn — tránh phụ thuộc layout-compat giữa POD C và POD C++.
+    std::memcpy(out.trace_id, ids.trace_id, sizeof(out.trace_id));
+    std::memcpy(out.span_id,  ids.span_id,  sizeof(out.span_id));
+    return out;
+}
+
+size_t ut_format_traceparent(const ut_trace_ids* ids,
+                             int sampled,
+                             char* out,
+                             size_t out_size) {
+    if (!ids || !out || out_size < 56) return 0;  // 55 byte + NUL
+    unitrack::TraceIds tmp{};
+    std::memcpy(tmp.trace_id, ids->trace_id, sizeof(tmp.trace_id));
+    std::memcpy(tmp.span_id,  ids->span_id,  sizeof(tmp.span_id));
+    auto s = unitrack::traceparent_header(tmp, sampled != 0);
+    // s đúng 55 ký tự. memcpy + NUL, không strncpy (clang warning).
+    std::memcpy(out, s.data(), s.size());
+    out[s.size()] = '\0';
+    return s.size();
 }
 
 const char* ut_version(void) {

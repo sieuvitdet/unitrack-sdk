@@ -97,6 +97,21 @@ public final class UniTrack {
         shared.eventRules = rules
     }
 
+    /// Apply W3C distributed-tracing settings from remote config. Safe to call
+    /// any time (before/after init): the URLProtocol reads the snapshot under
+    /// its own lock. Passing `enabled: false` disables injection without
+    /// uninstalling the protocol — apps stay tracked, just no header added.
+    public static func setTracing(enabled: Bool,
+                                  headerName: String = "traceparent",
+                                  allowlistHosts: [String] = [],
+                                  sampled: Bool = true) {
+        UniTrackURLProtocol.configureTracing(
+            enabled: enabled,
+            headerName: headerName,
+            allowlistHosts: allowlistHosts,
+            sampled: sampled)
+    }
+
     // Returns the rewritten (name, properties) for an event, or nil if no rule
     // matches. First matching rule wins.
     private func applyRules(_ event: String, _ properties: [String: Any]) -> (String, [String: Any])? {

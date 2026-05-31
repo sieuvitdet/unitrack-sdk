@@ -157,6 +157,43 @@ UT_EXPORT void ut_set_http_transport(ut_context* ctx,
                                      ut_http_send_fn fn,
                                      void* user_data);
 
+/* ============================================================
+ * Distributed tracing (W3C Trace Context)
+ * ============================================================
+ *
+ * Mỗi outbound HTTP call của app gắn header `traceparent` theo chuẩn
+ * W3C → backend đọc, sinh span con dưới cùng trace_id, log của app và
+ * log backend ráp lại bằng grep cùng trace_id. Spec:
+ *   https://www.w3.org/TR/trace-context/
+ *
+ * Cách dùng từ binding (Swift / Kotlin / Dart / TS):
+ *   1) Khi sắp gửi request, gọi ut_new_trace() để cấp một cặp (trace,span).
+ *   2) Set header  traceparent: 00-<trace>-<span>-01
+ *   3) Sau khi request xong, ut_log_network(...) với cùng trace_id để
+ *      portal hiển thị; binding pass trace_id qua extra props hoặc gắn
+ *      trực tiếp vào event network_request.
+ *
+ * Không phụ thuộc ctx — id là dữ liệu thuần. Truyền NULL cũng được nếu
+ * binding chỉ muốn id, không cần header thành phẩm.
+ */
+typedef struct {
+    char trace_id[33];   /* 32 lowercase hex + NUL */
+    char span_id[17];    /* 16 lowercase hex + NUL */
+} ut_trace_ids;
+
+/* Sinh cặp trace_id/span_id mới (root span của một request mới). */
+UT_EXPORT ut_trace_ids ut_new_trace(void);
+
+/* Tiện ích: format header value "00-<trace>-<span>-<flags>".
+ * - out:        buffer 64 byte (đủ — header dài cố định 55 ký tự + NUL).
+ * - out_size:   sizeof(out). Hàm KHÔNG ghi nếu out_size < 56.
+ * - sampled:    1 ⇒ flags=01 (backend nên ghi log), 0 ⇒ flags=00.
+ * Trả về số byte đã ghi (không tính NUL), 0 nếu out_size không đủ. */
+UT_EXPORT size_t ut_format_traceparent(const ut_trace_ids* ids,
+                                       int sampled,
+                                       char* out,
+                                       size_t out_size);
+
 /* SDK version */
 UT_EXPORT const char* ut_version(void);
 

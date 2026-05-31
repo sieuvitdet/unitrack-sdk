@@ -18,6 +18,7 @@ set(UT_CORE_SOURCES
     ${UT_CORE_ROOT}/src/transport.cpp
     ${UT_CORE_ROOT}/src/session_manager.cpp
     ${UT_CORE_ROOT}/src/crash_handler.cpp
+    ${UT_CORE_ROOT}/src/trace_context.cpp
     ${UT_CORE_ROOT}/src/tracker.cpp
     ${UT_CORE_ROOT}/src/capi.cpp
 )

@@ -22,6 +22,7 @@ set(UT_SOURCES
     src/transport.cpp
     src/session_manager.cpp
     src/crash_handler.cpp
+    src/trace_context.cpp
     src/tracker.cpp
     src/capi.cpp
 )

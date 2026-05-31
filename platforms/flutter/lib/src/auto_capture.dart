@@ -31,6 +31,7 @@ import 'package:flutter/material.dart' show MaterialPageRoute, Tooltip;
 import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 
 import '../unitrack.dart';
+import 'trace_context.dart';
 
 // ---------------------------------------------------------------------------
 // Tap + screen auto-capture
@@ -408,7 +409,24 @@ class _TrackingHttpClient implements HttpClient {
     if (_isExcluded(url)) return _inner.openUrl(method, url);
     final started = DateTime.now();
     final request = await _inner.openUrl(method, url);
-    return _TrackingHttpRequest(request, method, url, started, _body);
+
+    // W3C tracing: mint (trace_id, span_id), inject the header if the host is
+    // on the allowlist, and remember the ids so the network_request event
+    // logged on close() carries them too. Don't clobber an existing header —
+    // an upstream tool may already be propagating its own trace.
+    UniTrackTraceIds? ids;
+    final tc = unitrackTracing;
+    if (tc.enabled
+        && UniTrackTraceContext.shouldInject(url.host, tc.allowlistHosts)
+        && request.headers.value(tc.headerName) == null) {
+      ids = UniTrackTraceContext.newTrace();
+      request.headers.set(
+        tc.headerName,
+        UniTrackTraceContext.traceparent(ids, sampled: tc.sampled),
+      );
+    }
+
+    return _TrackingHttpRequest(request, method, url, started, _body, ids);
   }
 
   @override
@@ -502,9 +520,14 @@ class _TrackingHttpRequest implements HttpClientRequest {
   final Uri _url;
   final DateTime _started;
   final UniTrackBodyCapture _body;
+  // Trace ids minted in openUrl() so the same pair appears on the wire header
+  // AND in the network_request event we log on completion. null when tracing
+  // is disabled / host not on the allowlist / upstream set their own header.
+  final UniTrackTraceIds? _traceIds;
   // Accumulates the request body bytes the app writes (only when opted in).
   final List<int> _reqBytes = [];
-  _TrackingHttpRequest(this._inner, this._method, this._url, this._started, this._body);
+  _TrackingHttpRequest(this._inner, this._method, this._url, this._started,
+      this._body, [this._traceIds]);
 
   // Decode + truncate captured bytes to a readable string.
   String? _decode(List<int> bytes) {
@@ -564,6 +587,10 @@ class _TrackingHttpRequest implements HttpClientRequest {
       if (error != null) 'error': error,
       if (reqBody != null) 'request_body': reqBody,
       if (respBody != null) 'response_body': respBody,
+      // Carry the trace ids on the event so the portal can offer a "copy
+      // trace_id → grep backend logs" affordance per request.
+      if (_traceIds != null) 'trace_id': _traceIds!.traceId,
+      if (_traceIds != null) 'span_id':  _traceIds!.spanId,
       if (mirrored) 'triggered_by_element': tap.element,
       if (mirrored) 'triggered_by_screen': tap.screen,
     });

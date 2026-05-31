@@ -1,3 +1,4 @@
+import { type UniTrackTraceIds, type UniTrackTracingConfig } from './traceContext';
 export interface UniTrackConfig {
     endpoint?: string;
     batchSize?: number;
@@ -38,6 +39,22 @@ declare class UniTrackClass {
     reset(): Promise<void>;
     private eventRules;
     setEventRules(rules: EventRule[]): void;
+    /**
+     * Apply W3C distributed-tracing settings. The fetch interceptor reads this
+     * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
+     * fetch).
+     *
+     * `allowlistHosts` is fail-closed: empty list ⇒ never inject, so the
+     * `traceparent` header doesn't leak to Firebase/Maps/CDNs by default. Each
+     * entry is either an exact host (`api.example.com`) or a wildcard suffix
+     * (`*.example.com`, which matches every subdomain plus the bare apex).
+     */
+    setTracing(opts: Partial<UniTrackTracingConfig> & {
+        enabled: boolean;
+    }): void;
+    /** Mint a fresh (trace_id, span_id) — exposed so app code can correlate
+     *  push payloads or deep-links with backend logs by trace_id. */
+    newTrace(): UniTrackTraceIds;
     private applyRules;
     track(event: string, properties?: EventProperties): Promise<void>;
     setScreen(name: string): Promise<void>;

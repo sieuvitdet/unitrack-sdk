@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart';
 
 import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
+import 'src/trace_context.dart' as _trace;
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
 export 'src/auto_capture.dart'
@@ -22,6 +23,11 @@ export 'src/auto_capture.dart'
 export 'src/analytics_provider.dart' show AnalyticsProvider;
 // Remote config fetcher (Phase 1+2): app pulls endpoint/providers/rules at start.
 export 'src/remote_config.dart' show UniTrackRemoteConfig;
+// W3C trace-context helpers — exposed so app code can mint a trace_id for
+// non-HTTP boundaries (push payload → backend correlation) or pre-populate
+// a header for a specific request.
+export 'src/trace_context.dart'
+    show UniTrackTraceIds, UniTrackTraceContext, UniTrackTracingConfig;
 
 class UniTrackConfig {
   final String? endpoint;
@@ -209,6 +215,27 @@ class UniTrack {
   // business event + merges props, at this single chokepoint.
   List<UniTrackEventRule> _eventRules = const [];
   void setEventRules(List<UniTrackEventRule> rules) { _eventRules = rules; }
+
+  /// Apply W3C distributed-tracing settings (from remote config or app code).
+  /// Cheap — the HTTP interceptor reads this snapshot per request.
+  ///
+  /// `allowlistHosts` is fail-closed: empty list ⇒ never inject, so the
+  /// `traceparent` header doesn't leak to Firebase/Maps/CDNs by default.
+  /// Each entry is either an exact host (`api.example.com`) or a wildcard
+  /// suffix (`*.example.com` matches every subdomain plus the bare apex).
+  void setTracing({
+    required bool enabled,
+    String headerName = 'traceparent',
+    List<String> allowlistHosts = const [],
+    bool sampled = true,
+  }) {
+    _trace.unitrackTracing = _trace.UniTrackTracingConfig(
+      enabled: enabled,
+      headerName: headerName,
+      allowlistHosts: allowlistHosts,
+      sampled: sampled,
+    );
+  }
 
   // Returns the rewritten (name, props) as a MapEntry, or null if no rule
   // matched. (MapEntry instead of a record tuple, to keep this compatible with

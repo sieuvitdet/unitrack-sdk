@@ -103,6 +103,21 @@ object NativeBridge {
     fun logBackground()              = nativeLogBackground(ctxPtr)
     fun logAppStart(coldStartMs: Long) = nativeLogAppStart(ctxPtr, coldStartMs)
 
+    /**
+     * W3C distributed-tracing helper. Returns Pair(traceId, spanId) — both
+     * lowercase hex (trace_id 32 chars, span_id 16 chars). Pure native call,
+     * does NOT require ctxPtr to be initialized, so an OkHttp interceptor
+     * installed in Application.onCreate can call this safely even before
+     * UniTrack.init() finishes.
+     */
+    fun newTrace(): Pair<String, String> {
+        // Make sure libunitrack_jni is loaded — apps may install the
+        // interceptor before NativeBridge.init() runs.
+        if (!loaded) load()
+        val pair = nativeNewTrace()
+        return Pair(pair[0], pair[1])
+    }
+
     fun shutdown() {
         if (ctxPtr != 0L) {
             nativeShutdown(ctxPtr)
@@ -132,4 +147,6 @@ object NativeBridge {
     private external fun nativeLogForeground(ctx: Long)
     private external fun nativeLogBackground(ctx: Long)
     private external fun nativeLogAppStart(ctx: Long, coldStartMs: Long)
+    // length-2 result: [traceId 32-hex, spanId 16-hex]
+    private external fun nativeNewTrace(): Array<String>
 }

@@ -207,4 +207,19 @@ JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogAppStart(
     JNIEnv*, jobject, jlong p, jlong ms) { ut_log_app_start(ctx_of(p), (long)ms); }
 
+// W3C distributed tracing — mint a (trace_id, span_id) pair for the calling
+// HTTP request. Returns a length-2 String[] {traceId, spanId}, both already
+// lowercase hex. The core helper is pure and doesn't touch ut_context — keep
+// it that way here too so Kotlin can call this from an OkHttp interceptor
+// installed in Application.onCreate, before UniTrack.init finishes.
+JNIEXPORT jobjectArray JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeNewTrace(JNIEnv* env, jobject) {
+    ut_trace_ids ids = ut_new_trace();
+    jclass strCls = env->FindClass("java/lang/String");
+    jobjectArray out = env->NewObjectArray(2, strCls, nullptr);
+    env->SetObjectArrayElement(out, 0, env->NewStringUTF(ids.trace_id));
+    env->SetObjectArrayElement(out, 1, env->NewStringUTF(ids.span_id));
+    return out;
+}
+
 } // extern "C"

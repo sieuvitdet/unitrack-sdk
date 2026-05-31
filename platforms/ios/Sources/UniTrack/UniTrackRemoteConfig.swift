@@ -28,6 +28,8 @@ public struct UniTrackRemoteConfig: Codable {
     public var firebase: FirebaseConfig
     public var eventRegistry: [EventDef]
     public var rules: [Rule]?
+    /// W3C distributed-tracing settings (optional — absent = disabled).
+    public var tracing: TracingConfig?
 
     // Phase 2 rewrite rule: match an auto-captured event → a business event.
     public struct Rule: Codable {
@@ -85,6 +87,29 @@ public struct UniTrackRemoteConfig: Codable {
         }
     }
 
+    /// W3C trace-context propagation. When `enabled` and a request's host is
+    /// in `allowlistHosts` (or the list is empty = match everything inside our
+    /// own backends — see UniTrack.shouldInjectTraceHeader), the SDK injects
+    /// the W3C `traceparent` header on outbound HTTP calls so backend logs can
+    /// be joined with mobile logs by trace_id.
+    ///
+    /// Important: `allowlistHosts` is what stops us from leaking `traceparent`
+    /// to third parties (Firebase, Maps, CDNs). Default empty here = "no host
+    /// allowed"; the SDK only injects when the app or remote config supplies
+    /// the internal hosts to match.
+    public struct TracingConfig: Codable {
+        public var enabled: Bool?
+        public var headerName: String?        // default "traceparent"
+        public var allowlistHosts: [String]?  // exact host or *.suffix.com
+        public var sampled: Bool?             // flags=01 when true (default true)
+        enum CodingKeys: String, CodingKey {
+            case enabled
+            case headerName     = "header_name"
+            case allowlistHosts = "allowlist_hosts"
+            case sampled
+        }
+    }
+
     public struct EventDef: Codable {
         public var name: String
         public var template: [String: String]?
@@ -94,7 +119,7 @@ public struct UniTrackRemoteConfig: Codable {
 
     // JSON keys are snake_case on the wire.
     enum CodingKeys: String, CodingKey {
-        case version, endpoint, rules
+        case version, endpoint, rules, tracing
         case sdkConfig = "sdk_config"
         case snowplow, firebase
         case eventRegistry = "event_registry"
@@ -110,6 +135,18 @@ public struct UniTrackRemoteConfig: Codable {
                 toName: r.toName,
                 addProps: r.addProps?.unwrapped() ?? [:])
         }
+    }
+
+    /// Hand off the tracing block to UniTrack. No-op if the portal didn't send
+    /// a `tracing` section. Apps usually just call this from the fetch
+    /// callback alongside `setEventRules(toEventRules())`.
+    public func applyTracing() {
+        guard let t = tracing else { return }
+        UniTrack.setTracing(
+            enabled:        t.enabled ?? false,
+            headerName:     t.headerName ?? "traceparent",
+            allowlistHosts: t.allowlistHosts ?? [],
+            sampled:        t.sampled ?? true)
     }
 
     // MARK: - Fetch + cache

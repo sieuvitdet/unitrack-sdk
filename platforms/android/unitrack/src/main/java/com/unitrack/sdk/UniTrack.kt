@@ -111,6 +111,57 @@ object UniTrack {
         eventRules.clear(); eventRules.addAll(rules)
     }
 
+    // ── W3C distributed tracing ────────────────────────────────────────────
+    //
+    // Apps install UniTrackTracingInterceptor on their OkHttpClient (and/or
+    // wrap HttpURLConnection manually). When enabled, the interceptor mints a
+    // (trace_id, span_id) per outbound request and adds `traceparent` for
+    // hosts on the allowlist. allowlistHosts is fail-closed: empty list ⇒
+    // never inject (so `traceparent` doesn't leak to Firebase/Maps/CDNs).
+    @Volatile private var tracingEnabled  = false
+    @Volatile private var tracingHeader   = "traceparent"
+    @Volatile private var tracingAllow    = emptyList<String>()
+    @Volatile private var tracingSampled  = true
+
+    @JvmStatic
+    @JvmOverloads
+    fun setTracing(enabled: Boolean,
+                   headerName: String = "traceparent",
+                   allowlistHosts: List<String> = emptyList(),
+                   sampled: Boolean = true) {
+        tracingEnabled = enabled
+        tracingHeader  = if (headerName.isBlank()) "traceparent" else headerName
+        tracingAllow   = allowlistHosts
+        tracingSampled = sampled
+    }
+
+    // Snapshot read by the OkHttp interceptor without locking — volatile reads
+    // give enough safety since each field updates independently and the
+    // interceptor tolerates a torn read (worst case: one request uses the new
+    // header name with the old allowlist for a microsecond).
+    internal fun tracingSnapshot(): TracingSnapshot =
+        TracingSnapshot(tracingEnabled, tracingHeader, tracingAllow, tracingSampled)
+
+    internal data class TracingSnapshot(
+        val enabled: Boolean, val headerName: String,
+        val allowlist: List<String>, val sampled: Boolean,
+    )
+
+    /** Decide if `host` should receive a `traceparent` header. See setTracing(). */
+    internal fun shouldInjectTrace(host: String?, allowlist: List<String>): Boolean {
+        if (host.isNullOrEmpty() || allowlist.isEmpty()) return false
+        val h = host.lowercase()
+        for (raw in allowlist) {
+            val pat = raw.lowercase()
+            if (pat == h) return true
+            if (pat.startsWith("*.")) {
+                val suffix = pat.substring(1)               // ".mobix.asia"
+                if (h.endsWith(suffix) || h == suffix.substring(1)) return true
+            }
+        }
+        return false
+    }
+
     private fun applyRules(event: String, props: Map<String, Any?>): Pair<String, Map<String, Any?>>? {
         val screen = (props["screen"] ?: props["screen_name"]) as? String
         val elem = props["element_key"] as? String

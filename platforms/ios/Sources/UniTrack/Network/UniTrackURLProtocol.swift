@@ -27,6 +27,34 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
         if !ignoredSubstrings.contains(substring) { ignoredSubstrings.append(substring) }
     }
 
+    // ── W3C trace injection (slide 03 L1 — backend HTTP+trace header) ──
+    //
+    // Stored statically because (a) URLProtocol instances are created by the
+    // URL Loading System, we don't own ctor params, and (b) the same setting
+    // must apply to every intercepted request. Lock around mutation; readers
+    // copy out under lock so the hot path doesn't hold it across the fetch.
+    private static let traceLock = NSLock()
+    private static var traceEnabled = false
+    private static var traceHeader  = "traceparent"
+    private static var traceAllow:  [String] = []
+    private static var traceSampled = true
+
+    static func configureTracing(enabled: Bool,
+                                 headerName: String,
+                                 allowlistHosts: [String],
+                                 sampled: Bool) {
+        traceLock.lock(); defer { traceLock.unlock() }
+        traceEnabled = enabled
+        traceHeader  = headerName.isEmpty ? "traceparent" : headerName
+        traceAllow   = allowlistHosts
+        traceSampled = sampled
+    }
+
+    private static func tracingSnapshot() -> (Bool, String, [String], Bool) {
+        traceLock.lock(); defer { traceLock.unlock() }
+        return (traceEnabled, traceHeader, traceAllow, traceSampled)
+    }
+
     private static func isIgnored(_ url: URL?) -> Bool {
         guard let s = url?.absoluteString else { return false }
         ignoredLock.lock(); defer { ignoredLock.unlock() }
@@ -38,6 +66,9 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
     private var dataTask: URLSessionDataTask?
     private var startAt: Date = Date()
     private var responseBytes: Int = 0
+    // Trace ids minted in startLoading() so the same ids appear on the wire
+    // header AND in the network_request event we log on completion.
+    private var traceIds: UniTrackTraceIds?
 
     static func install() {
         URLProtocol.registerClass(UniTrackURLProtocol.self)
@@ -63,6 +94,19 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
         startAt = Date()
         let mreq = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mreq)
+
+        // Inject W3C `traceparent` if tracing is on AND the request's host is
+        // on the allowlist. Skip if the app already set the header (manual
+        // propagation wins — don't clobber an explicit upstream trace).
+        let (enabled, hdrName, allow, sampled) = Self.tracingSnapshot()
+        if enabled,
+           UniTrackTracing.shouldInject(host: request.url?.host, allowlist: allow),
+           mreq.value(forHTTPHeaderField: hdrName) == nil {
+            let ids = UniTrackTracing.newTrace()
+            mreq.setValue(UniTrackTracing.traceparent(ids, sampled: sampled),
+                          forHTTPHeaderField: hdrName)
+            traceIds = ids
+        }
 
         let cfg = URLSessionConfiguration.default
         cfg.protocolClasses = (cfg.protocolClasses ?? []).filter {
@@ -102,7 +146,7 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
         let method = request.httpMethod ?? "GET"
         let reqBytes = Int(request.httpBody?.count ?? 0)
 
-        UniTrack.track("network_request", properties: [
+        var props: [String: Any] = [
             "url":         url,
             "method":      method,
             "status":      status,
@@ -110,7 +154,14 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
             "req_bytes":   reqBytes,
             "resp_bytes":  responseBytes,
             "error":       error?.localizedDescription ?? ""
-        ])
+        ]
+        // Carry trace_id/span_id on the event so the portal can render a "copy
+        // trace_id → grep backend logs" affordance per request.
+        if let ids = traceIds {
+            props["trace_id"] = ids.traceId
+            props["span_id"]  = ids.spanId
+        }
+        UniTrack.track("network_request", properties: props)
 
         if let err = error {
             client?.urlProtocol(self, didFailWithError: err)
