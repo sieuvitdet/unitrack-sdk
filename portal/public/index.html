@@ -38,9 +38,18 @@
      reads as a moving spotlight even when scrolling is instant. */
   .ide-card.ide-replay-on{outline:2px solid var(--accent);outline-offset:1px;
     box-shadow:0 0 0 4px rgba(91,140,255,.18);transition:box-shadow .15s}
-  /* Wireframe (flow/heatmap) fullscreen + pan/zoom. */
-  #wfWrap.wf-fs{position:fixed;inset:0;z-index:45;background:var(--bg);max-height:none!important;padding:0}
-  #wfWrap.wf-fs .wf-grid{height:100vh;max-height:none!important}
+  /* Wireframe (flow/heatmap) fullscreen + pan/zoom.
+     Flex column so filter-bar + wf-grid share the viewport without spilling —
+     the replay control bar sits in row 2 of wf-grid, and if wf-grid swallowed
+     the full 100vh on top of the filter bar, the controls fell below the
+     fold and looked "missing" in fullscreen. */
+  #wfWrap.wf-fs{position:fixed;inset:0;z-index:45;background:var(--bg);max-height:none!important;padding:0;
+    display:flex;flex-direction:column}
+  #wfWrap.wf-fs .filter-bar{flex:0 0 auto;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+  #wfWrap.wf-fs .wf-grid{flex:1 1 auto;height:auto;max-height:none!important;min-height:0}
+  /* Bottom replay bar gets a subtle highlight in fullscreen so it's clearly
+     part of the chrome (otherwise it can read as just another panel). */
+  #wfWrap.wf-fs #wfCtrl{box-shadow:0 -2px 8px rgba(0,0,0,.18)}
   .wf-pan{position:relative;overflow:hidden;cursor:grab;background:var(--bg)}
   .wf-pan.dragging{cursor:grabbing}
   .wf-pan #wfSvg{transform-origin:0 0;will-change:transform}
@@ -1170,7 +1179,6 @@ async function renderWireframe(pid){
           <option value="4">4x</option><option value="8">8x</option>
         </select>
         <span id="wfNow" class="muted" style="min-width:160px;text-align:right;font-size:11px">— chọn 1 session để replay —</span>
-        <button class="btn ghost sm" id="wfStop" disabled>✕</button>
       </div>
     </div>
    </div>`;
@@ -1294,7 +1302,7 @@ function stopReplay(){
   _wfReplayState = null;
   const r = document.getElementById('wfReplay'); if(r) r.style.display='none';
   // Disable (don't hide) the control bar so it stays visible.
-  for(const id of ['wfPlay','wfSeek','wfStop']) {
+  for(const id of ['wfPlay','wfSeek']) {
     const el = document.getElementById(id); if(el) el.disabled = true;
   }
   const t = document.getElementById('wfTime'); if(t) t.textContent = '0.0s / 0.0s';
@@ -1529,7 +1537,7 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
   // session is visible separately from the aggregate flow.
   drawSessionJourneyOverlay(segs, sid);
   // Enable the always-visible control bar.
-  for(const id of ['wfPlay','wfSeek','wfStop']) {
+  for(const id of ['wfPlay','wfSeek']) {
     const el = document.getElementById(id); if(el) el.disabled = false;
   }
   document.getElementById('wfPlay').textContent = '⏸ Pause';
@@ -1559,7 +1567,9 @@ async function startReplay(pid, sid, nodePos, dwellBaseline){
       if(st.raf) cancelAnimationFrame(st.raf);
     }
   };
-  document.getElementById('wfStop').onclick = stopReplay;
+  // (No explicit stop button — replay auto-ends at the last step. To re-watch,
+  // pick a session again from the sidebar; switching sessions calls stopReplay
+  // internally before binding the new one.)
   document.getElementById('wfSpeed').onchange = (ev)=>{
     const st=_wfReplayState; if(!st)return;
     const newSpeed = parseFloat(ev.target.value)||4;
