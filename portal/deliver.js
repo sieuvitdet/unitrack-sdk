@@ -7,16 +7,22 @@
 
 const TELEGRAM_TIMEOUT_MS = 15_000;
 
-async function sendTelegram(token, chatId, text) {
+async function sendTelegram(token, chatId, text, { markdown = false } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TELEGRAM_TIMEOUT_MS);
   try {
+    const body = { chat_id: chatId, text: text.slice(0, 4000) };
+    // Markdown is opt-in. Real project names contain `_` / `*` which silently
+    // break Telegram's Markdown parser and reject the whole message — default
+    // plain text and disable link preview so the deep-link doesn't grab a
+    // huge preview card.
+    if (markdown) body.parse_mode = 'Markdown';
+    else          body.disable_web_page_preview = true;
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal,
-      // Telegram caps messages at 4096 chars.
-      body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4000), parse_mode: 'Markdown' }),
+      body: JSON.stringify(body),
     });
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok && j.ok !== false, info: j.description || ('http_' + r.status) };
@@ -29,14 +35,20 @@ function emailRecipient(cfg, category) {
 }
 
 // deliver: try every configured channel; report per-channel result.
+//
+// Two pieces of report text travel together:
+//   report.summary_text — short 24h summary + deep-links into the SPA. This is
+//                         what Telegram receives so the chat stays scannable.
+//   report.report_text  — full LLM/heuristic analysis. Stored on the portal and
+//                         used as the email body. Falls back to summary if missing.
 async function deliver(cfg, report) {
   const channels = [];
-  const text = report.report_text || '(báo cáo trống)';
+  const summary = report.summary_text || report.report_text || '(báo cáo trống)';
 
-  // Telegram
+  // Telegram — short summary only (with link to the portal for details).
   if (cfg.telegram_token && cfg.telegram_chat_id) {
     try {
-      const r = await sendTelegram(cfg.telegram_token, cfg.telegram_chat_id, text);
+      const r = await sendTelegram(cfg.telegram_token, cfg.telegram_chat_id, summary);
       channels.push({ channel: 'telegram', ok: r.ok, info: r.info });
     } catch (err) {
       channels.push({ channel: 'telegram', ok: false, info: err.message });

@@ -240,7 +240,63 @@ function evTag(r){
 }
 
 let route = {name:'projects', pid:null, tab:'sessions'};
-function go(r){route={...route,...r};render();}
+// Hash routing — so Telegram (and anyone else) can deep-link straight into a
+// project / tab / session. Patterns:
+//   #/p/<pid>                 → project, default tab (sessions)
+//   #/p/<pid>/<tab>           → project on a specific tab (sessions|flows|logs|...)
+//   #/p/<pid>/sessions/<sid>  → open session detail IDE for one session
+//   #/cms                     → admin CMS
+//   #/                        → projects list
+// Updating the hash should NOT recursively rerender (history.replaceState
+// silently keeps the URL in sync without firing hashchange).
+let _suppressHashChange = false;
+function routeToHash(r){
+  if(r.name==='cms') return '#/cms';
+  if(r.name==='project' && r.pid){
+    let h = `#/p/${r.pid}`;
+    if(r.tab && r.tab!=='sessions') h += `/${r.tab}`;
+    else if(r.openSid) h += `/sessions/${encodeURIComponent(r.openSid)}`;
+    return h;
+  }
+  return '#/';
+}
+function hashToRoute(){
+  const h = (location.hash || '').replace(/^#/, '');
+  const m = h.match(/^\/p\/(\d+)(?:\/([^/]+))?(?:\/([^/]+))?/);
+  if(m){
+    const pid = parseInt(m[1], 10);
+    const seg2 = m[2], seg3 = m[3];
+    // /p/<pid>/sessions/<sid> opens the IDE drawer for that session.
+    if(seg2 === 'sessions' && seg3) return {name:'project', pid, tab:'sessions', openSid: decodeURIComponent(seg3)};
+    if(seg2) return {name:'project', pid, tab: seg2};
+    return {name:'project', pid, tab:'sessions'};
+  }
+  if(/^\/cms/.test(h)) return {name:'cms'};
+  return null;   // no hash → caller picks the default
+}
+function go(r){
+  route={...route,...r};
+  const newHash = routeToHash(route);
+  if(location.hash !== newHash){
+    _suppressHashChange = true;
+    history.replaceState(null, '', newHash);
+    _suppressHashChange = false;
+  }
+  // If a session deep-link was requested, render the project first, then open
+  // the IDE drawer once the SPA shell has mounted.
+  const openSid = route.openSid;
+  if(openSid) delete route.openSid;
+  render().then(()=>{
+    if(openSid && route.name==='project' && route.pid){
+      openSessionIDE(route.pid, openSid).catch(()=>{});
+    }
+  });
+}
+window.addEventListener('hashchange', ()=>{
+  if(_suppressHashChange) return;
+  const r = hashToRoute();
+  if(r) go(r);
+});
 
 $('#navProjects').onclick=()=>go({name:'projects'});
 $('#navCms').onclick=()=>go({name:'cms'});
@@ -2605,6 +2661,15 @@ function onAuthed(){
   $('#userBox').hidden=false;
   $('#userEmail').textContent=me.email+(me.role==='admin'?' (admin)':'');
   $('#navCmsWrap').style.display = me.role==='admin' ? '' : 'none';
+  // Honor a deep-link from Telegram (or anywhere) if the URL has a hash route;
+  // otherwise fall back to the role default (admin → CMS, user → projects).
+  const fromHash = hashToRoute();
+  if(fromHash){
+    // Non-admins can't see the CMS — if they were sent a #/cms link, drop them on projects.
+    if(fromHash.name==='cms' && me.role!=='admin') go({name:'projects'});
+    else go(fromHash);
+    return;
+  }
   go({name: me.role==='admin' ? 'cms' : 'projects'});
 }
 $('#logout').onclick=async()=>{

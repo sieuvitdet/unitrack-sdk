@@ -14,7 +14,11 @@
 
 const { db } = require('./db');
 const { sendTelegram } = require('./deliver');
-const { computeFlows, runCycle, reconstructSessions } = require('./agent');
+const {
+  computeFlows, runCycle, reconstructSessions,
+  buildProjectSummary, formatTelegramSummary,
+  linkSessions, linkFlows, linkSession,
+} = require('./agent');
 
 const POLL_TIMEOUT_S = 30;       // Telegram long-poll hold time
 const fmtPct = (n) => (n == null ? '—' : n + '%');
@@ -43,11 +47,11 @@ async function handleCommand(token, chatId, text) {
 
   if (cmd === '/start' || cmd === '/help') {
     await sendTelegram(token, chatId,
-      `*UniTrack — ${projectName(pid)}*\n\nLệnh:\n` +
-      '`/report` — chạy phân tích + gửi báo cáo ngay\n' +
-      '`/flows` — top flow theo lượt dùng + crash/stuck\n' +
-      '`/sessions` — số session gần đây\n' +
-      '`/status` — tình trạng dự án & agent');
+      `UniTrack — ${projectName(pid)}\n\nLệnh:\n` +
+      '/report — báo cáo 24h (users, sessions, crashes, top flow) + link portal\n' +
+      '/flows — top flow theo lượt dùng + crash/stuck\n' +
+      '/sessions — link mở danh sách session trên portal\n' +
+      '/status — tình trạng dự án & agent');
     return;
   }
 
@@ -55,10 +59,11 @@ async function handleCommand(token, chatId, text) {
     const n = db.prepare('SELECT COUNT(*) n FROM events WHERE project_id = ?').get(pid).n;
     const s = db.prepare('SELECT COUNT(*) n FROM app_sessions WHERE project_id = ?').get(pid).n;
     await sendTelegram(token, chatId,
-      `*${projectName(pid)}* — trạng thái\n` +
+      `${projectName(pid)} — trạng thái\n` +
       `Events: ${n}\nSessions: ${s}\n` +
       `Agent: ${cfg.enabled ? 'bật' : 'tắt'} · LLM: ${cfg.llm_endpoint ? 'đã cấu hình' : 'chưa (dùng heuristic)'}\n` +
-      `Lịch: ${cfg.schedule_cron}`);
+      `Lịch: ${cfg.schedule_cron}\n\n` +
+      `Mở portal: ${linkSessions(pid)}`);
     return;
   }
 
@@ -66,24 +71,36 @@ async function handleCommand(token, chatId, text) {
     let flows = [];
     try { flows = computeFlows(pid); } catch (_) {}
     if (!flows.length) { await sendTelegram(token, chatId, 'Chưa có flow nào (cần session đã reconstruct).'); return; }
-    const lines = ['*Top flows — ' + projectName(pid) + '*'];
+    const lines = ['Top flows — ' + projectName(pid)];
     for (const f of flows.slice(0, 8)) {
       lines.push(`• ${f.flow_signature} — ${f.session_count} (${fmtPct(f.usage_pct)}) · crash ${fmtPct(f.crash_rate)} · stuck ${fmtPct(f.stuck_rate)}`);
     }
+    lines.push('');
+    lines.push(`Chi tiết: ${linkFlows(pid)}`);
     await sendTelegram(token, chatId, lines.join('\n'));
     return;
   }
 
+  // /sessions — point to the portal instead of dumping a long list. Show a
+  // short header (totals) and 5 most-recent session deep-links so the user can
+  // tap straight into one. Each session is one URL line so Telegram renders it
+  // as a tappable link.
   if (cmd === '/sessions') {
     try { reconstructSessions(pid); } catch (_) {}
+    const total = db.prepare('SELECT COUNT(*) n FROM app_sessions WHERE project_id = ?').get(pid).n;
+    if (!total) { await sendTelegram(token, chatId, 'Chưa có session nào. App cần gửi event có session_id (journeyCapture).'); return; }
     const rows = db.prepare(
       'SELECT session_id, flow_signature, ended_reason, crashed FROM app_sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 5'
     ).all(pid);
-    const total = db.prepare('SELECT COUNT(*) n FROM app_sessions WHERE project_id = ?').get(pid).n;
-    if (!total) { await sendTelegram(token, chatId, 'Chưa có session nào. App cần gửi event có session_id (journeyCapture).'); return; }
-    const lines = [`*Sessions — ${projectName(pid)}* (${total} tổng, 5 gần nhất)`];
+    const lines = [`Sessions — ${projectName(pid)} (tổng ${total})`, ''];
+    lines.push(`Xem tất cả: ${linkSessions(pid)}`);
+    lines.push('');
+    lines.push('5 session gần nhất:');
     for (const r of rows) {
-      lines.push(`• ${r.flow_signature || '(no_screens)'} — ${r.ended_reason}${r.crashed ? ' ⚠crash' : ''}`);
+      const flag = r.crashed ? ' ⚠crash' : '';
+      const flow = r.flow_signature === '(no_screens)' ? '(không có màn)' : (r.flow_signature || '—');
+      lines.push(`• ${flow} — ${r.ended_reason}${flag}`);
+      lines.push(`  ${linkSession(pid, r.session_id)}`);
     }
     await sendTelegram(token, chatId, lines.join('\n'));
     return;

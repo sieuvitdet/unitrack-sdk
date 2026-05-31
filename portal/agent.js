@@ -434,6 +434,139 @@ function computeFlowGraph(projectId, { refresh = true, userId = null } = {}) {
 
 // ── Phase 4: LLM analyze → report pipeline ───────────────────────────────────
 
+// ── Telegram summary (short report + deep-link, sent in place of full LLM body) ─
+//
+// The full LLM/heuristic report is still stored in agent_reports.report_text so
+// you can read it on the portal. Telegram receives only this compact summary so
+// the chat stays readable — counts for the project's last 24h, deltas vs the
+// previous 24h, top flows, and clickable deep-links into the SPA. Markdown is
+// avoided here (we send plain text + URLs) because Telegram's Markdown parser
+// chokes on `_` / `*` in real project names; the bot client renders bare URLs
+// as tappable links anyway.
+//
+// Resolves the public portal base for deep-links. PORTAL_BASE_URL wins so an
+// op can override (staging vs prod); otherwise we use the prod host the SDK
+// already talks to. The trailing '/' is required for the SPA hash route.
+function portalBaseUrl() {
+  const env = process.env.PORTAL_BASE_URL && process.env.PORTAL_BASE_URL.replace(/\/+$/, '');
+  return (env || 'https://mobix.asia/event-tracking-mobile') + '/';
+}
+const linkProject  = (pid)      => `${portalBaseUrl()}#/p/${pid}/sessions`;
+const linkSessions = (pid)      => `${portalBaseUrl()}#/p/${pid}/sessions`;
+const linkFlows    = (pid)      => `${portalBaseUrl()}#/p/${pid}/flows`;
+const linkSession  = (pid, sid) => `${portalBaseUrl()}#/p/${pid}/sessions/${encodeURIComponent(sid)}`;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Format a percent delta with a directional arrow. Returns '' when prev is 0
+// (no baseline → comparison is meaningless; don't print "+∞%").
+function fmtDelta(now, prev) {
+  if (!prev) return '';
+  const pct = Math.round(((now - prev) / prev) * 100);
+  if (pct === 0) return ' (→0%)';
+  return pct > 0 ? ` (↑${pct}%)` : ` (↓${Math.abs(pct)}%)`;
+}
+
+// Aggregate the last 24h of a project for the Telegram summary:
+//   users / sessions / crashes (with deltas vs the previous 24h)
+//   top 3 flows by session_count + the flow with the highest crash_rate
+// Refresh sessions first so the numbers reflect the latest events.
+function buildProjectSummary(projectId, { refresh = true } = {}) {
+  if (refresh) {
+    try { reconstructSessions(projectId); }
+    catch (err) { console.error('[summary] reconstruct failed', err); }
+  }
+  const now = Date.now();
+  const day0 = now - DAY_MS;        // start of "last 24h" window
+  const day1 = now - 2 * DAY_MS;    // start of "previous 24h" window
+
+  // Window stats live on events (24h means "happened recently"), but session/user
+  // counts use events too so a session active in the window is counted even if
+  // started before. DISTINCT user_id / session_id excludes the rare NULLs.
+  const window = (start, end) => {
+    const e = db.prepare(`
+      SELECT
+        COUNT(DISTINCT user_id)    AS users,
+        COUNT(DISTINCT session_id) AS sessions,
+        SUM(CASE WHEN event_name='crash' THEN 1 ELSE 0 END) AS crashes
+      FROM events
+      WHERE project_id = ? AND timestamp >= ? AND timestamp < ?
+        AND user_id IS NOT NULL AND user_id <> ''
+    `).get(projectId, start, end);
+    return {
+      users:    e?.users    || 0,
+      sessions: e?.sessions || 0,
+      crashes:  e?.crashes  || 0,
+    };
+  };
+  const last24h = window(day0, now);
+  const prev24h = window(day1, day0);
+
+  // Top flows by usage (last 24h sessions). Phase 2's computeFlows aggregates
+  // ALL time — for the daily report we want only sessions started in the window.
+  const flows = db.prepare(`
+    SELECT flow_signature,
+           COUNT(*) AS session_count,
+           SUM(crashed) AS crash_count
+    FROM app_sessions
+    WHERE project_id = ? AND started_at >= ?
+    GROUP BY flow_signature
+    ORDER BY session_count DESC
+    LIMIT 10
+  `).all(projectId, day0).map((r) => ({
+    flow_signature: r.flow_signature,
+    session_count: r.session_count,
+    crash_count: r.crash_count || 0,
+    crash_rate: r.session_count ? Math.round((r.crash_count / r.session_count) * 1000) / 10 : 0,
+  }));
+  // Flow with the highest crash rate (min 2 sessions so a single fluke doesn't win).
+  const worstFlow = flows.filter((f) => f.session_count >= 2)
+    .slice().sort((a, b) => b.crash_rate - a.crash_rate)[0] || null;
+
+  return { last24h, prev24h, flows, worstFlow };
+}
+
+// Real flow signatures are long ("Home>HUD>Home>HUD>Home>List>Detail>...") —
+// users bounce back and forth and the raw chain is unreadable in a Telegram
+// line. Compress to a short hint: dedup consecutive duplicates, then keep the
+// first 2 + last 2 distinct screens, eliding the middle with "…".
+function shortFlow(sig) {
+  if (!sig || sig === '(no_screens)') return '(không có màn)';
+  const parts = sig.split('>');
+  const deduped = [];
+  for (const s of parts) if (deduped[deduped.length - 1] !== s) deduped.push(s);
+  if (deduped.length <= 5) return deduped.join(' › ');
+  return deduped.slice(0, 2).join(' › ') + ' › … › ' + deduped.slice(-2).join(' › ')
+    + ` (${deduped.length} màn)`;
+}
+
+// Render the summary as the Telegram message body. Plain text + bare URLs —
+// no Markdown so project names with underscores don't break the parser.
+function formatTelegramSummary(projectId, projectName, summary) {
+  const { last24h, prev24h, flows, worstFlow } = summary;
+  const lines = [];
+  lines.push(`📊 ${projectName} — báo cáo 24h`);
+  lines.push('');
+  lines.push(`👥 Users: ${last24h.users}${fmtDelta(last24h.users, prev24h.users)}`);
+  lines.push(`🟢 Sessions: ${last24h.sessions}${fmtDelta(last24h.sessions, prev24h.sessions)}`);
+  lines.push(`⚠️  Crashes: ${last24h.crashes}${fmtDelta(last24h.crashes, prev24h.crashes)}`);
+
+  if (flows.length) {
+    lines.push('');
+    lines.push('Top flow:');
+    for (const f of flows.slice(0, 3)) {
+      lines.push(`• ${shortFlow(f.flow_signature)} — ${f.session_count} session${f.crash_count ? ` · ${f.crash_count} crash` : ''}`);
+    }
+    if (worstFlow && worstFlow.crash_rate > 0) {
+      lines.push('');
+      lines.push(`🔴 Flow crash nhiều nhất: ${shortFlow(worstFlow.flow_signature)} (${worstFlow.crash_rate}%)`);
+    }
+  }
+  lines.push('');
+  lines.push(`Xem chi tiết: ${linkSessions(projectId)}`);
+  if (flows.length) lines.push(`Flows:        ${linkFlows(projectId)}`);
+  return lines.join('\n');
+}
+
 const LLM_TIMEOUT_MS = 60_000;
 
 // Default model when agent_config.llm_model is unset. The team's proxy is
@@ -580,7 +713,14 @@ async function runCycle(projectId, deliverFn) {
   let delivered = false, delivery_log = null;
   if (deliverFn) {
     try {
-      const res = await deliverFn(cfg, { report_text, category });
+      // Telegram gets a short summary (24h counts + top flows + deep-links) so
+      // the chat stays scannable; the full LLM/heuristic report stays in the DB
+      // and is shown on the portal. Pass both: deliver() picks `summary_text`
+      // for Telegram and keeps `report_text` available for richer channels.
+      const projectName = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId)?.name || `#${projectId}`;
+      const summary = buildProjectSummary(projectId, { refresh: false });
+      const summary_text = formatTelegramSummary(projectId, projectName, summary);
+      const res = await deliverFn(cfg, { report_text, summary_text, category });
       delivered = !!(res && res.delivered);
       delivery_log = JSON.stringify(res || {});
       db.prepare('UPDATE agent_reports SET delivered = ?, delivery_log = ? WHERE id = ?')
@@ -596,5 +736,7 @@ async function runCycle(projectId, deliverFn) {
 module.exports = {
   reconstructSessions, buildSessionRow, cleanScreen, computeFlows, computeFlowGraph,
   callLLM, buildAnalysisInput, heuristicReport, runCycle,
+  buildProjectSummary, formatTelegramSummary,
+  linkProject, linkSessions, linkFlows, linkSession,
   DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT,
 };
