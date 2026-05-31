@@ -306,7 +306,9 @@ router.get('/projects/:id/stats', ownProject, (req, res) => {
     detected_bundles,
     total:    one('SELECT COUNT(*) n FROM events WHERE project_id = ?').n,
     sessions: one('SELECT COUNT(DISTINCT session_id) n FROM events WHERE project_id = ?').n,
-    users:    one('SELECT COUNT(DISTINCT user_id) n FROM events WHERE project_id = ? AND user_id IS NOT NULL').n,
+    // Skip BOTH null AND empty-string user_id values — pre-login events fan
+    // out with user_id="" which used to inflate the count (5 instead of 4).
+    users:    one("SELECT COUNT(DISTINCT user_id) n FROM events WHERE project_id = ? AND user_id IS NOT NULL AND user_id <> ''").n,
     last_hour: one('SELECT COUNT(*) n FROM events WHERE project_id = ? AND received_at > ?', now() - 3600_000).n,
     by_event:    all('SELECT event_name, COUNT(*) count FROM events WHERE project_id = ? GROUP BY event_name ORDER BY count DESC'),
     by_platform: all("SELECT COALESCE(platform,'unknown') platform, COUNT(*) count FROM events WHERE project_id = ? GROUP BY platform ORDER BY count DESC"),

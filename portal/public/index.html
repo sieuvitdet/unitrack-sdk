@@ -74,6 +74,8 @@
   .card-clickable{transition:border-color .15s, transform .15s, box-shadow .15s}
   .card-clickable:hover{border-color:var(--danger);transform:translateY(-1px);
     box-shadow:0 4px 14px rgba(220,38,38,.18)}
+  /* Same lift, accent (blue) framing — used by neutral drill-downs like Users. */
+  .card-clickable-accent:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(91,140,255,.18)}
   table{width:100%;border-collapse:collapse;}
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);}
   td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top;}
@@ -458,7 +460,12 @@ async function renderProject(){
     <div class="cards">
       <div class="card"><div class="k">Events</div><div class="v">${stats.total}</div></div>
       <div class="card"><div class="k">Sessions</div><div class="v">${stats.sessions}</div></div>
-      <div class="card"><div class="k">Users</div><div class="v">${stats.users}</div></div>
+      <div class="card ${stats.users?'card-clickable card-clickable-accent':''}" id="usersCard"
+        style="${stats.users?'cursor:pointer':''}"
+        title="${stats.users?'Bấm để xem danh sách user':''}">
+        <div class="k">Users${stats.users?' <span class="muted" style="font-size:10px">↗</span>':''}</div>
+        <div class="v">${stats.users}</div>
+      </div>
       <div class="card ${stats.crashes?'card-clickable':''}" id="crashCard"
         style="${stats.crashes?'cursor:pointer':''}"
         title="${stats.crashes?'Bấm để xem chi tiết các crash':''}">
@@ -497,6 +504,13 @@ async function renderProject(){
   const crashCard = document.getElementById('crashCard');
   if (crashCard && stats.crashes) {
     crashCard.onclick = () => openCrashReportDialog(pid);
+  }
+  // Users card → user-list modal with search; picking a user routes to the
+  // Sessions tab with the user filter applied (so the right pane only shows
+  // that user's sessions).
+  const usersCard = document.getElementById('usersCard');
+  if (usersCard && stats.users) {
+    usersCard.onclick = () => openUsersDialog(pid);
   }
   $('#smAdd').onclick=async()=>{
     const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
@@ -3129,6 +3143,123 @@ function renderCrashReport(pid, data, killFn) {
       openSessionIDE(pid, a.dataset.sid).catch(() => {});
     };
   });
+}
+
+// User-list dialog — opens from the Users card on the project overview.
+// Same data source as the existing user <select> in the Sessions/wireframe
+// toolbar, but with search + click-to-filter so picking a user takes the
+// operator straight to that user's sessions.
+async function openUsersDialog(pid) {
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id = 'usersDlg'; dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:640px;max-width:96vw;max-height:84vh;padding:0;z-index:110;'
+    + 'display:flex;flex-direction:column;overflow:hidden';
+  dlg.innerHTML = `
+    <div class="dlg-h" style="flex:0 0 auto">👥 Danh sách user
+      <button class="usr-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div style="flex:0 0 auto;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)">
+      <input id="usrSearch" placeholder="🔎 Tìm theo user_id / username / epcode…" autocomplete="off"
+        style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 12px;font-size:13px">
+    </div>
+    <div class="dlg-b" id="usrList" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 0">
+      <div class="muted" style="font-size:12px;padding:14px">Đang tải…</div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open', ''); }
+  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
+  dlg.querySelector('.usr-close').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+
+  let users = [];
+  try {
+    const data = await api(`/api/projects/${pid}/users`);
+    users = (data && data.users) || [];
+  } catch (e) {
+    document.getElementById('usrList').innerHTML =
+      `<div style="color:var(--danger);padding:14px">Không tải được user list: ${esc(e.message || e)}</div>`;
+    return;
+  }
+  if (!users.length) {
+    document.getElementById('usrList').innerHTML =
+      '<div class="muted" style="padding:14px">Project chưa có user nào (chưa có event nào kèm user_id).</div>';
+    return;
+  }
+
+  // Reusable row renderer — called on initial render + on each search keystroke.
+  // Match against user_id + username + epcode (lowercase, substring).
+  const fmtAgo = (ts) => {
+    if (!ts) return '—';
+    const d = Date.now() - ts;
+    if (d < 60_000) return Math.round(d / 1000) + 's';
+    if (d < 3600_000) return Math.round(d / 60_000) + ' phút';
+    if (d < 86400_000) return Math.round(d / 3600_000) + ' giờ';
+    return Math.round(d / 86400_000) + ' ngày';
+  };
+  const renderList = (q) => {
+    const list = document.getElementById('usrList');
+    const needle = (q || '').toLowerCase().trim();
+    const filtered = needle
+      ? users.filter((u) => {
+          const hay = [u.user_id, u.username, u.epcode].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(needle);
+        })
+      : users;
+    if (!filtered.length) {
+      list.innerHTML = '<div class="muted" style="padding:14px;font-size:12px">Không user nào khớp.</div>';
+      return;
+    }
+    list.innerHTML = filtered.map((u) => {
+      const display = u.username && u.username !== u.user_id
+        ? `${esc(u.username)} <span class="muted" style="font-weight:400">· ${esc(u.user_id)}</span>`
+        : esc(u.user_id);
+      const sub = [
+        u.epcode ? `EP <span class="mono">${esc(u.epcode)}</span>` : null,
+        u.session_count ? `${u.session_count} session` : null,
+        u.event_count ? `${u.event_count} event` : null,
+        u.last_seen ? `gặp gần nhất ${fmtAgo(u.last_seen)} trước` : null,
+      ].filter(Boolean).join(' · ');
+      return `
+        <div class="usr-row" data-uid="${esc(u.user_id)}"
+          style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--line)">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--bg);border:1px solid var(--line);
+                      display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;color:var(--accent2)">
+            ${esc((u.username || u.user_id || '?').slice(0, 1).toUpperCase())}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${display}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sub || '(no metadata)'}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div><span style="font-size:18px;font-weight:700;color:var(--accent)">${u.session_count || 0}</span></div>
+            <div class="muted" style="font-size:10px">session</div>
+          </div>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.usr-row').forEach((row) => {
+      row.onclick = () => {
+        // Pick this user → close dialog, set the global user filter, and switch
+        // to the Sessions tab so the right pane updates immediately.
+        _userFilter = row.dataset.uid;
+        kill();
+        go({ name: 'project', pid, tab: 'sessions' });
+      };
+    });
+  };
+  renderList('');
+
+  // Debounced search — keeps typing snappy on a big user list.
+  const inp = document.getElementById('usrSearch');
+  inp.focus();
+  inp.oninput = () => {
+    clearTimeout(inp._h);
+    inp._h = setTimeout(() => renderList(inp.value), 120);
+  };
+  // Enter on a single match → pick it.
+  inp.onkeydown = (ev) => {
+    if (ev.key !== 'Enter') return;
+    const rows = document.querySelectorAll('#usrList .usr-row');
+    if (rows.length === 1) rows[0].click();
+  };
 }
 
 // Fetch + render the per-provider payload of this event ("what was forwarded
