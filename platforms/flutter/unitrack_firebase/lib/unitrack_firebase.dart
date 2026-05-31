@@ -72,12 +72,22 @@ class FirebaseProvider extends AnalyticsProvider {
   void track(String name, Map<String, Object?> properties) {
     final fa = _fa;
     if (fa == null) return;
+    // Some apps still call FirebaseAnalytics.logEvent directly (e.g. legacy
+    // tracking code) AND also push the same event through UniTrack so the
+    // portal sees it. The caller marks the UniTrack-only copy with
+    // `_skip_firebase: true` so we don't double-log to Firebase.
+    final skipFirebase = properties['_skip_firebase'] == true;
     // Merge super properties under the event's own (event props win).
     final merged = <String, Object?>{..._superProps, ...properties};
-    fa.logEvent(
-      name: _sanitizeName(name),
-      parameters: _sanitizeParams(merged),
-    );
+    // Drop the marker before anything goes out so it doesn't pollute the
+    // event row on either side.
+    merged.remove('_skip_firebase');
+    if (!skipFirebase) {
+      fa.logEvent(
+        name: _sanitizeName(name),
+        parameters: _sanitizeParams(merged),
+      );
+    }
     _mirrorToPortal(name, merged);
   }
 

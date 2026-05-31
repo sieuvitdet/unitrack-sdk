@@ -2700,6 +2700,30 @@ function showActionDetail(a){
   const isParse = a.event_name==='json_parse_error';
   const isErr   = a.event_name==='application_error' || isCrash || isParse;
 
+  const isTap = a.event_name === 'tap';
+  // Common context: when did this fire + on what screen + what triggered any
+  // followups (network attribution). Shown above the specifics block so the
+  // operator can grok "when/where" before the deeper details.
+  const ctxRows = [];
+  if (a.ts) ctxRows.push(['Thời điểm', new Date(a.ts).toLocaleString('vi-VN', { hour12: false }) + ` (${a.ts})`]);
+  const screen = (a.props && (a.props.screen || a.props.screen_name)) || null;
+  if (screen) ctxRows.push(['Màn hình', screen]);
+  if (a.element_key) ctxRows.push(['Element key', a.element_key]);
+  if (a.props && a.props.element_type) ctxRows.push(['Element type', a.props.element_type]);
+  if (a.props && a.props.label && a.props.label !== a.element_key) ctxRows.push(['Label', a.props.label]);
+  if (a.props && a.props.trace_id) ctxRows.push(['trace_id', a.props.trace_id]);
+  if (a.props && a.props.span_id)  ctxRows.push(['span_id',  a.props.span_id]);
+  if (a.triggeredBy) ctxRows.push(['Gây ra bởi', a.triggeredBy]);
+  // Followup network calls — set by buildSessionTree when networks fired
+  // within NET_WINDOW_MS of this action. Tap → API → response chain is the
+  // most useful "what happened next" view for a tap.
+  const followups = (a.networks || []).filter((n) => !!n);
+  if (followups.length) ctxRows.push(['API gọi sau đó', `${followups.length} call`]);
+
+  // For taps, the bottom-of-popup business-rule + provider-forward sections
+  // do most of the work. Put a small "🏷️ Gán event nghiệp vụ →" hint near
+  // the bottom of the body so the user knows the rewrite tool is one click
+  // away. Wire it up after dlg is open (below).
   let body = '';
   if(isErr){
     // Diagnose the cause from the properties the SDK sent up.
@@ -2736,10 +2760,61 @@ function showActionDetail(a){
     body += `<div class="key" style="margin-top:10px">Properties</div>
       <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto">${esc(JSON.stringify(p,null,2))}</pre>`;
   } else {
-    // Plain custom event → show its properties.
-    body = Object.keys(p).length
-      ? `<div class="kv" style="grid-template-columns:140px 1fr">${Object.entries(p).map(([k,v])=>`<div class="key">${esc(k)}</div><div class="mono">${esc(typeof v==='object'?JSON.stringify(v):String(v))}</div>`).join('')}</div>`
-      : '<div class="muted">Sự kiện này không truyền properties.</div>';
+    // Context block first — when / where / element type / trace id — then the
+    // raw properties (everything the SDK captured for this tap). Two zones so
+    // an operator scanning for "where did this come from" doesn't have to dig
+    // through every key.
+    const ctxHtml = ctxRows.length
+      ? `<div class="key" style="margin-bottom:4px">Ngữ cảnh</div>
+         <div class="kv" style="grid-template-columns:140px 1fr;margin-bottom:10px;font-size:12px">
+           ${ctxRows.map(([k,v]) =>
+             `<div class="key">${esc(k)}</div><div class="mono" style="word-break:break-all">${esc(String(v))}</div>`).join('')}
+         </div>`
+      : '';
+
+    // Followup network preview (top 5). Useful for taps: shows the API chain
+    // the button kicked off without forcing the operator to leave the popup.
+    let netHtml = '';
+    if (followups.length) {
+      const rows = followups.slice(0, 5).map((n) => {
+        const path = n.url ? (() => { try { return new URL(n.url).pathname; } catch (_) { return n.url; } })() : '—';
+        const ok = n.status >= 200 && n.status < 400;
+        const c = n.net_error || !ok ? 'var(--danger)' : '#79c0ff';
+        return `<div style="display:flex;gap:8px;font-size:11px;padding:2px 0">
+          <span style="color:#79c0ff;font-weight:600">${esc(n.method || '')}</span>
+          <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(n.url || path)}">${esc(path)}</span>
+          <span style="color:${c};font-weight:700">${n.net_error ? '✕' : (n.status || '—')}</span>
+        </div>`;
+      }).join('');
+      netHtml = `<div class="key" style="margin-top:6px">API gọi sau đó (${followups.length})</div>
+        <div style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px">${rows}${
+          followups.length > 5 ? `<div class="muted" style="font-size:11px;padding-top:4px">+${followups.length - 5} call khác — xem chi tiết trong session timeline</div>` : ''
+        }</div>`;
+    }
+
+    // Raw properties (everything else). Hide the keys we already promoted
+    // into the context block so the operator isn't reading them twice.
+    const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id']);
+    const rest = Object.fromEntries(Object.entries(p).filter(([k]) => !promoted.has(k)));
+    const propsHtml = Object.keys(rest).length
+      ? `<div class="key" style="margin-top:10px">Properties khác</div>
+         <div class="kv" style="grid-template-columns:140px 1fr;font-size:11px">${
+           Object.entries(rest).map(([k,v]) =>
+             `<div class="key">${esc(k)}</div><div class="mono" style="word-break:break-all">${esc(typeof v==='object'?JSON.stringify(v):String(v))}</div>`).join('')
+         }</div>`
+      : (ctxRows.length ? '' : '<div class="muted">Sự kiện này không truyền properties.</div>');
+
+    // Tap-only: a quick affordance to map this element_key → a business event
+    // name (the existing rewrite-rules feature). Resolved via openEventMapDialog
+    // wired below.
+    const ruleBtn = (isTap && a.element_key)
+      ? `<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
+          <button class="btn ghost sm" id="actMapBtn">🏷️ Gán element key này thành event nghiệp vụ…</button>
+          <div class="muted" style="font-size:10.5px;margin-top:4px">Tạo rule remote-config để mọi tap vào <span class="mono">${esc(a.element_key)}</span> trên <span class="mono">${esc(screen || '—')}</span> trở thành event riêng (vd <span class="mono">cart_open</span>).</div>
+        </div>`
+      : '';
+
+    body = ctxHtml + netHtml + propsHtml + ruleBtn;
   }
 
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
@@ -2756,6 +2831,85 @@ function showActionDetail(a){
   const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
   dlg.querySelector('.act-close').onclick = kill;
   dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };
+
+  // Tap-only: wire the "Gán element key này…" button to the quick-rule dialog.
+  // That dialog issues PUT /config with the merged rules list — same shape as
+  // the Tree tab uses, just bound to (tap, element_key, screen) directly.
+  const mapBtn = dlg.querySelector('#actMapBtn');
+  if (mapBtn) mapBtn.onclick = () => {
+    const screen = (a.props && (a.props.screen || a.props.screen_name)) || _ideState?.segs?.find(s => s.screen)?.screen || '';
+    openQuickRuleDialog({
+      pid: route?.pid,
+      matchEvent: 'tap',
+      matchScreen: screen,
+      matchElementKey: a.element_key,
+      onSaved: () => { kill(); toast('Đã gán event nghiệp vụ — rebuild app sẽ áp dụng'); },
+    });
+  };
+}
+
+// Quick mapping dialog: build ONE rewrite rule (tap@screen/element → toName)
+// and PUT it into project_config.rules. Reuses the same merge behaviour as
+// the tree tab — remove any existing rule with the same match keys, then
+// append the new one.
+function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, onSaved }) {
+  if (!pid) return;
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id = 'quickRuleDlg'; dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:480px;max-width:92vw;z-index:110';
+  dlg.innerHTML = `
+    <div class="dlg-h">🏷️ Gán event nghiệp vụ
+      <button class="qr-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b">
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        Khi app rebuild + pull lại config, mọi <b>${esc(matchEvent)}</b> trên
+        màn <span class="mono">${esc(matchScreen || '(bất kỳ)')}</span>
+        ${matchElementKey ? `vào <span class="mono">${esc(matchElementKey)}</span>` : ''}
+        sẽ được đổi tên thành event dưới đây.
+      </div>
+      <label style="font-size:12px">Tên event nghiệp vụ</label>
+      <input id="qrToName" placeholder="vd: cart_open" style="width:100%" autocomplete="off"/>
+      <label style="font-size:12px;margin-top:8px">Schema iglu (tuỳ chọn — Snowplow self-describing)</label>
+      <input id="qrSchema" placeholder="iglu:com.acme/cart_open/jsonschema/1-0-0" style="width:100%" autocomplete="off"/>
+      <div class="row" style="margin-top:14px;justify-content:flex-end;gap:8px">
+        <button class="btn ghost sm qr-cancel">Huỷ</button>
+        <button class="btn sm" id="qrSave">Lưu rule</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
+  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
+  dlg.querySelector('.qr-close').onclick = kill;
+  dlg.querySelector('.qr-cancel').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+  dlg.querySelector('#qrToName').focus();
+
+  dlg.querySelector('#qrSave').onclick = async () => {
+    const toName = dlg.querySelector('#qrToName').value.trim();
+    if (!toName) { toast('Nhập tên event nghiệp vụ', 'err'); return; }
+    const schema = dlg.querySelector('#qrSchema').value.trim();
+    // Pull current rules so we don't wipe siblings.
+    let rules = [];
+    try {
+      const c = await api(`/api/projects/${pid}/config`);
+      rules = c.rules || [];
+    } catch (_) {}
+    // Replace any existing rule with the same match keys, then append.
+    rules = rules.filter((r) => !(
+      r.match_event === matchEvent
+      && (r.match_screen || '') === (matchScreen || '')
+      && (r.match_element_key || '') === (matchElementKey || '')
+    ));
+    const rule = { match_event: matchEvent, to_name: toName };
+    if (matchScreen) rule.match_screen = matchScreen;
+    if (matchElementKey) rule.match_element_key = matchElementKey;
+    if (schema) rule.add_props = { _schema: schema };
+    rules.push(rule);
+    await api(`/api/projects/${pid}/config`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }) });
+    kill();
+    if (onSaved) onSaved();
+  };
 }
 
 // Fetch + render the per-provider payload of this event ("what was forwarded
