@@ -2818,7 +2818,7 @@ function showSwfNetGroup(group){
     return `<div style="flex:0 0 auto;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;overflow:hidden">
       <div class="swf-netrow" data-i="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;font-size:12px;min-height:20px">
         <span style="color:#79c0ff">${esc(n.method||'')}</span>
-        <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path)}</span>
+        <span class="mono" title="${esc(n.url||path)}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path)}</span>
         <span style="color:${c};font-weight:700">${statusTxt}</span>
         <span class="muted" style="font-size:10px">▾</span>
       </div>
@@ -2852,7 +2852,10 @@ function showSwfNetGroup(group){
   const dlg = document.createElement('dialog'); dlg.id='netListDlg'; dlg.className='ut-util-dlg';
   // High z-index + appended to <body> so it sits on the top layer above the IDE
   // overlay (z-index 40) regardless of where it was triggered from.
-  dlg.style.cssText='width:560px;max-width:92vw;max-height:85vh;padding:0;z-index:100;'
+  // Width upped from 560 → 920 so long API paths
+  // (/service/mobinet/gateway/transition-deployment/api/v1/...) read end-to-end
+  // without ellipsis. Capped at 96vw so it still fits on narrow screens.
+  dlg.style.cssText='width:920px;max-width:96vw;max-height:85vh;padding:0;z-index:100;'
     +'display:flex;flex-direction:column;overflow:hidden';
   dlg.innerHTML = `<div class="dlg-h" style="flex:0 0 auto">🌐 ${group.networks.length} network call
     <button class="swf-net-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
