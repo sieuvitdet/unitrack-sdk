@@ -21,3 +21,6 @@ mkdir -p "$HERE/Classes/include"
 cp "$HERE/../../ios/Sources/UniTrackCore/include/unitrack.h" "$HERE/Classes/include/unitrack.h"
 
 echo "[sync_native] copied native SDK + core into $HERE/Native"
+echo "[sync_native] If you ADDED or RENAMED a file, also run 'pod install' in"
+echo "[sync_native] the consuming app's ios/ dir — Pods.xcodeproj caches the"
+echo "[sync_native] file list and won't pick up new files until then."
