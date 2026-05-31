@@ -69,6 +69,11 @@
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
   .card .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;}
   .card .v{font-size:24px;font-weight:700;margin-top:6px;}
+  /* Clickable summary card (e.g. Crashes → opens the crash report dialog).
+     Hover gives a subtle lift so the affordance reads without a button look. */
+  .card-clickable{transition:border-color .15s, transform .15s, box-shadow .15s}
+  .card-clickable:hover{border-color:var(--danger);transform:translateY(-1px);
+    box-shadow:0 4px 14px rgba(220,38,38,.18)}
   table{width:100%;border-collapse:collapse;}
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);}
   td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top;}
@@ -454,7 +459,12 @@ async function renderProject(){
       <div class="card"><div class="k">Events</div><div class="v">${stats.total}</div></div>
       <div class="card"><div class="k">Sessions</div><div class="v">${stats.sessions}</div></div>
       <div class="card"><div class="k">Users</div><div class="v">${stats.users}</div></div>
-      <div class="card"><div class="k">Crashes</div><div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div></div>
+      <div class="card ${stats.crashes?'card-clickable':''}" id="crashCard"
+        style="${stats.crashes?'cursor:pointer':''}"
+        title="${stats.crashes?'Bấm để xem chi tiết các crash':''}">
+        <div class="k">Crashes${stats.crashes?' <span class="muted" style="font-size:10px">↗</span>':''}</div>
+        <div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div>
+      </div>
     </div>
     <div class="panel">
       <div class="tabs">
@@ -480,6 +490,14 @@ async function renderProject(){
     toast('Đã lưu cấu hình providers');
   };
   renderSpMaps(pid);
+
+  // Crash card → open the crash report dialog. Only wire when there's
+  // something to show (the card only renders the cursor:pointer styling
+  // when stats.crashes > 0 — same predicate here).
+  const crashCard = document.getElementById('crashCard');
+  if (crashCard && stats.crashes) {
+    crashCard.onclick = () => openCrashReportDialog(pid);
+  }
   $('#smAdd').onclick=async()=>{
     const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
     const mode=$('#smMode').value, schema=$('#smSchema').value.trim();
@@ -2974,6 +2992,143 @@ function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, on
     kill();
     if (onSaved) onSaved();
   };
+}
+
+// Crash report dialog — opens from the Crashes card on the project overview.
+// Two views in one dialog:
+//   1) Group list: signature (message + screen) ordered by frequency, with
+//      session/user counts.
+//   2) Group detail (when an item is expanded): one representative crash's
+//      message + stack + properties + the 5 most recent sessions hit (each
+//      a deep-link into the session IDE).
+async function openCrashReportDialog(pid) {
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id = 'crashDlg'; dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:880px;max-width:96vw;max-height:88vh;padding:0;z-index:110;'
+    + 'display:flex;flex-direction:column;overflow:hidden';
+  dlg.innerHTML = `
+    <div class="dlg-h" style="flex:0 0 auto;color:var(--danger)">⚠ Báo cáo crash
+      <button class="cr-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:14px 16px" id="crashBody">
+      <div class="muted" style="font-size:12px">Đang tải…</div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
+  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
+  dlg.querySelector('.cr-close').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+
+  let data;
+  try { data = await api(`/api/projects/${pid}/crashes`); }
+  catch (e) {
+    document.getElementById('crashBody').innerHTML =
+      `<div style="color:var(--danger)">Không tải được crash report: ${esc(e.message || e)}</div>`;
+    return;
+  }
+  renderCrashReport(pid, data, kill);
+}
+
+function renderCrashReport(pid, data, killFn) {
+  const body = document.getElementById('crashBody');
+  if (!body) return;
+  if (!data.groups || !data.groups.length) {
+    body.innerHTML = '<div class="muted">Không có crash nào (data.total_crashes = 0).</div>';
+    return;
+  }
+  const fmtAgo = (ts) => {
+    const d = Date.now() - ts;
+    if (d < 60_000) return Math.round(d / 1000) + 's trước';
+    if (d < 3600_000) return Math.round(d / 60_000) + ' phút trước';
+    if (d < 86400_000) return Math.round(d / 3600_000) + ' giờ trước';
+    return Math.round(d / 86400_000) + ' ngày trước';
+  };
+  // Header summary: total + group count.
+  const header = `
+    <div style="display:flex;gap:16px;align-items:baseline;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line)">
+      <div><span style="font-size:24px;font-weight:700;color:var(--danger)">${data.total_crashes}</span>
+        <span class="muted" style="font-size:11px;margin-left:4px">tổng crash</span></div>
+      <div><span style="font-size:18px;font-weight:600">${data.group_count}</span>
+        <span class="muted" style="font-size:11px;margin-left:4px">loại lỗi khác nhau</span></div>
+      <span class="muted" style="font-size:11px;margin-left:auto">Sắp xếp theo tần suất</span>
+    </div>`;
+  // Each group rendered collapsed; expand toggles the detail panel inline.
+  const groups = data.groups.map((g, i) => {
+    const sessionsHtml = g.recent_sessions.map((s) => `
+      <a class="cr-sess" data-sid="${esc(s.session_id)}"
+         style="display:inline-flex;gap:6px;align-items:center;padding:4px 10px;border:1px solid var(--line);
+                border-radius:14px;font-size:11px;cursor:pointer;background:var(--bg);text-decoration:none;color:var(--text)">
+        <span class="mono" style="color:var(--accent2)">${esc(shortSid(s.session_id))}</span>
+        <span class="muted">${s.user_id ? esc(s.user_id) + ' · ' : ''}${fmtAgo(s.timestamp)}</span>
+      </a>`).join('');
+    // Pull the stack out of the sample's properties (if any) — present at
+    // crash time as `stack_trace` (Flutter exception) or `stack` (native).
+    const p = g.sample.properties || {};
+    const stack = p.stack_trace || p.stack || p.callstack || null;
+    const extraProps = Object.fromEntries(
+      Object.entries(p).filter(([k]) => !['stack_trace','stack','callstack','message','error','exception','signal_name','screen','screen_name','session_id','user_id'].includes(k))
+    );
+    const propsHtml = Object.keys(extraProps).length
+      ? `<div class="key" style="margin-top:10px">Properties khác</div>
+         <div class="kv" style="grid-template-columns:140px 1fr;font-size:11px">${
+           Object.entries(extraProps).map(([k, v]) =>
+             `<div class="key">${esc(k)}</div><div class="mono" style="word-break:break-all">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</div>`).join('')
+         }</div>`
+      : '';
+    return `
+      <div class="cr-group" data-i="${i}" style="border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden">
+        <div class="cr-head" data-i="${i}" style="display:flex;gap:10px;align-items:center;padding:10px 14px;cursor:pointer;background:var(--panel)">
+          <span style="color:var(--danger);font-size:16px;flex-shrink:0">⚠</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px;color:var(--danger);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.message)}">${esc(g.message)}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px">
+              📱 <span class="mono">${esc(g.screen)}</span> ·
+              ${g.platform || ''}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div><span style="font-size:18px;font-weight:700;color:var(--danger)">${g.count}</span>
+              <span class="muted" style="font-size:10px">crash</span></div>
+            <div class="muted" style="font-size:10px">${g.session_count} session · ${g.user_count} user</div>
+          </div>
+          <span class="cr-caret" style="color:var(--muted);font-size:14px;width:14px;text-align:center">▸</span>
+        </div>
+        <div class="cr-detail" data-i="${i}" style="display:none;padding:12px 14px;border-top:1px solid var(--line);background:var(--bg)">
+          <div class="muted" style="font-size:11px;margin-bottom:8px">
+            Lần đầu: <span class="mono">${fmtTime(g.first_seen)}</span> ·
+            Gần nhất: <span class="mono">${fmtTime(g.last_seen)}</span> ·
+            App version: <span class="mono">${esc(g.sample.app_version || '—')}</span>
+          </div>
+          ${stack ? `<div class="key">Stack trace</div>
+            <pre style="background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px;
+                        font-size:11px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:4px 0 10px">${esc(stack)}</pre>` : ''}
+          ${propsHtml}
+          ${g.recent_sessions.length ? `<div class="key" style="margin-top:12px">Session gần nhất bị crash</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${sessionsHtml}</div>
+            <div class="muted" style="font-size:10px;margin-top:6px">Bấm 1 session để mở session detail</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  body.innerHTML = header + groups;
+
+  // Wire expand/collapse + session deep-link.
+  body.querySelectorAll('.cr-head').forEach((h) => {
+    h.onclick = () => {
+      const i = h.dataset.i;
+      const detail = body.querySelector(`.cr-detail[data-i="${i}"]`);
+      const caret  = h.querySelector('.cr-caret');
+      const open = detail.style.display === 'none' || !detail.style.display;
+      detail.style.display = open ? 'block' : 'none';
+      if (caret) caret.textContent = open ? '▾' : '▸';
+    };
+  });
+  body.querySelectorAll('.cr-sess').forEach((a) => {
+    a.onclick = (ev) => {
+      ev.preventDefault();
+      // Close the crash dialog so the IDE overlay isn't fighting it for focus.
+      if (killFn) killFn();
+      openSessionIDE(pid, a.dataset.sid).catch(() => {});
+    };
+  });
 }
 
 // Fetch + render the per-provider payload of this event ("what was forwarded

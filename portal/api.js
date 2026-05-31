@@ -315,6 +315,103 @@ router.get('/projects/:id/stats', ownProject, (req, res) => {
   });
 });
 
+// Crash report: every crash event grouped by signature (message + screen) so
+// the operator can see "8 sessions hit the same NPE on RemainingShiftScreen".
+// Each group carries: count, distinct sessions/users, first/last seen, one
+// representative crash (with stack trace), and the most recent 5 sessions
+// hit so the SPA can deep-link straight into the session IDE.
+router.get('/projects/:id/crashes', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const rows = db.prepare(`
+    SELECT id, event_id, timestamp, session_id, user_id,
+           screen_name, screen, class_name, platform, app_version, properties
+    FROM events
+    WHERE project_id = ? AND event_name = 'crash'
+    ORDER BY timestamp DESC
+  `).all(pid);
+
+  // Build a fingerprint per crash: message + screen. Stack-trace top frame
+  // would be more precise but the SDK doesn't always carry one (Flutter
+  // exceptions vs native signals carry different shapes). Message + screen is
+  // a good signal for "same bug" in practice.
+  const groups = new Map();
+  // Trim the bug message so different exception instances with the same root
+  // cause collapse into one group ("FormatException: Invalid number 5", "...8").
+  const trimMessage = (m) => {
+    if (!m) return '(unknown)';
+    let s = String(m).split('\n')[0];     // first line only
+    if (s.length > 140) s = s.slice(0, 137) + '…';
+    return s;
+  };
+
+  for (const r of rows) {
+    let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
+    const message = trimMessage(props.message || props.error || props.exception || props.signal_name);
+    const screen  = r.screen_name || r.screen || props.screen || props.screen_name || '(unknown)';
+    const key = `${screen}|${message}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        signature: key,
+        message,
+        screen,
+        count: 0,
+        sessions: new Set(),
+        users: new Set(),
+        first_seen: r.timestamp,
+        last_seen:  r.timestamp,
+        // Keep the most-recent representative so the dialog has stack+props ready.
+        sample: {
+          event_id:    r.event_id,
+          timestamp:   r.timestamp,
+          session_id:  r.session_id,
+          user_id:     r.user_id,
+          platform:    r.platform,
+          app_version: r.app_version,
+          class_name:  r.class_name,
+          properties:  props,
+        },
+        recent_sessions: [],   // unique session_ids, newest first
+      };
+      groups.set(key, g);
+    }
+    g.count++;
+    if (r.session_id) g.sessions.add(r.session_id);
+    if (r.user_id)    g.users.add(r.user_id);
+    g.first_seen = Math.min(g.first_seen, r.timestamp);
+    g.last_seen  = Math.max(g.last_seen,  r.timestamp);
+    if (r.session_id && !g.recent_sessions.find((s) => s.session_id === r.session_id) && g.recent_sessions.length < 5) {
+      g.recent_sessions.push({
+        session_id:  r.session_id,
+        user_id:     r.user_id,
+        timestamp:   r.timestamp,
+        app_version: r.app_version,
+      });
+    }
+  }
+
+  const out = [...groups.values()]
+    .map((g) => ({
+      signature:        g.signature,
+      message:          g.message,
+      screen:           g.screen,
+      count:            g.count,
+      session_count:    g.sessions.size,
+      user_count:       g.users.size,
+      first_seen:       g.first_seen,
+      last_seen:        g.last_seen,
+      sample:           g.sample,
+      recent_sessions:  g.recent_sessions,
+    }))
+    .sort((a, b) => b.count - a.count);   // most frequent first
+
+  res.json({
+    total_crashes: rows.length,
+    group_count:   out.length,
+    groups:        out,
+  });
+});
+
 // ----------------------------------------------------------------- users
 // Identified users for a project: id + traits (from the latest `identify`
 // event's properties, e.g. username/epcode) + session/event counts + last seen.
