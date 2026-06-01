@@ -187,12 +187,24 @@ public final class UniTrack {
 
     // MARK: - Semantic events (Phase 3)
 
-    /// Notification received/opened. state: foreground|background|silent.
-    public static func trackNotification(state: String, action: String = "received",
-                                         title: String? = nil, body: String? = nil) {
+    /// Notification received/opened/dismissed.
+    /// state: foreground|background|silent  ·  action: received|opened|dismissed
+    /// `notificationId` is the platform identifier (UNNotification.request.identifier
+    /// on iOS / RemoteMessage.getMessageId on Android) so the portal can dedup
+    /// the same push delivered + opened. `data` is the raw payload dict — push
+    /// notifications usually carry routing keys (route, deeplink, campaign_id)
+    /// in there and dropping them blinds the analytics.
+    public static func trackNotification(state: String,
+                                         action: String = "received",
+                                         title: String? = nil,
+                                         body: String? = nil,
+                                         notificationId: String? = nil,
+                                         data: [String: Any]? = nil) {
         var p: [String: Any] = ["state": state, "action": action]
         if let title = title { p["title"] = title }
         if let body = body { p["body"] = body }
+        if let nid = notificationId, !nid.isEmpty { p["notification_id"] = nid }
+        if let data = data, !data.isEmpty { p["data"] = data }
         track("notification", properties: p)
     }
 

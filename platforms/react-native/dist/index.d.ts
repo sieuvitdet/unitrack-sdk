@@ -60,12 +60,19 @@ declare class UniTrackClass {
     setScreen(name: string): Promise<void>;
     flush(): Promise<void>;
     setEnabled(e: boolean): Promise<void>;
-    /** Notification received/opened. state: 'foreground'|'background'|'silent'. */
+    /** Notification received/opened/dismissed.
+     *  state: 'foreground'|'background'|'silent'
+     *  action: 'received'|'opened'|'dismissed' (default 'received')
+     *  notificationId: platform id (FCM messageId / APNs id) so the portal can
+     *    dedup the same push across deliver/open
+     *  data: raw payload (usually carries routing keys like deeplink/campaign_id)
+     */
     trackNotification(opts: {
         state: string;
         action?: string;
         title?: string;
         body?: string;
+        notificationId?: string;
         data?: EventProperties;
     }): Promise<void>;
     trackWebViewOpen(url: string, screen?: string): Promise<void>;

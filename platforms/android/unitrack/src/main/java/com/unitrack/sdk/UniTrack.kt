@@ -195,11 +195,19 @@ object UniTrack {
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------
+    // notificationId + data added in audit-fix phase 3: FCM/local notifications
+    // carry routing keys (deeplink, campaign_id) in the data payload that the
+    // earlier short signature dropped on the floor.
     @JvmStatic @JvmOverloads
     fun trackNotification(state: String, action: String = "received",
-                          title: String? = null, body: String? = null) {
+                          title: String? = null, body: String? = null,
+                          notificationId: String? = null,
+                          data: Map<String, Any?>? = null) {
         val p = mutableMapOf<String, Any?>("state" to state, "action" to action)
-        title?.let { p["title"] = it }; body?.let { p["body"] = it }
+        title?.let { p["title"] = it }
+        body?.let { p["body"] = it }
+        notificationId?.takeIf { it.isNotEmpty() }?.let { p["notification_id"] = it }
+        data?.takeIf { it.isNotEmpty() }?.let { p["data"] = it }
         track("notification", p)
     }
 

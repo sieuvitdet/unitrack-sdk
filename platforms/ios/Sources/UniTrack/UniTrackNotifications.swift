@@ -24,10 +24,13 @@ import UIKit
 
 public enum UniTrackNotifications {
 
-    public enum Action: String { case received, opened }
+    public enum Action: String { case received, opened, dismissed }
 
     /// Forward a single notification to UniTrack. State is inferred from the
     /// current app state and whether the notification carries visible content.
+    /// Also forwards the platform notification id + userInfo payload so the
+    /// portal can dedup the same push and surface routing keys (deeplink,
+    /// campaign_id, …) that live in `data`.
     public static func capture(_ notification: UNNotification, action: Action) {
         let content = notification.request.content
         let silent = content.title.isEmpty && content.body.isEmpty
@@ -37,11 +40,20 @@ public enum UniTrackNotifications {
         } else {
             state = (UIApplication.shared.applicationState == .active) ? "foreground" : "background"
         }
+        // userInfo is a [AnyHashable: Any] — narrow to [String: Any] for JSON.
+        // Keys that aren't strings (rare) get dropped silently; payloads from
+        // FCM/APNs are always string-keyed in practice.
+        var data: [String: Any] = [:]
+        for (k, v) in content.userInfo {
+            if let key = k as? String { data[key] = v }
+        }
         UniTrack.trackNotification(
             state: state,
             action: action.rawValue,
             title: content.title.isEmpty ? nil : content.title,
-            body: content.body.isEmpty ? nil : content.body
+            body: content.body.isEmpty ? nil : content.body,
+            notificationId: notification.request.identifier,
+            data: data.isEmpty ? nil : data
         )
     }
 

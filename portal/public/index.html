@@ -2960,9 +2960,34 @@ function showActionDetail(a){
         }</div>`;
     }
 
+    // Notification-specific surfacing: pull the payload (`data`) into a
+    // pretty pre block + show notification_id as its own row. Otherwise the
+    // payload prints as one giant JSON-stringified line at the bottom of
+    // "Properties khác" and the routing keys are unreadable.
+    const isNotification = a.event_name === 'notification';
+    let notifHtml = '';
+    if (isNotification) {
+      const nRows = [];
+      if (p.state) nRows.push(['state', p.state]);
+      if (p.action) nRows.push(['action', p.action]);
+      if (p.notification_id) nRows.push(['notification_id', p.notification_id]);
+      if (p.title) nRows.push(['title', p.title]);
+      if (p.body)  nRows.push(['body',  p.body]);
+      const dataObj = (p.data && typeof p.data === 'object') ? p.data : null;
+      notifHtml = `<div class="key" style="margin-top:6px">Notification</div>
+        <div class="kv" style="grid-template-columns:140px 1fr;font-size:12px">${
+          nRows.map(([k, v]) =>
+            `<div class="key">${esc(k)}</div><div class="mono" style="word-break:break-all">${esc(String(v))}</div>`).join('')
+        }</div>
+        ${dataObj ? `<div class="key" style="margin-top:8px">Payload (data)</div>
+          <pre style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto">${esc(JSON.stringify(dataObj, null, 2))}</pre>` : ''}`;
+    }
+
     // Raw properties (everything else). Hide the keys we already promoted
-    // into the context block so the operator isn't reading them twice.
-    const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id','class_name','framework','package']);
+    // into the context block so the operator isn't reading them twice. The
+    // notification fields are promoted too so the JSON dump doesn't repeat them.
+    const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id','class_name','framework','package',
+      ...(isNotification ? ['state','action','notification_id','title','body','data'] : [])]);
     const rest = Object.fromEntries(Object.entries(p).filter(([k]) => !promoted.has(k)));
     const propsHtml = Object.keys(rest).length
       ? `<div class="key" style="margin-top:10px">Properties khác</div>
@@ -2982,7 +3007,7 @@ function showActionDetail(a){
         </div>`
       : '';
 
-    body = ctxHtml + netHtml + propsHtml + ruleBtn;
+    body = ctxHtml + notifHtml + netHtml + propsHtml + ruleBtn;
   }
 
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';

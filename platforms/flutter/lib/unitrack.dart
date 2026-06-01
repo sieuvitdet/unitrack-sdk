@@ -278,11 +278,18 @@ class UniTrack {
 
   /// A push/local notification was received or interacted with.
   /// [state]: 'foreground' | 'background' | 'silent'. [action]: 'received' | 'opened'.
+  /// A push/local notification was received or interacted with.
+  /// [action]: 'received' | 'opened' | 'dismissed'
+  /// [notificationId]: platform id (FCM messageId / iOS UNNotification id) so
+  /// the portal can join the same push across deliver/open.
+  /// [data]: the raw payload bag (usually carries routing keys like
+  /// `deeplink`, `campaign_id`).
   Future<void> trackNotification({
     required String state,
     String action = 'received',
     String? title,
     String? body,
+    String? notificationId,
     Map<String, Object?>? data,
   }) =>
       track('notification', properties: {
@@ -290,7 +297,9 @@ class UniTrack {
         'action': action,
         if (title != null) 'title': title,
         if (body != null) 'body': body,
-        if (data != null) 'data': data,
+        if (notificationId != null && notificationId.isNotEmpty)
+          'notification_id': notificationId,
+        if (data != null && data.isNotEmpty) 'data': data,
       });
 
   /// Drop-in notification auto-capture: forward a notification here from your
@@ -311,6 +320,7 @@ class UniTrack {
     String action = 'received',
     String? title,
     String? body,
+    String? notificationId,
     Map<String, Object?>? data,
   }) {
     final resumed =
@@ -323,6 +333,7 @@ class UniTrack {
       action: action,
       title: title,
       body: body,
+      notificationId: notificationId,
       data: data,
     );
   }
