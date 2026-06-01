@@ -75,6 +75,163 @@ class SnowplowProvider extends AnalyticsProvider {
   /// rewrites this map without forcing a re-init of the underlying tracker.
   Map<String, String> schemas;
 
+  // ── Blueprint config ────────────────────────────────────────────────────
+  //
+  // `schemas` only covers "event_name → one schema URI". FPT's analytics
+  // taxonomy (and Snowplow's own model) needs more: each event ships with
+  // context entities (user_context, core_action, attendance, …) whose own
+  // schemas + field maps come from the backend team's spec, NOT from app
+  // code. Blueprints encode that.
+  //
+  // _blueprints[id] = { schema, attach_entities[] }
+  //   one blueprint per event "kind" (click_event, result_event, …) so 21
+  //   events sharing the same ev_click schema reuse one blueprint entry.
+  //
+  // _entities[id]   = { schema, fields{name → {from, key, default?}} }
+  //   one definition per context entity. `from` is the value source —
+  //   "globals" (app-supplied via setGlobalContext), "device" (UniTrack
+  //   device blob), "props" (per-event properties), or "literal".
+  //
+  // _eventBlueprintMap[name_or_pattern] = blueprint_id
+  //   exact match wins; wildcard `prefix_*` matches by startsWith.
+  Map<String, Map<String, Object?>> _blueprints = {};
+  Map<String, Map<String, Object?>> _entities = {};
+  Map<String, String>               _eventBlueprintMap = {};
+
+  /// Globals are values that don't live on a single event but get attached
+  /// to its context entities (user info, build flavor, …). One write per
+  /// app session is normal — call from your "user logged in" code path.
+  Map<String, Object?> _globals = {};
+  void setGlobalContext(Map<String, Object?> ctx) {
+    _globals = Map<String, Object?>.from(ctx);
+    debugPrint('[unitrack_snowplow] globals updated (${_globals.length} keys)');
+  }
+  void mergeGlobalContext(Map<String, Object?> ctx) {
+    _globals = { ..._globals, ...ctx };
+  }
+
+  /// Device blob from the SDK init (DeviceInfo.json). Apps push it via
+  /// setDeviceBlob so the provider can pull device.* fields when an entity
+  /// field's source is "device". We DON'T import the C bridge here just for
+  /// this — pull-on-write keeps the provider unitrack-package-agnostic.
+  Map<String, Object?> _deviceBlob = {};
+  void setDeviceBlob(Map<String, Object?> blob) {
+    _deviceBlob = Map<String, Object?>.from(blob);
+  }
+
+  /// Replace the blueprint config wholesale (typically from remote config).
+  /// Pass empty maps to fall back to the legacy schemas[] behaviour.
+  void applyBlueprintConfig({
+    Map<String, Map<String, Object?>>? blueprints,
+    Map<String, Map<String, Object?>>? entities,
+    Map<String, String>? eventBlueprintMap,
+  }) {
+    if (blueprints != null) _blueprints = Map<String, Map<String, Object?>>.from(blueprints);
+    if (entities != null)   _entities   = Map<String, Map<String, Object?>>.from(entities);
+    if (eventBlueprintMap != null) _eventBlueprintMap = Map<String, String>.from(eventBlueprintMap);
+    debugPrint('[unitrack_snowplow] blueprints=${_blueprints.length} entities=${_entities.length} mapped=${_eventBlueprintMap.length}');
+  }
+
+  // Resolve an event name to a blueprint id. Exact match wins; otherwise
+  // walk patterns with a trailing `_*` and return the first prefix match.
+  // null = no blueprint, fall back to schemas[name] or Structured.
+  String? _resolveBlueprintId(String eventName) {
+    final exact = _eventBlueprintMap[eventName];
+    if (exact != null) return exact;
+    for (final entry in _eventBlueprintMap.entries) {
+      final pat = entry.key;
+      if (pat.endsWith('*')) {
+        final prefix = pat.substring(0, pat.length - 1);
+        if (eventName.startsWith(prefix)) return entry.value;
+      }
+    }
+    return null;
+  }
+
+  // Pull a value from the configured source. Returns null if missing —
+  // the caller decides what to do (some entities require all fields).
+  Object? _pullField(Map<String, Object?> field, Map<String, Object?> props, String eventName) {
+    final from = (field['from'] ?? 'literal') as String;
+    final key  = (field['key']  ?? '')        as String;
+    Object? raw;
+    switch (from) {
+      case 'globals':
+        raw = _readDottedKey(_globals, key);
+        break;
+      case 'device':
+        raw = _readDottedKey(_deviceBlob, key);
+        break;
+      case 'props':
+        raw = _readDottedKey(props, key);
+        break;
+      case 'event_name':
+        raw = eventName;
+        break;
+      case 'literal':
+        raw = field['value'];
+        break;
+    }
+    if (raw != null && raw.toString().isNotEmpty) return raw;
+    // default token — "now" → ISO timestamp; anything else → literal default.
+    final def = field['default'];
+    if (def == 'now') return DateTime.now().toIso8601String();
+    return def;
+  }
+
+  /// `user.userName` → walk `globals['user']['userName']`. Plain strings
+  /// without a `.` read one level.
+  Object? _readDottedKey(Map<String, Object?> bag, String key) {
+    if (key.isEmpty) return null;
+    final parts = key.split('.');
+    Object? cur = bag;
+    for (final p in parts) {
+      if (cur is Map) {
+        cur = cur[p];
+      } else {
+        return null;
+      }
+      if (cur == null) return null;
+    }
+    return cur;
+  }
+
+  /// Build one entity into a Snowplow SelfDescribing context. Returns null
+  /// if the entity isn't configured OR every field came back null (no point
+  /// shipping an entity full of empty strings; backend schema validation
+  /// would likely reject anyway).
+  SelfDescribing? _buildEntity(String entityId, Map<String, Object?> props, String eventName) {
+    final ent = _entities[entityId];
+    if (ent == null) return null;
+    final schema = ent['schema'] as String?;
+    if (schema == null || schema.isEmpty) return null;
+    final fieldMap = (ent['fields'] as Map?)?.cast<String, Object?>() ?? const {};
+    final data = <String, Object?>{};
+    var anyValue = false;
+    for (final f in fieldMap.entries) {
+      final spec = (f.value as Map?)?.cast<String, Object?>() ?? const {};
+      final v = _pullField(spec, props, eventName);
+      if (v != null && v.toString().isNotEmpty) anyValue = true;
+      // Snowplow doesn't like null values inside a SelfDescribing — coerce
+      // to empty string. The backend schema can reject empties if needed.
+      data[f.key] = v ?? '';
+    }
+    if (!anyValue) return null;
+    return SelfDescribing(schema: schema, data: data);
+  }
+
+  /// Strip internal-only keys (anything starting with `_`) before they
+  /// reach the SelfDescribing data field — those are inputs for context
+  /// entities (vd `_start_time` → core_action.start_time), not part of the
+  /// event's own schema.
+  Map<String, Object?> _cleanedEventData(Map<String, Object?> props) {
+    final out = <String, Object?>{};
+    for (final e in props.entries) {
+      if (e.key.startsWith('_')) continue;
+      out[e.key] = e.value ?? '';
+    }
+    return out;
+  }
+
   /// Replace the schemas map at runtime (e.g. from remote config). Existing
   /// entries are dropped; pass an empty map to disable self-describing
   /// fan-out and fall back to Structured for everything.
@@ -174,28 +331,64 @@ class SnowplowProvider extends AnalyticsProvider {
   void track(String name, Map<String, Object?> properties) {
     final t = _tracker;
     if (t == null) return;
-    final schema = schemas[name];
     Map<String, Object?> mirror;
-    if (schema != null) {
+
+    // Resolution order (richest first → simplest):
+    //   1. Blueprint match → SelfDescribing with attach_entities
+    //   2. Plain schemas[name] map → SelfDescribing with the global user_context only
+    //   3. Structured event (category/action/label/property)
+    //
+    // (1) is the path FPT taxonomy needs: one click_event blueprint serves
+    // every ev_click_* event, with core_action + user_context entities
+    // assembled from globals + per-event props. App code stays free of
+    // schema URIs and entity field shapes.
+    final blueprintId = _resolveBlueprintId(name);
+    final blueprint = blueprintId != null ? _blueprints[blueprintId] : null;
+
+    if (blueprint != null && (blueprint['schema'] as String?)?.isNotEmpty == true) {
+      final schema = blueprint['schema'] as String;
+      final attach = (blueprint['attach_entities'] as List?)?.cast<String>() ?? const [];
+      final contexts = <SelfDescribing>[];
+      for (final entId in attach) {
+        final entity = _buildEntity(entId, properties, name);
+        if (entity != null) contexts.add(entity);
+      }
+      // Also keep the legacy global user_context entity if it wasn't already
+      // built by the blueprint — apps with both old + new wiring don't lose it.
+      if (!attach.contains('user_context')) {
+        contexts.addAll(_contexts());
+      }
+      final data = _cleanedEventData(properties);
       t.track(
-        SelfDescribing(
-          schema: schema,
-          data: properties.map((k, v) => MapEntry(k, v ?? '')),
-        ),
-        contexts: _contexts(),
+        SelfDescribing(schema: schema, data: data),
+        contexts: contexts,
       );
-      // Snowplow received this as a self-describing event — record both the
-      // schema and the original properties so the portal can show them
-      // exactly the way they went out on the wire.
       mirror = {
         '_sp_type': 'self_describing',
         '_sp_schema': schema,
-        ...properties,
+        '_sp_blueprint': blueprintId,
+        '_sp_contexts': attach,        // entity ids that were resolved
+        ...data,
+      };
+    } else if (schemas[name] != null) {
+      // Legacy path — single-schema map, no blueprint context list.
+      final schema = schemas[name]!;
+      t.track(
+        SelfDescribing(
+          schema: schema,
+          data: _cleanedEventData(properties),
+        ),
+        contexts: _contexts(),
+      );
+      mirror = {
+        '_sp_type': 'self_describing',
+        '_sp_schema': schema,
+        ..._cleanedEventData(properties),
       };
     } else {
-      // No registered schema → Structured event. Snowplow Structured only has
-      // category/action/label/property/value, so fold a couple of common
-      // properties into label/property for visibility.
+      // No schema at all → Structured event fallback. Snowplow Structured
+      // only has category/action/label/property/value — fold the two common
+      // props into label/property for visibility on the collector.
       final label = properties['screen']?.toString() ??
           properties['screen_name']?.toString();
       final property = properties['element_key']?.toString() ??
@@ -209,15 +402,13 @@ class SnowplowProvider extends AnalyticsProvider {
         ),
         contexts: _contexts(),
       );
-      // Mirror reflects the Structured shape so the portal can show
-      // category/action/label/property like Snowplow's own UI would.
       mirror = {
         '_sp_type': 'structured',
         '_sp_category': 'unitrack',
         '_sp_action': name,
         if (label != null) '_sp_label': label,
         if (property != null) '_sp_property': property,
-        ...properties,
+        ..._cleanedEventData(properties),
       };
     }
     _mirrorToPortal(name, mirror);

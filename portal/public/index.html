@@ -803,6 +803,83 @@ function wireChartHover(wrap) {
 // resolves the right block by passing ?flavor=… to /config.
 const FLAVORS = ['dev', 'staging', 'beta', 'production'];
 
+// JS replica of the Flutter SnowplowProvider's blueprint resolver +
+// entity builder — used by the "🧪 Test với event name" preview to show
+// the operator the EXACT Snowplow payload the app will fire, without
+// having to install + run the build. Keep in sync with
+// unitrack_snowplow/lib/unitrack_snowplow.dart's _resolveBlueprintId +
+// _buildEntity + _pullField + _cleanedEventData.
+function previewSnowplowPayload(eventName, props, ctx) {
+  const { blueprints, entities, mapj, globals, device } = ctx;
+  const readDotted = (bag, key) => {
+    if (!key) return null;
+    const parts = String(key).split('.');
+    let cur = bag;
+    for (const p of parts) {
+      if (cur && typeof cur === 'object') cur = cur[p];
+      else return null;
+      if (cur == null) return null;
+    }
+    return cur;
+  };
+  const pullField = (field, eventProps) => {
+    const from = field.from || 'literal';
+    const key  = field.key  || '';
+    let raw;
+    if      (from === 'globals')    raw = readDotted(globals, key);
+    else if (from === 'device')     raw = readDotted(device, key);
+    else if (from === 'props')      raw = readDotted(eventProps, key);
+    else if (from === 'event_name') raw = eventName;
+    else if (from === 'literal')    raw = field.value;
+    if (raw != null && String(raw).length > 0) return raw;
+    if (field.default === 'now') return new Date().toISOString();
+    return field.default ?? null;
+  };
+  const buildEntity = (entityId) => {
+    const ent = entities[entityId];
+    if (!ent || !ent.schema) return null;
+    const data = {};
+    let any = false;
+    const fields = ent.fields || {};
+    for (const [k, spec] of Object.entries(fields)) {
+      const v = pullField(spec || {}, props);
+      if (v != null && String(v).length > 0) any = true;
+      data[k] = v == null ? '' : v;
+    }
+    if (!any) return null;
+    return { schema: ent.schema, data };
+  };
+  // Resolve blueprint: exact > wildcard `prefix_*`.
+  let blueprintId = mapj[eventName];
+  if (!blueprintId) {
+    for (const [pat, id] of Object.entries(mapj)) {
+      if (pat.endsWith('*') && eventName.startsWith(pat.slice(0, -1))) { blueprintId = id; break; }
+    }
+  }
+  const blueprint = blueprintId ? blueprints[blueprintId] : null;
+  if (!blueprint) {
+    return {
+      type: 'structured',
+      reason: 'no blueprint matched — will fall back to Structured event',
+      event_name: eventName,
+      props,
+    };
+  }
+  // Strip "_..." prefixed keys from the event data (they're inputs for
+  // entities, not part of the event's own schema).
+  const cleanedData = {};
+  for (const [k, v] of Object.entries(props)) if (!k.startsWith('_')) cleanedData[k] = v ?? '';
+  const attach = blueprint.attach_entities || [];
+  const contexts = attach.map(buildEntity).filter(Boolean);
+  return {
+    type: 'self_describing',
+    blueprint_id: blueprintId,
+    snowplow_event: { schema: blueprint.schema, data: cleanedData },
+    contexts,
+    skipped_entities: attach.filter((id) => !buildEntity(id)),
+  };
+}
+
 async function renderConfig(pid){
   const c = await api(`/api/projects/${pid}/config`);
   const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{}), tr=c.tracing||{};
@@ -892,6 +969,66 @@ async function renderConfig(pid){
         <textarea id="cfSpSchemas" placeholder="ev_click_check_in = iglu:vn.fpt.ftel.snowplow/ev_click_check_in/jsonschema/1-0-0"
           style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px">${esc(kvText(sp.schemas))}</textarea>
       </div>
+
+      <!-- Blueprints + Entities — the previous "Iglu schemas" map only
+           covers 1 event => 1 schema URI. FPT's analytics taxonomy ships a
+           core_action + user_context entity alongside every click/result
+           event, with field maps the backend team defines per-app.
+           Blueprints encode that as JSON so the app stays free of schema
+           URIs and entity shapes. -->
+      <details style="margin-top:14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0">
+        <summary style="cursor:pointer;padding:12px;font-size:13px;font-weight:600;color:var(--accent2)">
+          📐 Blueprints &amp; Entities <span class="muted" style="font-weight:400;font-size:11px">— xây event với SelfDescribing + context entities (core_action, user_context, …)</span>
+        </summary>
+        <div style="padding:0 12px 12px">
+          <div class="muted" style="font-size:11px;margin-bottom:10px">
+            Mỗi <b>blueprint</b> là 1 cách dựng event (schema + entities gắn kèm). Mỗi <b>entity</b>
+            có schema riêng + map field từ <span class="mono">globals/device/props/literal</span>.
+            Map dưới cùng tên event → blueprint id. Wildcard <span class="mono">prefix_*</span> match prefix.
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <b style="font-size:12px">Blueprints</b>
+            <span class="muted" style="font-size:11px;flex:1">JSON object — <span class="mono">{ "click_event": { "schema": "iglu:...", "attach_entities": ["user_context","core_action"] } }</span></span>
+            <button class="btn ghost sm" id="cfSpBpSeed" type="button" title="Sinh blueprint + entities mẫu theo FPT taxonomy (click_event, result_event, screen_event + user_context, core_action, attendance)">
+              ✨ Seed FPT taxonomy
+            </button>
+          </div>
+          <textarea id="cfSpBlueprints"
+            style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px">${esc(JSON.stringify(sp.blueprints || {}, null, 2))}</textarea>
+
+          <div style="margin-top:10px"><b style="font-size:12px">Entities</b>
+            <span class="muted" style="font-size:11px;margin-left:6px">JSON — entity_id → { schema, fields: { name: { from, key, default? } } }</span></div>
+          <textarea id="cfSpEntities"
+            style="width:100%;height:200px;font-family:ui-monospace,monospace;font-size:11px;margin-top:4px">${esc(JSON.stringify(sp.entities || {}, null, 2))}</textarea>
+
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+            <b style="font-size:12px">Event → Blueprint map</b>
+            <span class="muted" style="font-size:11px;flex:1">JSON object — exact "ev_click_check_in":"click_event" hoặc wildcard "ev_click_*":"click_event"</span>
+            <button class="btn ghost sm" id="cfSpMapSeed" type="button" title="Auto-fill wildcard: ev_click_* → click_event, ev_result_* → result_event, …">
+              ✨ Sinh wildcard từ event đã thấy
+            </button>
+          </div>
+          <textarea id="cfSpEventBpMap"
+            style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px;margin-top:4px">${esc(JSON.stringify(sp.event_blueprint_map || {}, null, 2))}</textarea>
+
+          <div style="margin-top:12px;padding:10px;border:1px dashed var(--line);border-radius:6px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <b style="font-size:12px">🧪 Test với event name</b>
+              <span class="muted" style="font-size:11px">paste event + props mẫu → preview Snowplow payload thực tế</span>
+            </div>
+            <div class="row" style="gap:8px">
+              <input id="cfSpTestName" placeholder="ev_click_check_in"
+                style="flex:1;min-width:180px;font-family:ui-monospace,monospace;font-size:11px"/>
+              <button class="btn sm" id="cfSpTestRun" type="button">Preview</button>
+            </div>
+            <textarea id="cfSpTestProps" placeholder='{"event_action":"check_in_button","contract_id":"X123","_start_time":"2026-06-01T10:00:00"}'
+              style="width:100%;height:60px;margin-top:6px;font-family:ui-monospace,monospace;font-size:11px"></textarea>
+            <pre id="cfSpTestOut" class="mono"
+              style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;margin-top:6px;max-height:240px;overflow:auto;display:none"></pre>
+          </div>
+        </div>
+      </details>
 
       ${flavorOverrideHtml('Sp', sp)}
 
@@ -1028,6 +1165,139 @@ async function renderConfig(pid){
     }
   };
 
+  // ── FPT taxonomy seed (blueprints + entities, no event map) ──────────
+  // Drops in the 3 blueprints + 3 entities MobiX needs. Doesn't touch the
+  // event_blueprint_map — that's seeded separately so the operator can
+  // pick which prefix → which blueprint. Won't overwrite hand-edited JSON.
+  const bpSeedBtn = document.getElementById('cfSpBpSeed');
+  if (bpSeedBtn) bpSeedBtn.onclick = () => {
+    const fptBlueprints = {
+      click_event: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/ev_click/jsonschema/1-0-0',
+        attach_entities: ['user_context', 'core_action'],
+      },
+      result_event: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/ev_result/jsonschema/1-0-0',
+        attach_entities: ['user_context', 'core_action', 'attendance'],
+      },
+      screen_event: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/screen_view/jsonschema/1-0-0',
+        attach_entities: ['user_context'],
+      },
+    };
+    const fptEntities = {
+      user_context: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
+        fields: {
+          username:     { from: 'globals', key: 'user.userName' },
+          epcode:       { from: 'globals', key: 'user.staffEmp' },
+          platform:     { from: 'device',  key: 'platform' },
+          device_name:  { from: 'device',  key: 'device_name' },
+          device_imei:  { from: 'globals', key: 'imei' },
+          app_version:  { from: 'device',  key: 'app_version' },
+          environment:  { from: 'globals', key: 'flavor' },
+        },
+      },
+      core_action: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/core_action/jsonschema/1-0-0',
+        fields: {
+          start_time:  { from: 'props',      key: '_start_time' },
+          end_time:    { from: 'props',      key: '_end_time', default: 'now' },
+          method_name: { from: 'event_name', key: '' },
+        },
+      },
+      attendance: {
+        schema: 'iglu:vn.fpt.ftel.snowplow/attendance/jsonschema/1-0-0',
+        fields: {
+          contract_id: { from: 'props', key: 'contract_id' },
+          sub_type:    { from: 'props', key: 'sub_type' },
+        },
+      },
+    };
+    // Merge — don't overwrite operator-typed keys.
+    const curBp = (() => { try { return JSON.parse(document.getElementById('cfSpBlueprints').value || '{}'); } catch (_) { return {}; } })();
+    const curEnt = (() => { try { return JSON.parse(document.getElementById('cfSpEntities').value || '{}'); } catch (_) { return {}; } })();
+    document.getElementById('cfSpBlueprints').value =
+      JSON.stringify({ ...fptBlueprints, ...curBp }, null, 2);
+    document.getElementById('cfSpEntities').value =
+      JSON.stringify({ ...fptEntities, ...curEnt }, null, 2);
+    toast('Đã seed FPT taxonomy — chưa lưu, bấm Lưu config');
+  };
+
+  // ── Event → blueprint wildcard map seed ──────────────────────────────
+  // Walks the observed event names + falls back to the 21 MobiX constants
+  // (some may not have fired yet on this project) and emits a wildcard map
+  // grouped by prefix. The operator usually only needs to tweak the values.
+  const mapSeedBtn = document.getElementById('cfSpMapSeed');
+  if (mapSeedBtn) mapSeedBtn.onclick = async () => {
+    mapSeedBtn.disabled = true; mapSeedBtn.textContent = '⏳ …';
+    try {
+      const data = await api(`/api/projects/${pid}/event-names`).catch(() => ({ names: [] }));
+      const all = new Set((data.names || []).filter(Boolean));
+      // Hard-coded known FPT prefixes — guarantees the seed even on a
+      // brand-new project that hasn't fired the events yet.
+      ['ev_click','ev_result','event_click','event_result','ev_open','ev_switch','screen_view']
+        .forEach((p) => all.add(p + '_seed'));   // ensure prefix detection
+      const prefixToBp = (prefix) => {
+        if (prefix.startsWith('ev_click') || prefix.startsWith('event_click')) return 'click_event';
+        if (prefix.startsWith('ev_result') || prefix.startsWith('event_result')) return 'result_event';
+        if (prefix === 'screen_view') return 'screen_event';
+        if (prefix.startsWith('ev_open') || prefix.startsWith('ev_switch')) return 'click_event';
+        return null;
+      };
+      const map = {};
+      const seenPrefixes = new Set();
+      for (const name of all) {
+        // Group by first 2 underscore-separated tokens, e.g. "ev_click".
+        const tok = name.split('_').slice(0, 2).join('_');
+        if (seenPrefixes.has(tok)) continue;
+        const bp = prefixToBp(tok);
+        if (!bp) continue;
+        seenPrefixes.add(tok);
+        map[`${tok}_*`] = bp;
+      }
+      // Merge with what the operator already typed.
+      const curMap = (() => { try { return JSON.parse(document.getElementById('cfSpEventBpMap').value || '{}'); } catch (_) { return {}; } })();
+      document.getElementById('cfSpEventBpMap').value =
+        JSON.stringify({ ...map, ...curMap }, null, 2);
+      const added = Object.keys(map).filter((k) => !(k in curMap)).length;
+      toast(added > 0 ? `Đã thêm ${added} wildcard (chưa lưu)` : 'Map đã đủ');
+    } catch (e) {
+      toast('Lỗi: ' + (e.message || e), 'err');
+    } finally {
+      mapSeedBtn.disabled = false; mapSeedBtn.textContent = '✨ Sinh wildcard từ event đã thấy';
+    }
+  };
+
+  // ── Live test: dry-run blueprint resolution + entity build ──────────
+  // Mirrors the SDK's resolveBlueprintId + buildEntity in JS so the
+  // operator sees the exact Snowplow payload BEFORE the app fires it.
+  // No round-trip to the SDK; pure preview from the textareas + a fake
+  // globals/device blob filled with placeholders the operator can edit.
+  const testBtn = document.getElementById('cfSpTestRun');
+  if (testBtn) testBtn.onclick = () => {
+    const out = document.getElementById('cfSpTestOut');
+    const name = (document.getElementById('cfSpTestName').value || '').trim();
+    if (!name) { toast('Nhập event name', 'err'); return; }
+    let props = {};
+    try { props = JSON.parse(document.getElementById('cfSpTestProps').value || '{}'); }
+    catch (_) { toast('Props JSON không hợp lệ', 'err'); return; }
+    let blueprints, entities, mapj;
+    try { blueprints = JSON.parse(document.getElementById('cfSpBlueprints').value || '{}'); } catch (_) { toast('Blueprints JSON lỗi', 'err'); return; }
+    try { entities   = JSON.parse(document.getElementById('cfSpEntities').value   || '{}'); } catch (_) { toast('Entities JSON lỗi', 'err'); return; }
+    try { mapj       = JSON.parse(document.getElementById('cfSpEventBpMap').value || '{}'); } catch (_) { toast('Map JSON lỗi', 'err'); return; }
+    const fakeGlobals = {
+      user: { userName: 'ISC01.DEMO', staffEmp: '00000000' },
+      flavor: 'staging', imei: 'demo-imei',
+    };
+    const fakeDevice = {
+      platform: 'iOS', device_name: 'iPhone 15', app_version: '2.3.1.9',
+    };
+    const result = previewSnowplowPayload(name, props, { blueprints, entities, mapj, globals: fakeGlobals, device: fakeDevice });
+    out.style.display = 'block';
+    out.textContent = JSON.stringify(result, null, 2);
+  };
+
   // Firebase file drag-drop → parse json/plist, fill inputs.
   const drop=$('#cfFbDrop');
   ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
@@ -1068,12 +1338,24 @@ async function renderConfig(pid){
                      'screenContext','lifecycleAutotracking','screenEngagementAutotracking'];
     const spOpts = Object.fromEntries(optKeys.map((k) =>
       [k, document.getElementById('cfSpOpt_' + k)?.checked === true]));
+    // Parse each blueprint/entity/map JSON textarea. Invalid JSON falls back
+    // to {} with a toast — don't wipe the whole form because of one typo.
+    const parseJsonOr = (id, fallback) => {
+      const raw = (document.getElementById(id)?.value || '').trim();
+      if (!raw) return fallback;
+      try { return JSON.parse(raw); }
+      catch (_) { toast(`JSON ở ${id} không hợp lệ — bỏ qua`, 'err'); return fallback; }
+    };
+
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
       userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx'),
       // schemas map: parsed from the kv textarea ("event_name = iglu:..."). Drop
       // empty values so the SDK doesn't try to register a self-describing call
       // with an empty URI.
       schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)),
+      blueprints: parseJsonOr('cfSpBlueprints', {}),
+      entities:   parseJsonOr('cfSpEntities', {}),
+      event_blueprint_map: parseJsonOr('cfSpEventBpMap', {}),
       options: spOpts };
     const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 
@@ -3637,7 +3919,10 @@ function renderWireframeSvg(tree, opts = {}) {
   const isContainer = (type) => {
     if (!type) return true;
     const t = String(type);
-    return /^(_?(Padding|SizedBox|Column|Row|Stack|Container|Flex|Expanded|Align|Center|Positioned|Wrap|Flexible|Material|MaterialApp|Scaffold|SafeArea|Directionality|MediaQuery|LayoutBuilder|Theme|Builder|RepaintBoundary|ClipR|Transform|Offstage|Visibility|FractionallySizedBox|ConstrainedBox|DecoratedBox|Provider|Consumer|Selector|Listener|GestureDetector|Semantics|NotificationListener|FocusScope|Focus|Localizations|IconTheme|IconButtonTheme|DefaultTextStyle|Theme|InheritedTheme|HeroController|Navigator|Overlay|MediaQueryFromWindow|RootRestorationScope|UnitToBuildLayer|RawGestureDetector|MouseRegion|AbsorbPointer|IgnorePointer|InteractiveViewer|SliverPadding|SliverList|SliverFillRemaining|CustomMultiChildLayout|SliverToBoxAdapter|CustomScrollView)([A-Z_<].*)?$|^(View|ViewGroup|FrameLayout|LinearLayout|RelativeLayout|ConstraintLayout|CoordinatorLayout|AppBarLayout|UIView|UIStackView|UIViewController|FlutterView)$/.test(t);
+    // The `(.*)?` tail catches generic-typed variants (e.g. State<Foo>,
+    // _ColumnState<…>) without the regex engine choking on a `<` inside
+    // a character class — older versions of `<...>` syntax rejected it.
+    return /^_?(Padding|SizedBox|Column|Row|Stack|Container|Flex|Expanded|Align|Center|Positioned|Wrap|Flexible|Material|MaterialApp|Scaffold|SafeArea|Directionality|MediaQuery|LayoutBuilder|Theme|Builder|RepaintBoundary|ClipR|Transform|Offstage|Visibility|FractionallySizedBox|ConstrainedBox|DecoratedBox|Provider|Consumer|Selector|Listener|GestureDetector|Semantics|NotificationListener|FocusScope|Focus|Localizations|IconTheme|IconButtonTheme|DefaultTextStyle|InheritedTheme|HeroController|Navigator|Overlay|MediaQueryFromWindow|RootRestorationScope|UnitToBuildLayer|RawGestureDetector|MouseRegion|AbsorbPointer|IgnorePointer|InteractiveViewer|SliverPadding|SliverList|SliverFillRemaining|CustomMultiChildLayout|SliverToBoxAdapter|CustomScrollView)(?:.*)?$|^(?:View|ViewGroup|FrameLayout|LinearLayout|RelativeLayout|ConstraintLayout|CoordinatorLayout|AppBarLayout|UIView|UIStackView|UIViewController|FlutterView)$/.test(t);
   };
 
   // Cap rendered count for performance. 2000 nodes ≈ ~120KB SVG which is

@@ -463,9 +463,6 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
   /// trigger the snapshot themselves from a custom RouteAware).
   final bool captureWireframe;
 
-  // Track screens we've already snapshotted in this session so revisits of
-  // the same screen don't re-walk the tree. Cleared on app reset/reinstall
-  // (this observer is rebuilt each cold start).
   final Set<String> _wireframedScreens = <String>{};
 
   UniTrackNavigatorObserver({

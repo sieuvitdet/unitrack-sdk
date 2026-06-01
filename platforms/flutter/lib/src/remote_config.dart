@@ -70,6 +70,47 @@ class UniTrackRemoteConfig {
     return 'iglu:vn.fpt.ftel.snowplow/$eventName/jsonschema/$version';
   }
 
+  /// Portal-defined Snowplow blueprints + entities + event mapping. See
+  /// the SnowplowProvider.applyBlueprintConfig() docstring for the shape.
+  /// Empty maps when the operator hasn't filled the block in — caller passes
+  /// them through, the provider treats empty as "fall back to schemas[name]
+  /// or Structured event".
+  Map<String, Map<String, Object?>> get snowplowBlueprints {
+    final raw = snowplow['blueprints'];
+    if (raw is! Map) return const {};
+    final out = <String, Map<String, Object?>>{};
+    for (final e in raw.entries) {
+      if (e.key is String && e.value is Map) {
+        out[e.key as String] = Map<String, Object?>.from(e.value as Map);
+      }
+    }
+    return out;
+  }
+
+  Map<String, Map<String, Object?>> get snowplowEntities {
+    final raw = snowplow['entities'];
+    if (raw is! Map) return const {};
+    final out = <String, Map<String, Object?>>{};
+    for (final e in raw.entries) {
+      if (e.key is String && e.value is Map) {
+        out[e.key as String] = Map<String, Object?>.from(e.value as Map);
+      }
+    }
+    return out;
+  }
+
+  Map<String, String> get snowplowEventBlueprintMap {
+    final raw = snowplow['event_blueprint_map'];
+    if (raw is! Map) return const {};
+    final out = <String, String>{};
+    for (final e in raw.entries) {
+      if (e.key is String && e.value is String) {
+        out[e.key as String] = e.value as String;
+      }
+    }
+    return out;
+  }
+
   /// Raw `snowplow.options` map from the portal (Snowplow TrackerConfiguration
   /// flags: base64Encoding, platformContext, applicationContext, sessionContext,
   /// screenContext, lifecycleAutotracking, screenEngagementAutotracking).

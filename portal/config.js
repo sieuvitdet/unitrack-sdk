@@ -72,7 +72,17 @@ function defaults(project) {
       // inactivity/background window after which a session is considered closed.
       journeyCapture: true, sessionTimeoutMs: 1800000,
     },
-    snowplow: { enabled: false },
+    // snowplow.blueprints / entities / event_blueprint_map drive the per-event
+    // SelfDescribing payload + attached contexts (user_context, core_action,
+    // attendance, …) without the app having to hard-code schema URIs. See
+    // SnowplowProvider.applyBlueprintConfig in the Flutter SDK + the
+    // "📐 Blueprints & Entities" expander in the portal Config tab.
+    snowplow: {
+      enabled: false,
+      blueprints: {},
+      entities: {},
+      event_blueprint_map: {},
+    },
     firebase: { enabled: false },
     event_registry: [],
     rules: [],
