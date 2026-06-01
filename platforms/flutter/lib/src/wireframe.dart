@@ -28,11 +28,12 @@ import '../unitrack.dart';
 
 class UniTrackWireframe {
   /// Beyond this many widgets, the walk stops and `truncated: true` is set.
-  /// Most screens are well under — this caps payload for outlier layouts.
-  /// Bumped to 3000 from 500 so MobiX's deeply-nested Flutter pages (often
-  /// 1000+ Element nodes once material wrappers + provider scopes count)
-  /// don't lose the bottom half of the tree.
-  static int maxNodes = 3000;
+  /// Real-world cap: MobiX's HomePageRoute crashed with EXC_RESOURCE
+  /// (high watermark > 3.3 GB) when we let it walk every Element — large
+  /// scrollable lists yield thousands of out-of-viewport children that
+  /// each contribute a JSON object. 600 keeps the head of the tree
+  /// (Scaffold, AppBar, action buttons) while bounding the upload.
+  static int maxNodes = 600;
 
   /// Skip pure-layout container types when serialising. The widget tree
   /// has tons of these (Padding, SizedBox, Builder, Theme, …) that don't
@@ -40,6 +41,25 @@ class UniTrackWireframe {
   /// them from the payload and let their children's frames speak for the
   /// layout. Cuts node count 60–70% on typical Material screens.
   static bool skipContainerNodes = true;
+
+  /// Auto-snapshot every screen change. Off by default after the
+  /// EXC_RESOURCE crash on MobiX — long Material/auto_route stacks can
+  /// produce 10k+ Element nodes per screen, and even with the
+  /// container-skip + cap the JSON.encode+gzip step can blow the iOS
+  /// per-process memory limit. Apps opt back in once they've measured
+  /// their screens won't OOM.
+  ///
+  /// Manual snapshots via `UniTrackWireframe.snapshotCurrentScreen()`
+  /// are unaffected.
+  static bool autoSnapshot = false;
+
+  /// Skip nodes outside the viewport. iOS scrollable lists lay out
+  /// every cell, including ones at y = 50000+; walking them inflates
+  /// the tree without showing anything on screen. We read the platform
+  /// view size once at _emit time and prune children that fall entirely
+  /// below or to the right of it. Cuts node count further on screens
+  /// dominated by ListView / SliverList.
+  static bool skipOffscreen = true;
 
   // Widget types we consider pure layout glue. Matches the portal's
   // isContainer() — kept in sync so what we drop here is what the portal
@@ -55,9 +75,22 @@ class UniTrackWireframe {
     WidgetsBinding.instance.addPostFrameCallback((_) => _emit());
   }
 
+  // Cached viewport bounds + max nodes for the current walk. Read once in
+  // _emit before recursion so every _walk frame can cheaply prune
+  // out-of-viewport nodes without paying for a fresh MediaQuery lookup.
+  static double _viewportW = 0;
+  static double _viewportH = 0;
+
   static void _emit() {
     final root = WidgetsBinding.instance.rootElement;
     if (root == null) return;
+    // Read viewport from the platform view so the off-screen prune knows
+    // where "below the fold" is. Logical pixels — same coord space as
+    // RenderBox.localToGlobal returns.
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    final size = view.physicalSize / view.devicePixelRatio;
+    _viewportW = size.width;
+    _viewportH = size.height;
     final counter = _Counter();
     var tree = _walk(root, counter);
     if (tree == null) return;
@@ -118,6 +151,19 @@ class UniTrackWireframe {
       y = origin.dy.toInt();
       w = size.width.toInt();
       h = size.height.toInt();
+      // Off-screen prune. Skip the SUBTREE entirely if its bounding box
+      // doesn't intersect the viewport — ListViews stash thousands of
+      // cells at y > viewportH, and walking them blows up RAM (each cell
+      // alone has 20+ Element children). 64px tolerance so a sticky
+      // header sliding just off the top still gets captured.
+      if (skipOffscreen && _viewportW > 0 && _viewportH > 0 && w > 0 && h > 0) {
+        if (x > _viewportW + 64 ||
+            y > _viewportH + 64 ||
+            x + w < -64 ||
+            y + h < -64) {
+          return null;
+        }
+      }
     }
     final widget = el.widget;
     final typeName = widget.runtimeType.toString();

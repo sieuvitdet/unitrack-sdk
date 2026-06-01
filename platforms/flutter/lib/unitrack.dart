@@ -456,11 +456,15 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
   /// to settle within this window is emitted as screen_view.
   final Duration coalesceWindow;
 
-  /// When true (default), every emitted screen also triggers a
-  /// UniTrackWireframe snapshot — one screen_layout event per screen per
-  /// session, so the portal can render the actual layout the user saw.
-  /// Set to false to opt out (e.g. very heavy widget trees or apps that
-  /// trigger the snapshot themselves from a custom RouteAware).
+  /// Capture a UniTrackWireframe snapshot every time a screen is emitted.
+  /// Default OFF after MobiX's HomePageRoute hit EXC_RESOURCE (>3.3 GB)
+  /// walking auto_route + provider + theme-wrapper trees. Apps opt back
+  /// in once they've validated their screens don't OOM:
+  ///   UniTrackNavigatorObserver(captureWireframe: true)
+  ///
+  /// Manual snapshots (UniTrackWireframe.snapshotCurrentScreen() from a
+  /// button or test harness) are unaffected — only the per-route
+  /// auto-fire is gated by this flag.
   final bool captureWireframe;
 
   final Set<String> _wireframedScreens = <String>{};
@@ -468,7 +472,7 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
   UniTrackNavigatorObserver({
     List<Pattern>? skipRoutePatterns,
     this.coalesceWindow = const Duration(milliseconds: 120),
-    this.captureWireframe = true,
+    this.captureWireframe = false,
   }) : skipRoutePatterns = skipRoutePatterns ?? [RegExp(r'WrapperPageRoute$')];
 
   String? _lastEmitted;
