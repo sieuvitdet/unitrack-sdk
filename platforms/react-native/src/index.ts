@@ -324,6 +324,38 @@ export function installDeeplinkAutoCapture() {
   });
 }
 
+/**
+ * Auto-capture outgoing URL opens via Linking.openURL — every time the app
+ * launches Safari / Maps / Zalo / Telegram / a custom-scheme app, we emit
+ * `third_party_open` BEFORE handing the URL to the OS. Classification
+ * matches the iOS swizzler + Android helper (browser / phone / mail / sms /
+ * <scheme>). Wraps once; subsequent calls are no-ops.
+ */
+export function installThirdPartyOpenAutoCapture() {
+  const { Linking } = require('react-native');
+  if (!Linking || !Linking.openURL) return;
+  if ((Linking.openURL as any).__unitrack_wrapped) return;
+  const orig = Linking.openURL.bind(Linking);
+  const wrapped = (url: string) => {
+    try {
+      let scheme = '';
+      try { scheme = (new URL(url).protocol || '').replace(/:$/, '').toLowerCase(); }
+      catch (_) { /* malformed — fall through */ }
+      const target = scheme === 'http' || scheme === 'https' ? 'browser'
+        : scheme === 'tel'    ? 'phone'
+        : scheme === 'mailto' ? 'mail'
+        : scheme === 'sms'    ? 'sms'
+        : (scheme || 'unknown');
+      UniTrack.track('third_party_open', {
+        target, url, ...(scheme ? { scheme } : {}),
+      });
+    } catch (_) { /* never block the launch */ }
+    return orig(url);
+  };
+  (wrapped as any).__unitrack_wrapped = true;
+  Linking.openURL = wrapped;
+}
+
 export default UniTrack;
 export { UniTrackTapBoundary } from './autoTap';
 export { tapState } from './tapState';

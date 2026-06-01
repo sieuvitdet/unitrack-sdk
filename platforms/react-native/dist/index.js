@@ -12,6 +12,7 @@ var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.safeJsonParse = exports.createNavigationTracker = exports.tapState = exports.UniTrackTapBoundary = exports.UniTrackRemoteConfig = void 0;
 exports.installDeeplinkAutoCapture = installDeeplinkAutoCapture;
+exports.installThirdPartyOpenAutoCapture = installThirdPartyOpenAutoCapture;
 const react_native_1 = require("react-native");
 const tapState_1 = require("./tapState");
 const traceContext_1 = require("./traceContext");
@@ -277,6 +278,42 @@ function installDeeplinkAutoCapture() {
         if (url)
             UniTrack.trackDeeplink(url, 'runtime');
     });
+}
+/**
+ * Auto-capture outgoing URL opens via Linking.openURL — every time the app
+ * launches Safari / Maps / Zalo / Telegram / a custom-scheme app, we emit
+ * `third_party_open` BEFORE handing the URL to the OS. Classification
+ * matches the iOS swizzler + Android helper (browser / phone / mail / sms /
+ * <scheme>). Wraps once; subsequent calls are no-ops.
+ */
+function installThirdPartyOpenAutoCapture() {
+    const { Linking } = require('react-native');
+    if (!Linking || !Linking.openURL)
+        return;
+    if (Linking.openURL.__unitrack_wrapped)
+        return;
+    const orig = Linking.openURL.bind(Linking);
+    const wrapped = (url) => {
+        try {
+            let scheme = '';
+            try {
+                scheme = (new URL(url).protocol || '').replace(/:$/, '').toLowerCase();
+            }
+            catch (_) { /* malformed — fall through */ }
+            const target = scheme === 'http' || scheme === 'https' ? 'browser'
+                : scheme === 'tel' ? 'phone'
+                    : scheme === 'mailto' ? 'mail'
+                        : scheme === 'sms' ? 'sms'
+                            : (scheme || 'unknown');
+            UniTrack.track('third_party_open', {
+                target, url, ...(scheme ? { scheme } : {}),
+            });
+        }
+        catch (_) { /* never block the launch */ }
+        return orig(url);
+    };
+    wrapped.__unitrack_wrapped = true;
+    Linking.openURL = wrapped;
 }
 exports.default = UniTrack;
 var autoTap_1 = require("./autoTap");

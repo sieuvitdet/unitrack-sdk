@@ -374,6 +374,33 @@ class UniTrack {
     return track('deeplink', properties: props);
   }
 
+  /// Auto-classify a URL into a `third_party_open` target + fire the event.
+  /// Same categorisation as the native swizzlers — http/https→browser,
+  /// tel→phone, mailto→mail, anything else uses the scheme verbatim
+  /// (zalo / googlemaps / fb-messenger / …).
+  ///
+  /// Wire from your `url_launcher.launchUrl` call site:
+  ///   await UniTrack.instance.trackUrlLaunch(uri.toString());
+  ///   await launchUrl(uri);
+  Future<void> trackUrlLaunch(String url) {
+    final u = Uri.tryParse(url);
+    final scheme = u?.scheme.toLowerCase() ?? '';
+    // Plain if/else chain so this compiles on Dart < 3 (switch-expressions
+    // are 3.0+; we keep the lower bound permissive for older host apps).
+    String target;
+    if (scheme == 'http' || scheme == 'https') target = 'browser';
+    else if (scheme == 'tel')                  target = 'phone';
+    else if (scheme == 'mailto')               target = 'mail';
+    else if (scheme == 'sms')                  target = 'sms';
+    else if (scheme.isEmpty)                   target = 'unknown';
+    else                                       target = scheme;
+    return track('third_party_open', properties: {
+      'target': target,
+      'url': url,
+      if (scheme.isNotEmpty) 'scheme': scheme,
+    });
+  }
+
   /// A third-party app / SDK was opened (e.g. payment, social share, maps).
   Future<void> trackThirdPartyOpen(String name, {String? screen}) =>
       track('third_party_open', properties: {

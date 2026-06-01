@@ -95,6 +95,14 @@ declare const UniTrack: UniTrackClass;
  * launch URL (cold start) and every subsequent url event as `deeplink`.
  */
 export declare function installDeeplinkAutoCapture(): void;
+/**
+ * Auto-capture outgoing URL opens via Linking.openURL — every time the app
+ * launches Safari / Maps / Zalo / Telegram / a custom-scheme app, we emit
+ * `third_party_open` BEFORE handing the URL to the OS. Classification
+ * matches the iOS swizzler + Android helper (browser / phone / mail / sms /
+ * <scheme>). Wraps once; subsequent calls are no-ops.
+ */
+export declare function installThirdPartyOpenAutoCapture(): void;
 export default UniTrack;
 export { UniTrackTapBoundary } from './autoTap';
 export { tapState } from './tapState';
