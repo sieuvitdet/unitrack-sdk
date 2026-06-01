@@ -178,14 +178,104 @@ const upsertSession = db.prepare(`
     updated_at = excluded.updated_at
 `);
 
+// ── Reconstruction cache ────────────────────────────────────────────────────
+//
+// Each project keeps an in-memory record of "when did we last rebuild" and the
+// `received_at` watermark of the newest event we saw at that point. A request
+// is served from the existing app_sessions table (no rebuild) when:
+//   1. The previous build is still fresh (within RECONSTRUCT_TTL_MS), AND
+//   2. No event has arrived for this project since the watermark.
+//
+// When we DO rebuild, we only walk sessions touched since the watermark — the
+// "dirty set". A session is dirty if any of its events has
+// received_at > last watermark, OR it doesn't have an app_sessions row yet.
+// Sessions that have terminated and have no new events are skipped entirely,
+// which is what makes the second+ call cheap (the 24-session MobiX project
+// drops from ~600ms to ~5ms on a hot cache).
+const RECONSTRUCT_TTL_MS = 30_000;     // 30s — short enough to feel live
+const _reconState = new Map();          // projectId → { lastBuilt, watermark }
+
+// Force a full rebuild on next call. Used by tests + admin actions that mutate
+// events directly (e.g. wiping a project).
+function invalidateReconstructCache(projectId) {
+  if (projectId == null) _reconState.clear();
+  else _reconState.delete(projectId);
+}
+
+// What's the max(received_at) the project has right now? Cheap (uses the
+// existing idx_events_project index on COUNT/MAX). NULL → no events at all
+// (project just created) — treat as 0 so the first call still runs once.
+function _projectWatermark(projectId) {
+  const r = db.prepare(
+    'SELECT MAX(received_at) m FROM events WHERE project_id = ?'
+  ).get(projectId);
+  return (r && r.m) || 0;
+}
+
+// How quickly two requests can collapse into the same build. Inside this
+// window we DON'T even query the events table for the watermark — the
+// previous build is considered authoritative. Tradeoff: an event arriving
+// 0–FAST_TTL_MS after a build won't show up until the next request after
+// FAST_TTL_MS. That's the same staleness a CDN would give us and the SPA's
+// 10-15s polling absorbs it.
+const FAST_TTL_MS = 3_000;
+
 // Reconstruct (or refresh) app_sessions for a project from its raw events.
-// Rebuilds every session that has any event — cheap for the volumes here and
-// avoids partial-session bugs. Returns the number of sessions written.
-function reconstructSessions(projectId) {
-  const sessionIds = db.prepare(`
+// Three-level cache:
+//   - FAST path (< FAST_TTL_MS since last build): zero DB hits, return cached.
+//   - WATERMARK path (between FAST_TTL_MS and RECONSTRUCT_TTL_MS): one
+//     MAX(received_at) query; if equal to the previous watermark, skip
+//     rebuild and update lastBuilt to extend the fast window.
+//   - COLD path: incremental rebuild touching only sessions whose events
+//     are newer than the watermark.
+// Returns the number of sessions REWRITTEN (0 on a cache hit).
+function reconstructSessions(projectId, { force = false } = {}) {
+  const state = _reconState.get(projectId);
+  const now = Date.now();
+
+  // Fast path: blow past the watermark query — the previous build is still
+  // young enough. Most "click around the SPA" scenarios stop here.
+  if (!force && state && (now - state.lastBuilt) < FAST_TTL_MS) {
+    return 0;
+  }
+
+  const watermark = _projectWatermark(projectId);
+
+  // Hot path: same data, recent build → skip entirely. Extends the fast
+  // window so consecutive idle requests don't run the watermark query.
+  if (!force && state
+      && state.watermark === watermark
+      && (now - state.lastBuilt) < RECONSTRUCT_TTL_MS) {
+    state.lastBuilt = now;
+    return 0;
+  }
+
+  // Which sessions changed since the last watermark? Forced rebuilds (or the
+  // first call ever) walk every session; incremental walks only touch those
+  // with at least one event newer than the prior high-water mark.
+  const since = force ? 0 : (state ? state.watermark : 0);
+  const dirty = db.prepare(`
     SELECT DISTINCT session_id FROM events
     WHERE project_id = ? AND session_id IS NOT NULL AND session_id <> ''
-  `).all(projectId);
+      AND received_at > ?
+  `).all(projectId, since);
+
+  // No dirty sessions AND we already have a state → nothing to do; bump
+  // lastBuilt so the TTL check above keeps returning early.
+  if (!force && dirty.length === 0 && state) {
+    state.lastBuilt = now;
+    state.watermark = watermark;
+    return 0;
+  }
+
+  // Cold path: full rebuild on first call (no state) so brand-new portals
+  // backfill correctly. Incremental on every subsequent call.
+  const sessionIds = (state && !force)
+    ? dirty
+    : db.prepare(`
+        SELECT DISTINCT session_id FROM events
+        WHERE project_id = ? AND session_id IS NOT NULL AND session_id <> ''
+      `).all(projectId);
 
   const byId = db.prepare(`
     SELECT event_name, timestamp, session_id, user_id, screen, screen_name,
@@ -195,7 +285,6 @@ function reconstructSessions(projectId) {
     ORDER BY timestamp ASC, id ASC
   `);
 
-  const now = Date.now();
   let n = 0;
   const tx = () => {
     for (const { session_id } of sessionIds) {
@@ -222,6 +311,21 @@ function reconstructSessions(projectId) {
   db.exec('BEGIN');
   try { tx(); db.exec('COMMIT'); }
   catch (err) { db.exec('ROLLBACK'); throw err; }
+
+  // Also flip any session whose last event has aged past TERMINATE_GAP_MS
+  // but whose events table didn't gain new rows — they wouldn't be in `dirty`
+  // but their ended_reason should still graduate from "active" to
+  // "inferred_terminate". Cheap UPDATE, no journey rewrite.
+  db.prepare(`
+    UPDATE app_sessions
+       SET ended_reason = 'inferred_terminate', updated_at = ?
+     WHERE project_id = ?
+       AND ended_reason = 'active'
+       AND ended_at IS NOT NULL
+       AND (? - ended_at) > ?
+  `).run(now, projectId, now, TERMINATE_GAP_MS);
+
+  _reconState.set(projectId, { lastBuilt: now, watermark });
   return n;
 }
 
@@ -293,12 +397,33 @@ function computeFlows(projectId, { refresh = true } = {}) {
 //   node.stuck_score   0..1 heuristic: high exit ratio or crashes → a "red" node
 //   edge.count         # times users moved screen A → B
 //   edge.avg_ms        avg transition time A → B
+// Memoize the flowgraph per (projectId, userId). The reconstruction cache
+// already de-dups the work that builds app_sessions; this layer caches the
+// SECOND pass (parsing every journey JSON + walking it to count edges) which
+// dominates the request time once the sessions table is hot. Invalidated by
+// the same watermark + count signature reconstructSessions uses.
+const _flowGraphCache = new Map();        // "pid|user" → { sig, value }
+function _flowGraphSig(projectId, userId) {
+  const r = userId
+    ? db.prepare('SELECT MAX(updated_at) u, COUNT(*) c FROM app_sessions WHERE project_id=? AND user_id=?').get(projectId, userId)
+    : db.prepare('SELECT MAX(updated_at) u, COUNT(*) c FROM app_sessions WHERE project_id=?').get(projectId);
+  return `${r.c || 0}-${r.u || 0}`;
+}
+
 // Returns { nodes, edges, entry_screen, totals }. Pure read of app_sessions.
 function computeFlowGraph(projectId, { refresh = true, userId = null } = {}) {
   if (refresh) {
     try { reconstructSessions(projectId); }
     catch (err) { console.error('[flowgraph] reconstruct failed', err); }
   }
+
+  // Cache hit: same (count, max(updated_at)) → graph hasn't changed. Skip
+  // the JSON.parse loop entirely. Tab switches Flows ⇄ Sessions ⇄ Heatmap
+  // are basically free after the first build.
+  const cacheKey = `${projectId}|${userId || ''}`;
+  const sig = _flowGraphSig(projectId, userId);
+  const hit = _flowGraphCache.get(cacheKey);
+  if (hit && hit.sig === sig) return hit.value;
 
   // Optionally restrict to one user's sessions (per-user journey + heatmap).
   const rows = userId
@@ -423,13 +548,19 @@ function computeFlowGraph(projectId, { refresh = true, userId = null } = {}) {
 
   const entry_screen = [...entryCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
-  return {
+  const value = {
     nodes: nodeList,
     edges: edgeList,
     elements: elementList,
     entry_screen,
     totals: { sessions: sessionCount, screens: nodeList.length, transitions: edgeList.length, taps: elementList.reduce((s, e) => s + e.taps, 0) },
   };
+  // Store with the signature we computed at entry — next call with the same
+  // signature is a free dictionary read. Cap the map size so a runaway test
+  // (lots of userId filters) doesn't grow it without bound.
+  if (_flowGraphCache.size > 100) _flowGraphCache.clear();
+  _flowGraphCache.set(cacheKey, { sig, value });
+  return value;
 }
 
 // ── Phase 4: LLM analyze → report pipeline ───────────────────────────────────
@@ -734,7 +865,8 @@ async function runCycle(projectId, deliverFn) {
 }
 
 module.exports = {
-  reconstructSessions, buildSessionRow, cleanScreen, computeFlows, computeFlowGraph,
+  reconstructSessions, invalidateReconstructCache,
+  buildSessionRow, cleanScreen, computeFlows, computeFlowGraph,
   callLLM, buildAnalysisInput, heuristicReport, runCycle,
   buildProjectSummary, formatTelegramSummary,
   linkProject, linkSessions, linkFlows, linkSession,

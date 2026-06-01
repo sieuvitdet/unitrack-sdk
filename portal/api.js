@@ -463,6 +463,23 @@ router.get('/projects/:id/sessions', ownProject, (req, res) => {
   try { reconstructSessions(pid); }
   catch (err) { reconstruct_failed = true; console.error('[sessions] reconstruct failed', err); }
   const user = (req.query.user || '').trim();   // optional filter by user_id
+
+  // ETag is built from the freshest watermark in app_sessions (max updated_at
+  // and row count) + the user filter. Same response shape → same ETag, so a
+  // browser revisit on the Sessions tab gets a 304 without us reading 500
+  // rows + JSON-stringifying ~24 journeys.
+  const wm = user
+    ? db.prepare(`SELECT MAX(updated_at) u, COUNT(*) c
+                  FROM app_sessions WHERE project_id = ? AND user_id = ?`).get(pid, user)
+    : db.prepare(`SELECT MAX(updated_at) u, COUNT(*) c
+                  FROM app_sessions WHERE project_id = ?`).get(pid);
+  const etag = `"sess-${pid}-${user || 'all'}-${wm.c || 0}-${wm.u || 0}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'private, max-age=10');
+    return res.status(304).end();
+  }
+
   const rows = user
     ? db.prepare(`
         SELECT id, session_id, user_id, platform, app_version, started_at, ended_at,
@@ -474,6 +491,10 @@ router.get('/projects/:id/sessions', ownProject, (req, res) => {
                ended_reason, duration_ms, event_count, screen_count, crashed, flow_signature
         FROM app_sessions WHERE project_id = ?
         ORDER BY started_at DESC LIMIT 500`).all(pid);
+  res.set('ETag', etag);
+  // 10s browser cache; the SPA still revalidates via if-none-match so a
+  // new session showing up clears the 304 instantly.
+  res.set('Cache-Control', 'private, max-age=10');
   // Surface reconstruction failure so the client knows the list may be stale,
   // rather than silently returning old data with a 200.
   res.json({ reconstructed_at: Date.now(), reconstruct_failed, sessions: rows });
@@ -579,6 +600,16 @@ router.get('/projects/:id/sessions/:sid', ownProject, (req, res) => {
     'SELECT * FROM app_sessions WHERE project_id = ? AND session_id = ?'
   ).get(req.params.id, req.params.sid);
   if (!row) return res.status(404).json({ error: 'not_found' });
+  // ETag = the row's updated_at. The journey blob can be 200KB+ for big
+  // sessions; serving 304 makes the IDE overlay open instantly on revisit.
+  const etag = `"sess-${row.id}-${row.updated_at}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'private, max-age=30');
+    return res.status(304).end();
+  }
+  res.set('ETag', etag);
+  res.set('Cache-Control', 'private, max-age=30');
   // Surface device metadata captured at ingest time (app_name, app_bundle/
   // app_package, locale, network_type, …) so the session IDE header can show
   // the user-facing app title — not just the bundle id. Pick the FIRST
