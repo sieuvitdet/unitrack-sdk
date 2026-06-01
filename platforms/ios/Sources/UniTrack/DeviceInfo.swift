@@ -19,6 +19,15 @@ enum DeviceInfo {
         let screen = UIScreen.main.bounds.size
         let scale = UIScreen.main.scale
 
+        // User-facing app title: prefer CFBundleDisplayName (e.g. "Mobi X
+        // Staging"), fall back to CFBundleName, then bundle name. So the
+        // operator sees the same label they'd see under the home-screen icon
+        // instead of just the bundle id.
+        let appName = str(info["CFBundleDisplayName"]).isEmpty
+            ? (str(info["CFBundleName"]).isEmpty ? "" : str(info["CFBundleName"]))
+            : str(info["CFBundleDisplayName"])
+        let bundleId = bundle.bundleIdentifier ?? ""
+
         let fields: [String: String] = [
             "platform":       "ios",
             "os":             dev.systemName,                                  // "iOS"
@@ -26,9 +35,15 @@ enum DeviceInfo {
             "model":          hardwareModel(),                                 // "iPhone15,2"
             "device_name":    dev.model,                                       // "iPhone"
             "manufacturer":   "Apple",
+            "app_name":       appName,                                         // "Mobi X Staging"
             "app_version":    str(info["CFBundleShortVersionString"]),         // "1.0.0"
             "app_build":      str(info["CFBundleVersion"]),                    // "42"
-            "bundle_id":      bundle.bundleIdentifier ?? "",
+            // Cross-platform name (preferred) + iOS-specific alias. bundle_id
+            // is kept for portal queries that haven't migrated yet — same
+            // value as app_bundle, free to remove once everything reads the
+            // new key.
+            "app_bundle":     bundleId,
+            "bundle_id":      bundleId,
             "locale":         Locale.current.identifier,                       // "vi_VN"
             "timezone":       TimeZone.current.identifier,
             "screen":         "\(Int(screen.width))x\(Int(screen.height))@\(Int(scale))x",

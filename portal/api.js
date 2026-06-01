@@ -578,7 +578,25 @@ router.get('/projects/:id/sessions/:sid', ownProject, (req, res) => {
     'SELECT * FROM app_sessions WHERE project_id = ? AND session_id = ?'
   ).get(req.params.id, req.params.sid);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  res.json({ ...row, journey: JSON.parse(row.journey || '[]') });
+  // Surface device metadata captured at ingest time (app_name, app_bundle/
+  // app_package, locale, network_type, …) so the session IDE header can show
+  // the user-facing app title — not just the bundle id. Pick the FIRST
+  // event in the session that carries a non-empty `device` blob (every event
+  // ships the same JSON; first-write-wins is fine and cheaper than scanning).
+  let device = null;
+  try {
+    const ev = db.prepare(`
+      SELECT device FROM events
+      WHERE project_id = ? AND session_id = ? AND device IS NOT NULL AND device <> ''
+      ORDER BY timestamp ASC LIMIT 1
+    `).get(req.params.id, req.params.sid);
+    if (ev && ev.device) device = JSON.parse(ev.device);
+  } catch (_) { /* malformed device JSON — leave null */ }
+  res.json({
+    ...row,
+    journey: JSON.parse(row.journey || '[]'),
+    device,
+  });
 });
 
 // Detail of one journey event across providers: the same event is stored once

@@ -27,6 +27,11 @@ internal object DeviceInfo {
             val pkg = app.packageName
             val pm = app.packageManager
             val pi = pm.getPackageInfo(pkg, 0)
+            // User-facing app title (android:label on the application tag in
+            // AndroidManifest). Same idea as iOS CFBundleDisplayName — show
+            // "Mobi X Staging" not just the package name.
+            val appName = runCatching { pm.getApplicationLabel(app.applicationInfo)?.toString() ?: "" }
+                .getOrDefault("")
 
             o.put("platform", "android")
             o.put("os", "Android")
@@ -35,8 +40,13 @@ internal object DeviceInfo {
             o.put("model", Build.MODEL ?: "")
             o.put("device_name", Build.DEVICE ?: "")
             o.put("manufacturer", Build.MANUFACTURER ?: "")
+            o.put("app_name", appName)
             o.put("app_version", pi.versionName ?: "")
             o.put("app_build", versionCode(pi).toString())
+            // Cross-platform name (preferred for new portal queries) + an
+            // Android-specific alias. bundle_id is kept = packageName for
+            // back-compat with existing portal filters that read bundle_id.
+            o.put("app_package", pkg)
             o.put("bundle_id", pkg)
             o.put("locale", Locale.getDefault().toString())
             o.put("timezone", TimeZone.getDefault().id)

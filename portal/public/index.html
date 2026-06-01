@@ -2249,8 +2249,24 @@ async function openSessionDrawer(pid,sid){
   const s=await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`);
   window._curSession = { sid, data:s };   // for "Generate wireframe session"
   $('#dBadge').textContent='session'; $('#dBadge').className='badge'; $('#dId').textContent=shortSid(sid);
-  $('#dKv').innerHTML=[['session id',sid],['flow',s.flow_signature],['bắt đầu',s.started_at?fmtTime(s.started_at):'—'],['kết thúc',s.ended_at?fmtTime(s.ended_at):'—'],['lý do',s.ended_reason],['thời lượng',fmtDur(s.duration_ms)],['platform',s.platform],['app version',s.app_version],['user',s.user_id]]
-    .map(([k,v])=>`<div class="key">${k}</div><div class="mono">${esc(v)||'<span class=muted>—</span>'}</div>`).join('');
+  // Device metadata captured at ingest (set in DeviceInfo.swift/.kt → ut_set_device_info).
+  // Prefer the cross-platform app_name + app_bundle / app_package keys; fall
+  // back to bundle_id which the old SDK shipped on both platforms.
+  const dev = s.device || {};
+  const appBundle = dev.app_bundle || dev.app_package || dev.bundle_id || '';
+  $('#dKv').innerHTML=[
+    ['session id',sid],
+    ['flow',s.flow_signature],
+    ['bắt đầu',s.started_at?fmtTime(s.started_at):'—'],
+    ['kết thúc',s.ended_at?fmtTime(s.ended_at):'—'],
+    ['lý do',s.ended_reason],
+    ['thời lượng',fmtDur(s.duration_ms)],
+    ['app name',dev.app_name],
+    ['app bundle / package', appBundle],
+    ['platform',s.platform],
+    ['app version',s.app_version],
+    ['user',s.user_id],
+  ].map(([k,v])=>`<div class="key">${k}</div><div class="mono">${esc(v)||'<span class=muted>—</span>'}</div>`).join('');
 
   $('#dDeviceH').textContent='HÀNH TRÌNH THEO MÀN (cây)';
   $('#dPropsH').style.display='none'; $('#dProps').style.display='none';
@@ -2581,8 +2597,14 @@ async function renderIDEMain(pid, sid){
   main._alignArrows = alignArrows;
   window.addEventListener('resize', alignArrows);
 
+  // App name lives on the session's device blob (ingest captures one event's
+  // `device` JSON, /sessions/:sid surfaces it). Stick it at the head of the
+  // ideMeta line when present so the operator sees "Mobi X Staging · 12 màn"
+  // instead of just counts.
+  const ideAppName = s.device && s.device.app_name ? s.device.app_name : '';
   document.getElementById('ideMeta').textContent =
-    `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;
+    (ideAppName ? ideAppName + ' · ' : '')
+    + `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;
 
   // Crash/bug badge in the header — click toggles the "only buggy screens" filter.
   const badge = document.getElementById('ideCrashBadge');
