@@ -14,7 +14,6 @@ import 'package:flutter/widgets.dart';
 import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
 import 'src/trace_context.dart' as _trace;
-import 'src/wireframe.dart' show UniTrackWireframe;
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
 export 'src/auto_capture.dart'
@@ -29,10 +28,10 @@ export 'src/remote_config.dart' show UniTrackRemoteConfig;
 // a header for a specific request.
 export 'src/trace_context.dart'
     show UniTrackTraceIds, UniTrackTraceContext, UniTrackTracingConfig;
-// Screen wireframe — exposed so app code can take a snapshot manually
-// (e.g. from a button press) if the auto-snapshot inside the navigator
-// observer isn't enough.
-export 'src/wireframe.dart' show UniTrackWireframe;
+// Screen wireframe was an experimental feature (walk Element tree → SVG on
+// the portal). Disabled — the walk OOMed on real Material/auto_route trees
+// and the portal Layout tab is parked. Source kept at src/wireframe.dart
+// for future reference but no longer exported from the package.
 
 class UniTrackConfig {
   final String? endpoint;
@@ -456,23 +455,9 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
   /// to settle within this window is emitted as screen_view.
   final Duration coalesceWindow;
 
-  /// Capture a UniTrackWireframe snapshot every time a screen is emitted.
-  /// Default OFF after MobiX's HomePageRoute hit EXC_RESOURCE (>3.3 GB)
-  /// walking auto_route + provider + theme-wrapper trees. Apps opt back
-  /// in once they've validated their screens don't OOM:
-  ///   UniTrackNavigatorObserver(captureWireframe: true)
-  ///
-  /// Manual snapshots (UniTrackWireframe.snapshotCurrentScreen() from a
-  /// button or test harness) are unaffected — only the per-route
-  /// auto-fire is gated by this flag.
-  final bool captureWireframe;
-
-  final Set<String> _wireframedScreens = <String>{};
-
   UniTrackNavigatorObserver({
     List<Pattern>? skipRoutePatterns,
     this.coalesceWindow = const Duration(milliseconds: 120),
-    this.captureWireframe = false,
   }) : skipRoutePatterns = skipRoutePatterns ?? [RegExp(r'WrapperPageRoute$')];
 
   String? _lastEmitted;
@@ -509,13 +494,6 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
     if (name == null || name == _lastEmitted) return;
     _lastEmitted = name;
     UniTrack.instance.setScreen(name);
-    // One screen_layout per screen per session — capturing on every revisit
-    // would multiply payload + storage without adding info (the tree's
-    // structure doesn't change between visits in any meaningful way).
-    if (captureWireframe && !_wireframedScreens.contains(name)) {
-      _wireframedScreens.add(name);
-      UniTrackWireframe.snapshotCurrentScreen();
-    }
   }
 
   @override

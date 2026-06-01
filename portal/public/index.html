@@ -2947,7 +2947,7 @@ async function openSessionIDE(pid, sid){
       <span class="muted" style="font-size:12px" id="ideMeta"></span>
       <span id="ideCrashBadge"></span>
       <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
-      <button class="btn ghost sm" id="ideLayout" title="Xem wireframe các màn đã capture">🗺️ Layout</button>
+      <!-- Layout button removed — wireframe capture is parked. -->
       <button class="btn ghost sm" id="ideClose">✕ Đóng</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px">
@@ -2986,11 +2986,9 @@ async function openSessionIDE(pid, sid){
     ideReplayCleanup();
     ov.style.display = 'none';
   };
-  // Layout dialog — pulls /sessions/:sid/layouts and renders each screen's
-  // tree as an SVG outline. One click reveals the visual structure the SDK
-  // captured (Phase 7 of the audit fix).
-  const layoutBtn = document.getElementById('ideLayout');
-  if (layoutBtn) layoutBtn.onclick = () => openLayoutDialog(pid, sid);
+  // Layout dialog wiring removed with the button — wireframe capture is
+  // parked, openLayoutDialog/renderWireframeSvg/endpoint kept dormant in
+  // case we revisit, but no UI surfaces them anymore.
   // Search box filters the middle pane (debounced); see renderIDEMain.
   const searchEl = document.getElementById('ideSearch');
   searchEl.oninput = ()=>{ clearTimeout(searchEl._h); searchEl._h=setTimeout(()=>applyIDEFilter(), 160); };
