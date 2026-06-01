@@ -318,6 +318,93 @@ router.get('/projects/:id/stats', ownProject, (req, res) => {
   });
 });
 
+// Daily time-series for the report charts on the project overview.
+// Returns three parallel arrays bucketed by day (TZ-naive UTC; the SPA
+// renders the date label in the user's locale). Days with no activity
+// emit a 0 so the area chart draws a continuous baseline.
+//
+// Query knobs:
+//   ?days=N          window length (default 7, hard-capped at 90 so a typo
+//                    can't ask for years of buckets)
+//
+// Shape:
+//   { range_days, buckets: [{ day:"2026-05-31",
+//                              users, sessions, crashes,
+//                              crash_per_session_pct }] }
+router.get('/projects/:id/stats-series', ownProject, (req, res) => {
+  const pid = req.params.id;
+  const days = Math.max(1, Math.min(90, parseInt(req.query.days, 10) || 7));
+  const now = Date.now();
+  const dayMs = 86_400_000;
+  // Anchor to UTC midnight of "today" so buckets line up day-by-day
+  // regardless of when the query fires within the day.
+  const todayUtc = Math.floor(now / dayMs) * dayMs;
+  const start = todayUtc - (days - 1) * dayMs;
+
+  // SQL bucketing: SQLite has strftime('%Y-%m-%d', ts/1000, 'unixepoch'),
+  // but a 7-day series with COUNT(DISTINCT user_id) per bucket is faster as
+  // ONE scan with a CASE-WHEN GROUP BY day-index. The day index = floor((ts -
+  // start) / 86400000) which sqlite computes natively.
+  //
+  // crashed_sessions = COUNT(DISTINCT session_id) WHERE event_name='crash' —
+  // counts a session at most once even if it crashed multiple times. That's
+  // the metric the operator actually wants: "% sessions hit a crash" stays
+  // in 0-100% range, unlike crashes/sessions which spikes to 800% when one
+  // bad day fires 30 crashes per session.
+  const series = db.prepare(`
+    SELECT CAST((timestamp - ?) / ? AS INTEGER)                                     AS day_idx,
+           COUNT(DISTINCT user_id)                                                  AS users,
+           COUNT(DISTINCT session_id)                                               AS sessions,
+           SUM(CASE WHEN event_name='crash' THEN 1 ELSE 0 END)                      AS crashes,
+           COUNT(DISTINCT CASE WHEN event_name='crash' THEN session_id END)         AS crashed_sessions
+    FROM events
+    WHERE project_id = ?
+      AND timestamp >= ?
+      AND timestamp <  ?
+      AND user_id IS NOT NULL AND user_id <> ''
+    GROUP BY day_idx
+    ORDER BY day_idx ASC
+  `).all(start, dayMs, pid, start, todayUtc + dayMs);
+
+  // Fold the SQL result into a dense array (one entry per day in range).
+  // Missing days stay at 0 so the chart line touches the baseline instead
+  // of skipping x positions.
+  const buckets = [];
+  for (let i = 0; i < days; i++) {
+    const dayStart = start + i * dayMs;
+    const found = series.find((r) => r.day_idx === i);
+    const users           = found ? (found.users            || 0) : 0;
+    const sessions        = found ? (found.sessions         || 0) : 0;
+    const crashes         = found ? (found.crashes          || 0) : 0;
+    const crashedSessions = found ? (found.crashed_sessions || 0) : 0;
+    buckets.push({
+      day:     new Date(dayStart).toISOString().slice(0, 10), // "2026-05-31"
+      day_ms:  dayStart,
+      users, sessions, crashes,
+      crashed_sessions: crashedSessions,
+      // % of sessions that hit at least one crash — capped naturally at 100%.
+      crash_per_session_pct: sessions
+        ? Math.round((crashedSessions / sessions) * 1000) / 10
+        : 0,
+    });
+  }
+
+  // ETag from the freshest event we counted — invalidate as soon as ingest
+  // adds anything in-window.
+  const maxTs = db.prepare(
+    'SELECT MAX(timestamp) m FROM events WHERE project_id = ? AND timestamp >= ?'
+  ).get(pid, start)?.m || 0;
+  const etag = `"series-${pid}-${days}-${maxTs}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'private, max-age=30');
+    return res.status(304).end();
+  }
+  res.set('ETag', etag);
+  res.set('Cache-Control', 'private, max-age=30');
+  res.json({ range_days: days, buckets });
+});
+
 // Crash report: every crash event grouped by signature (message + screen) so
 // the operator can see "8 sessions hit the same NPE on RemainingShiftScreen".
 // Each group carries: count, distinct sessions/users, first/last seen, one

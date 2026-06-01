@@ -473,6 +473,9 @@ async function renderProject(){
         <div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div>
       </div>
     </div>
+    <!-- Report charts row: rendered async by renderStatsCharts() below the stat
+         cards. 3 area charts side-by-side, fed from /stats-series. -->
+    <div id="statsChartsRow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px"></div>
     <div class="panel">
       <div class="tabs">
         <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
@@ -512,6 +515,9 @@ async function renderProject(){
   if (usersCard && stats.users) {
     usersCard.onclick = () => openUsersDialog(pid);
   }
+  // Async — never blocks the project page render. The series endpoint has
+  // its own ETag so revisits are cheap (304 + browser cache).
+  renderStatsCharts(pid).catch(() => {});
   $('#smAdd').onclick=async()=>{
     const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
     const mode=$('#smMode').value, schema=$('#smSchema').value.trim();
@@ -546,6 +552,247 @@ async function renderSpMaps(pid){
     await fetch(`${BASE}/api/projects/${pid}/sp-maps/${encodeURIComponent(b.dataset.n)}`,{method:'DELETE'});
     toast('Đã xoá map'); renderSpMaps(pid);
   });
+}
+
+// ── Report charts on the project overview ─────────────────────────────────
+//
+// Three area charts under the stat cards: Users / Sessions / Crash rate
+// (crashes-per-session, %). Range is selectable (7d default, 24h, 30d).
+// Hover any point → tooltip with the date + value.
+//
+// Pure SVG; no chart-lib dep. Reads /projects/:id/stats-series which is
+// ETag-cached so range switches are instant after first load.
+const _statsRanges = [
+  { key: '7d',  label: '7 ngày',  days: 7,  bucket: 'day' },
+  { key: '24h', label: '24 giờ',  days: 1,  bucket: 'day' },   // same endpoint w/ days=1 still buckets by day; the 24h granularity is on the roadmap
+  { key: '30d', label: '30 ngày', days: 30, bucket: 'day' },
+];
+let _statsRange = '7d';
+let _statsTip = null;   // DOM ref for the floating tooltip (one instance reused)
+
+async function renderStatsCharts(pid) {
+  const row = document.getElementById('statsChartsRow');
+  if (!row) return;
+  // Skeleton first so the page doesn't shift when data lands.
+  row.innerHTML = _statsRanges.map(() => '').join('') ||
+    '<div class="muted" style="grid-column:1/-1;font-size:11px;padding:8px">Đang tải biểu đồ…</div>';
+
+  const range = _statsRanges.find((r) => r.key === _statsRange) || _statsRanges[0];
+  let data;
+  try { data = await api(`/api/projects/${pid}/stats-series?days=${range.days}`); }
+  catch (e) {
+    row.innerHTML =
+      `<div style="grid-column:1/-1;color:var(--danger);font-size:12px">Không tải được chart: ${esc(e.message || e)}</div>`;
+    return;
+  }
+  const buckets = data.buckets || [];
+  if (!buckets.length) { row.innerHTML = ''; return; }
+
+  // 3 cards, same shape. Each prints a tiny header (label + sum) + the SVG.
+  const sumUsers          = buckets.reduce((a, b) => a + (b.users            || 0), 0);
+  const sumSessions       = buckets.reduce((a, b) => a + (b.sessions         || 0), 0);
+  const sumCrashes        = buckets.reduce((a, b) => a + (b.crashes          || 0), 0);
+  const sumCrashedSessions = buckets.reduce((a, b) => a + (b.crashed_sessions || 0), 0);
+  // Window-wide "% of sessions that hit ≥1 crash". Stays in 0–100%, unlike
+  // crashes/sessions which exceeds 100% when one bad session fires 10+ crashes.
+  const wAvgCrash = sumSessions > 0
+    ? Math.round((sumCrashedSessions / sumSessions) * 1000) / 10
+    : 0;
+
+  const charts = [
+    {
+      title: 'Users',
+      total: sumUsers,
+      values: buckets.map((b) => b.users || 0),
+      stroke: 'var(--accent)',      // blue
+      fill:   'rgba(91,140,255,0.25)',
+      suffix: '',
+    },
+    {
+      title: 'Sessions',
+      total: sumSessions,
+      values: buckets.map((b) => b.sessions || 0),
+      stroke: 'var(--accent2)',     // green
+      fill:   'rgba(39,215,150,0.25)',
+      suffix: '',
+    },
+    {
+      // % of sessions that hit ≥1 crash — capped 0..100, easier to read
+      // than raw crashes/sessions which can exceed 100% for chatty crashes.
+      title: '% Session bị crash',
+      total: `${wAvgCrash}%`,
+      values: buckets.map((b) => b.crash_per_session_pct || 0),
+      stroke: 'var(--danger)',
+      fill:   'rgba(239,68,68,0.25)',
+      suffix: '%',
+      // Raw counts so "0% nhưng có 3 crash hôm nay" is still visible if
+      // the day had 0 sessions to divide by.
+      meta:   `${sumCrashedSessions}/${sumSessions} session bị crash · ${sumCrashes} crash event`,
+    },
+  ];
+
+  // Range toggle is one row above the charts, full-width across the grid.
+  // Click → re-render. Same fetch will 304 if the data didn't change.
+  const tabs = _statsRanges.map((r) => `
+    <button class="stats-range" data-r="${r.key}"
+      style="border:none;background:${r.key === _statsRange ? 'var(--accent)' : 'transparent'};
+             color:${r.key === _statsRange ? '#fff' : 'var(--muted)'};
+             padding:3px 10px;font-size:11px;cursor:pointer;border-radius:6px">
+      ${r.label}
+    </button>`).join('');
+
+  const days = buckets.map((b) => b.day);
+  row.innerHTML = `
+    <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-bottom:-6px">
+      <span class="muted" style="font-size:11px">Báo cáo</span>
+      <span style="display:inline-flex;border:1px solid var(--line);border-radius:8px;padding:2px">${tabs}</span>
+    </div>
+    ${charts.map((c, idx) => `
+      <div class="card" style="padding:14px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <div class="k">${esc(c.title)}</div>
+          <span style="margin-left:auto;font-size:18px;font-weight:700;color:${c.stroke}">${esc(String(c.total))}</span>
+        </div>
+        ${c.meta ? `<div class="muted" style="font-size:10.5px;margin-top:2px">${esc(c.meta)}</div>` : ''}
+        <div data-chart="${idx}" style="margin-top:8px;position:relative">${
+          areaChartSvg(c.values, { stroke: c.stroke, fill: c.fill, days, suffix: c.suffix })
+        }</div>
+      </div>`).join('')}`;
+
+  // Range toggle wiring.
+  row.querySelectorAll('.stats-range').forEach((b) => {
+    b.onclick = () => { _statsRange = b.dataset.r; renderStatsCharts(pid); };
+  });
+  // Hover tooltip: delegated on the row so we only wire 3 mousemove handlers
+  // instead of (range_days * 3) per-point listeners.
+  row.querySelectorAll('[data-chart]').forEach((wrap) => {
+    wireChartHover(wrap);
+  });
+}
+
+// Build an area chart as one SVG string. Smooth-ish: we connect points with
+// a Catmull-Rom → Bezier conversion so the line reads as a curve without
+// requiring an external lib. fill = the area below the line; stroke = the
+// line itself; points get 0-radius circles that become hover handles via JS.
+function areaChartSvg(values, opts = {}) {
+  const w = 380, h = 96, pad = 8;
+  const n = values.length || 1;
+  const max = Math.max(1, ...values);              // never divide-by-zero
+  const stepX = (w - pad * 2) / Math.max(1, n - 1);
+  const xs = values.map((_, i) => pad + i * stepX);
+  const ys = values.map((v) => h - pad - (v / max) * (h - pad * 2));
+
+  // Catmull-Rom → cubic Bezier path for the stroke.
+  const linePath = (() => {
+    if (xs.length === 1) {
+      return `M${xs[0]},${ys[0]} L${xs[0]},${ys[0]}`;
+    }
+    let d = `M${xs[0]},${ys[0]}`;
+    for (let i = 0; i < xs.length - 1; i++) {
+      const x0 = xs[i - 1] ?? xs[i];
+      const y0 = ys[i - 1] ?? ys[i];
+      const x1 = xs[i],     y1 = ys[i];
+      const x2 = xs[i + 1], y2 = ys[i + 1];
+      const x3 = xs[i + 2] ?? x2;
+      const y3 = ys[i + 2] ?? y2;
+      // Standard Catmull-Rom (alpha 0.5 / centripetal) → bezier control points.
+      const cp1x = x1 + (x2 - x0) / 6;
+      const cp1y = y1 + (y2 - y0) / 6;
+      const cp2x = x2 - (x3 - x1) / 6;
+      const cp2y = y2 - (y3 - y1) / 6;
+      d += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
+    }
+    return d;
+  })();
+  // Area path = line path then close back along the baseline.
+  const areaPath = `${linePath} L${xs[xs.length - 1]},${h - pad} L${xs[0]},${h - pad} Z`;
+
+  // Hidden hit-targets at every datapoint so the hover tooltip has something
+  // to anchor to. 12px wide invisible rects between adjacent points work
+  // better than circles for narrow charts (no dead space between dots).
+  const hitW = stepX;
+  const hits = xs.map((x, i) => {
+    const left = i === 0 ? 0 : x - hitW / 2;
+    const width = i === 0 ? hitW / 2
+                 : (i === xs.length - 1 ? hitW / 2 : hitW);
+    return `<rect class="ac-hit" data-i="${i}" x="${left}" y="0" width="${width}" height="${h}"
+      fill="transparent" pointer-events="all"/>`;
+  }).join('');
+  // Visible dots (small, semi-transparent) so points are still readable
+  // when not hovered.
+  const dots = xs.map((x, i) =>
+    `<circle cx="${x}" cy="${ys[i]}" r="2" fill="${opts.stroke || '#999'}" fill-opacity="0.7"/>`
+  ).join('');
+  // Active dot (hidden until hover wires it).
+  const activeDot = `<circle class="ac-active" cx="-10" cy="-10" r="4"
+    fill="${opts.stroke || '#999'}" stroke="var(--bg)" stroke-width="1.5" style="display:none"/>`;
+
+  // Pack the bucket day labels + values onto the SVG via data-* on hits so
+  // the hover handler doesn't need a closure into the JS world.
+  const meta = JSON.stringify({
+    days: opts.days || [], values, suffix: opts.suffix || '',
+  }).replace(/'/g, '&#39;');
+  return `<svg class="area-chart" viewBox="0 0 ${w} ${h}" width="100%" height="${h}"
+    preserveAspectRatio="none" data-meta='${meta}' style="display:block">
+    <path d="${areaPath}" fill="${opts.fill || 'rgba(91,140,255,0.2)'}" stroke="none"/>
+    <path d="${linePath}" fill="none" stroke="${opts.stroke || '#5b8cff'}" stroke-width="1.6" stroke-linejoin="round"/>
+    ${dots}
+    ${activeDot}
+    ${hits}
+  </svg>`;
+}
+
+// Attach hover wiring to one chart wrapper. The tooltip is a singleton
+// floating div anchored to body — created lazily, reused across charts.
+function wireChartHover(wrap) {
+  const svg = wrap.querySelector('svg.area-chart');
+  if (!svg) return;
+  let meta;
+  try { meta = JSON.parse(svg.dataset.meta || '{}'); } catch (_) { meta = {}; }
+  const days = meta.days || [];
+  const values = meta.values || [];
+  const suffix = meta.suffix || '';
+  const active = svg.querySelector('.ac-active');
+  const hits   = svg.querySelectorAll('.ac-hit');
+
+  const showTip = (i, ev) => {
+    if (!_statsTip) {
+      _statsTip = document.createElement('div');
+      _statsTip.style.cssText =
+        'position:fixed;z-index:120;background:var(--panel2);border:1px solid var(--line);'
+        + 'border-radius:6px;padding:6px 10px;font-size:11px;pointer-events:none;'
+        + 'box-shadow:0 4px 14px rgba(0,0,0,.25);color:var(--text);min-width:120px';
+      document.body.appendChild(_statsTip);
+    }
+    _statsTip.innerHTML =
+      `<div class="muted" style="font-size:10px;margin-bottom:2px">${esc(days[i] || '')}</div>
+       <div style="font-weight:700">${esc(String(values[i] ?? 0))}${esc(suffix)}</div>`;
+    _statsTip.style.display = 'block';
+    _statsTip.style.left = (ev.clientX + 12) + 'px';
+    _statsTip.style.top  = (ev.clientY + 12) + 'px';
+    // Pin the active dot on the line via the SVG's logical x at index i.
+    const bbox = svg.getBoundingClientRect();
+    const w = 380, h = 96, pad = 8;
+    const n = values.length || 1;
+    const stepX = (w - pad * 2) / Math.max(1, n - 1);
+    const max = Math.max(1, ...values);
+    const x = pad + i * stepX;
+    const y = h - pad - ((values[i] || 0) / max) * (h - pad * 2);
+    active.setAttribute('cx', x);
+    active.setAttribute('cy', y);
+    active.style.display = '';
+    // No-op silencers for unused width/height refs so linters don't complain.
+    void bbox;
+  };
+  const hide = () => {
+    if (_statsTip) _statsTip.style.display = 'none';
+    active.style.display = 'none';
+  };
+  hits.forEach((hit) => {
+    hit.addEventListener('mousemove', (ev) => showTip(+hit.dataset.i, ev));
+    hit.addEventListener('mouseleave', hide);
+  });
+  svg.addEventListener('mouseleave', hide);
 }
 
 // ---------- remote config editor (Snowplow / Firebase / SDK) ----------
