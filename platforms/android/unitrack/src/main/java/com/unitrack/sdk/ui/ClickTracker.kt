@@ -72,11 +72,42 @@ internal object ClickTracker : Application.ActivityLifecycleCallbacks {
             // + the iOS swizzler); not activity.title, which is dynamic.
             val screen = (ctx as? Activity)?.javaClass?.simpleName ?: ""
 
+            // class_name = FQCN (e.g. "com.google.android.material.button.MaterialButton"),
+            // package = the Java package (e.g. "com.google.android.material.button"),
+            // framework = a coarse bucket the operator can filter by:
+            //   - androidx / material / android (system) for SDK views
+            //   - flutter / react-native for embedded host views
+            //   - app for everything else (the consuming app's own classes)
+            // Keeps the existing `type` field for back-compat with the old display.
+            val cls = target.javaClass
+            val className = cls.name ?: ""
+            val pkg       = cls.`package`?.name ?: className.substringBeforeLast('.', "")
+            val framework = classifyFramework(pkg)
+
             UniTrack.track("tap", mapOf(
                 "element_key" to key,
                 "screen"      to screen,
-                "type"        to target.javaClass.simpleName
+                "type"        to cls.simpleName,
+                "class_name"  to className,
+                "framework"   to framework,
+                "package"     to pkg,
             ))
+        }
+
+        // Bucket a tap source by package prefix. Cheap classification so the
+        // portal can group "tapped a Material widget vs a Flutter embedded
+        // view vs the app's own button". Order matters — more specific
+        // prefixes first.
+        private fun classifyFramework(pkg: String): String {
+            return when {
+                pkg.startsWith("com.google.android.material") -> "material"
+                pkg.startsWith("androidx.")                   -> "androidx"
+                pkg.startsWith("android.")                    -> "android"
+                pkg.startsWith("io.flutter.")                 -> "flutter"
+                pkg.startsWith("com.facebook.react")          -> "react-native"
+                pkg.isBlank()                                 -> "unknown"
+                else                                          -> "app"
+            }
         }
 
         private fun findTarget(root: View, rawX: Int, rawY: Int): View? {

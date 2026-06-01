@@ -46,11 +46,22 @@ private extension UIApplication {
 
         let key = control.ut_resolveKey(action: action)
         let screen = control.ut_ownerScreenName()
-        var extra: [String: Any] = ["type": String(describing: type(of: control))]
+        let cls = type(of: control)
+        // class_name = FQCN (NSStringFromClass gives the demangled
+        // "Module.Type" form on Swift classes, "UIButton" on ObjC). Bundle(for:)
+        // returns the bundle the class was loaded from — UIKit's bundle is
+        // "com.apple.UIKit", an app-defined subclass returns the app's main
+        // bundle identifier. That's our `package`.
+        let className   = NSStringFromClass(cls)
+        let pkg         = Bundle(for: cls).bundleIdentifier ?? ""
+        var extra: [String: Any] = ["type": String(describing: cls)]
         if let btn = control as? UIButton, let t = btn.title(for: .normal) { extra["title"] = t }
         UniTrack.track("tap", properties: [
             "element_key": key,
             "screen":      screen,
+            "class_name":  className,
+            "framework":   "uikit",
+            "package":     pkg,
             "extra":       extra,
         ])
         return handled

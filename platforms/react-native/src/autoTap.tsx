@@ -74,6 +74,25 @@ function elementName(fiber: any): string | undefined {
   return t.displayName || t.name || undefined;
 }
 
+/**
+ * Bucket a tap by component name. RN strips reflection too, so we match
+ * displayName prefixes against the standard library. The native modules
+ * (`RCTView`, `RCTText` …) and the standard touchables come from
+ * react-native; everything else is app code. Helps the portal split
+ * "tapped a TouchableOpacity in the framework" vs "tapped MyCustomButton".
+ */
+function classifyRNComponent(type: string | undefined): string {
+  if (!type) return 'unknown';
+  // Native host components prefixed with RCT-.
+  if (type.startsWith('RCT')) return 'react-native';
+  const rnLibPrefixes = [
+    'Touchable', 'Pressable', 'Button', 'Text', 'View', 'ScrollView',
+    'FlatList', 'SectionList', 'Image', 'Switch', 'Slider', 'Modal',
+  ];
+  for (const p of rnLibPrefixes) if (type.startsWith(p)) return 'react-native';
+  return 'app';
+}
+
 interface Props { children: React.ReactNode }
 
 /**
@@ -96,6 +115,10 @@ export class UniTrackTapBoundary extends React.Component<Props> {
           this.lastAt = now;
           const screen = tapState.currentScreen;
           tapState.last = { element: resolved.name, screen, at: now };
+          // Classify the source component by name. Same prefix-allowlist
+          // shape as Android/Flutter — RN has no module-of-origin reflection
+          // either, so we infer from the displayName/name.
+          const pkg = classifyRNComponent(resolved.type);
           UniTrack.track('tap', {
             // `element_key` is the field the portal (session tree + heatmap) and
             // the iOS/Android native tap capture use — send it so RN taps line up
@@ -103,6 +126,9 @@ export class UniTrackTapBoundary extends React.Component<Props> {
             element_key: resolved.name,
             element: resolved.name,
             element_type: resolved.type,
+            class_name: resolved.type,
+            framework: 'react-native',
+            package: pkg,
             screen,
           });
         }

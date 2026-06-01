@@ -2868,6 +2868,16 @@ function showActionDetail(a){
   if (screen) ctxRows.push(['Màn hình', screen]);
   if (a.element_key) ctxRows.push(['Element key', a.element_key]);
   if (a.props && a.props.element_type) ctxRows.push(['Element type', a.props.element_type]);
+  // class_name / framework / package come from Phase 2 of the audit fix —
+  // every platform now stamps them on the tap event. Surfacing the FQCN
+  // lets the operator tell "MaterialButton" from "MyCustomButton" at a
+  // glance, and `package` tells whether the source is the framework or
+  // the app's own code.
+  if (a.props && a.props.class_name && a.props.class_name !== a.props.element_type) {
+    ctxRows.push(['Class', a.props.class_name]);
+  }
+  if (a.props && a.props.framework) ctxRows.push(['Framework', a.props.framework]);
+  if (a.props && a.props.package) ctxRows.push(['Package', a.props.package]);
   if (a.props && a.props.label && a.props.label !== a.element_key) ctxRows.push(['Label', a.props.label]);
   if (a.props && a.props.trace_id) ctxRows.push(['trace_id', a.props.trace_id]);
   if (a.props && a.props.span_id)  ctxRows.push(['span_id',  a.props.span_id]);
@@ -2952,7 +2962,7 @@ function showActionDetail(a){
 
     // Raw properties (everything else). Hide the keys we already promoted
     // into the context block so the operator isn't reading them twice.
-    const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id']);
+    const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id','class_name','framework','package']);
     const rest = Object.fromEntries(Object.entries(p).filter(([k]) => !promoted.has(k)));
     const propsHtml = Object.keys(rest).length
       ? `<div class="key" style="margin-top:10px">Properties khác</div>

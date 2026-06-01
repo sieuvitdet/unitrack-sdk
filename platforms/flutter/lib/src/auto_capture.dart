@@ -105,12 +105,50 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     final known = flutterScreen.isNotEmpty && flutterScreen != 'unknown';
     UniTrackTapObserver.lastTap = LastTap(resolved.key, known ? flutterScreen : '', now);
 
+    // Classify the source widget. Flutter AOT strips reflection, so we can't
+    // ask the runtime which package a class came from — match by class-name
+    // prefix instead. Material / Cupertino widgets are easy (their public
+    // names start with well-known tokens); private widgets used by those
+    // libraries (e.g. `_InkResponseStateMixin`) start with underscore + a
+    // material-flavour name. Everything else → "app".
+    final pkg = _classifyFlutterWidget(resolved.type);
     UniTrack.instance.track('tap', properties: {
       'element': resolved.key,
       'element_type': resolved.type,
+      'class_name': resolved.type,        // Same as element_type — kept under
+                                          // its cross-platform key so portal
+                                          // queries don't need to know which.
+      'framework': 'flutter',
+      'package': pkg,
       if (known) 'screen': flutterScreen,
       if (resolved.text != null) 'label': resolved.text,
     });
+  }
+
+  /// Coarse classification by widget runtime-type name. We can't read the
+  /// originating Dart package on release builds (no mirrors), so this is a
+  /// prefix-match allowlist that covers the standard library and falls back
+  /// to "app" — same idea as the Android FQCN bucketing.
+  String _classifyFlutterWidget(String type) {
+    // Drop the leading "_" some private widgets carry.
+    final t = type.startsWith('_') ? type.substring(1) : type;
+    // Cupertino names are obvious; check before material so Material's
+    // catch-all doesn't swallow them.
+    const cupertinoPrefixes = ['Cupertino'];
+    const materialPrefixes = [
+      'Material', 'Scaffold', 'AppBar', 'ElevatedButton', 'TextButton',
+      'OutlinedButton', 'FloatingActionButton', 'IconButton', 'InkWell',
+      'InkResponse', 'ListTile', 'Card', 'Drawer', 'BottomNavigationBar',
+      'TabBar', 'Tab', 'Chip', 'Switch', 'Checkbox', 'Radio', 'Slider',
+    ];
+    const widgetsPrefixes = [
+      'GestureDetector', 'Listener', 'Semantics', 'Text', 'Icon',
+      'Container', 'Row', 'Column', 'Stack', 'Padding', 'SizedBox',
+    ];
+    for (final p in cupertinoPrefixes) { if (t.startsWith(p)) return 'cupertino'; }
+    for (final p in materialPrefixes)  { if (t.startsWith(p)) return 'material'; }
+    for (final p in widgetsPrefixes)   { if (t.startsWith(p)) return 'widgets'; }
+    return 'app';
   }
 
   /// Find the deepest interactive widget under [point] by walking the element
