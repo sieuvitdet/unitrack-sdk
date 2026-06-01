@@ -951,24 +951,6 @@ async function renderConfig(pid){
         })()}
       </div>
 
-      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <b style="font-size:13px">Iglu schemas</b>
-          <span class="muted" style="font-size:11px">map <span class="mono">event_name</span> → <span class="mono">iglu:vn.fpt.ftel.snowplow/&lt;event&gt;/jsonschema/&lt;version&gt;</span></span>
-          <span style="flex:1"></span>
-          <button class="btn ghost sm" id="cfSpSchemaSeed" type="button"
-            title="Sinh schemas mặc định cho mọi event đã thấy + các event registry">
-            ✨ Tự sinh từ event đang có
-          </button>
-        </div>
-        <div class="muted" style="font-size:11px;margin-bottom:6px">
-          Event có schema → Snowplow nhận dưới dạng <b>self-describing</b> (theo URI iglu).
-          Event không có → fallback Structured. Một dòng / event:
-          <span class="mono">event_name = iglu:vn.fpt.ftel.snowplow/event_name/jsonschema/1-0-0</span>
-        </div>
-        <textarea id="cfSpSchemas" placeholder="ev_click_check_in = iglu:vn.fpt.ftel.snowplow/ev_click_check_in/jsonschema/1-0-0"
-          style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px">${esc(kvText(sp.schemas))}</textarea>
-      </div>
 
       <!-- Blueprints + Entities — the previous "Iglu schemas" map only
            covers 1 event => 1 schema URI. FPT's analytics taxonomy ships a
@@ -1027,6 +1009,31 @@ async function renderConfig(pid){
             <pre id="cfSpTestOut" class="mono"
               style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;margin-top:6px;max-height:240px;overflow:auto;display:none"></pre>
           </div>
+        </div>
+      </details>
+
+      <!-- Per-event schema override (fallback path). Used to be the only way
+           to attach an iglu schema; with Blueprints above it's mostly dead
+           code for FPT taxonomy apps (one schema URI serves 21 events).
+           Kept collapsed by default — open when one event needs its OWN
+           schema that the matching blueprint can't express. -->
+      <details style="margin-top:10px;border:1px dashed var(--line);border-radius:8px;background:var(--bg);padding:0">
+        <summary style="cursor:pointer;padding:10px 12px;font-size:12px;font-weight:600;color:var(--muted)">
+          🪪 Iglu schemas map <span style="font-weight:400">(legacy / per-event override — chỉ dùng khi 1 event có schema riêng mà Blueprint không cover)</span>
+        </summary>
+        <div style="padding:0 12px 12px">
+          <div class="muted" style="font-size:11px;margin-bottom:6px">
+            Resolution order ở SDK: <b>Blueprint match</b> (ở trên) → fallback <b>schemas map</b> dưới đây → Structured event.
+            Một dòng / event: <span class="mono">event_name = iglu:vn.fpt.ftel.snowplow/&lt;event&gt;/jsonschema/&lt;version&gt;</span>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+            <button class="btn ghost sm" id="cfSpSchemaSeed" type="button"
+              title="Sinh schemas 1-1 mặc định cho mọi event đã thấy. Hữu ích cho project KHÔNG dùng FPT taxonomy">
+              ✨ Tự sinh từ event đang có
+            </button>
+          </div>
+          <textarea id="cfSpSchemas" placeholder="ev_click_check_in = iglu:vn.fpt.ftel.snowplow/ev_click_check_in/jsonschema/1-0-0"
+            style="width:100%;height:120px;font-family:ui-monospace,monospace;font-size:11px">${esc(kvText(sp.schemas))}</textarea>
         </div>
       </details>
 
