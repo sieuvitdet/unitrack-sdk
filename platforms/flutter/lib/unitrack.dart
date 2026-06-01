@@ -14,6 +14,7 @@ import 'package:flutter/widgets.dart';
 import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
 import 'src/trace_context.dart' as _trace;
+import 'src/wireframe.dart' show UniTrackWireframe;
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
 export 'src/auto_capture.dart'
@@ -28,6 +29,10 @@ export 'src/remote_config.dart' show UniTrackRemoteConfig;
 // a header for a specific request.
 export 'src/trace_context.dart'
     show UniTrackTraceIds, UniTrackTraceContext, UniTrackTracingConfig;
+// Screen wireframe — exposed so app code can take a snapshot manually
+// (e.g. from a button press) if the auto-snapshot inside the navigator
+// observer isn't enough.
+export 'src/wireframe.dart' show UniTrackWireframe;
 
 class UniTrackConfig {
   final String? endpoint;
@@ -451,9 +456,22 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
   /// to settle within this window is emitted as screen_view.
   final Duration coalesceWindow;
 
+  /// When true (default), every emitted screen also triggers a
+  /// UniTrackWireframe snapshot — one screen_layout event per screen per
+  /// session, so the portal can render the actual layout the user saw.
+  /// Set to false to opt out (e.g. very heavy widget trees or apps that
+  /// trigger the snapshot themselves from a custom RouteAware).
+  final bool captureWireframe;
+
+  // Track screens we've already snapshotted in this session so revisits of
+  // the same screen don't re-walk the tree. Cleared on app reset/reinstall
+  // (this observer is rebuilt each cold start).
+  final Set<String> _wireframedScreens = <String>{};
+
   UniTrackNavigatorObserver({
     List<Pattern>? skipRoutePatterns,
     this.coalesceWindow = const Duration(milliseconds: 120),
+    this.captureWireframe = true,
   }) : skipRoutePatterns = skipRoutePatterns ?? [RegExp(r'WrapperPageRoute$')];
 
   String? _lastEmitted;
@@ -490,6 +508,13 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
     if (name == null || name == _lastEmitted) return;
     _lastEmitted = name;
     UniTrack.instance.setScreen(name);
+    // One screen_layout per screen per session — capturing on every revisit
+    // would multiply payload + storage without adding info (the tree's
+    // structure doesn't change between visits in any meaningful way).
+    if (captureWireframe && !_wireframedScreens.contains(name)) {
+      _wireframedScreens.add(name);
+      UniTrackWireframe.snapshotCurrentScreen();
+    }
   }
 
   @override
