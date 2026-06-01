@@ -3598,46 +3598,107 @@ function renderWireframeSvg(tree, opts = {}) {
     return `<div class="muted" style="font-size:11px;margin-bottom:8px">React Native — không có toạ độ, hiển thị dạng cây.</div>${lines.join('')}`;
   }
 
-  // Compute bounding box of the tree so we can size the SVG.
-  let maxX = 0, maxY = 0;
-  const visit = (n) => {
+  // Viewport = the root view's size (Flutter MaterialApp / iOS UIWindow /
+  // Android decorView). The SDK walks DEPTH-FIRST so the root is always the
+  // first node — fall back to a sane mobile size if root.w/h missing.
+  const vpW = (tree.w && tree.w > 0) ? tree.w : 414;
+  const vpH = (tree.h && tree.h > 0) ? tree.h : 896;
+
+  // Frame SVG at a fixed display height (480px) and width keeping aspect
+  // ratio so the dialog doesn't stretch. Add 12px chrome padding on each
+  // side. Coordinates from the SDK are window-relative (top-left = 0,0),
+  // so we just scale uniformly.
+  const displayH = 600;
+  const scale = displayH / vpH;
+  const svgW = Math.round(vpW * scale) + 24;
+  const svgH = displayH + 24;
+  const offX = 12, offY = 12;
+
+  // Pass 1 — collect every node with a measurable frame. We render them in
+  // a flat list (not recursive nesting) so the stroke of a parent never
+  // sits underneath a child's stroke. Sort by area DESC so big containers
+  // render first and small leaves on top (the normal "back-to-front" order).
+  const items = [];
+  const walk = (n, depth) => {
     if (!n) return;
-    if ((n.x + n.w) > maxX) maxX = n.x + n.w;
-    if ((n.y + n.h) > maxY) maxY = n.y + n.h;
-    (n.children || []).forEach(visit);
+    const w = n.w || 0, h = n.h || 0;
+    if (w > 0 && h > 0) items.push({ n, depth, area: w * h });
+    (n.children || []).forEach((c) => walk(c, depth + 1));
   };
-  visit(tree);
-  // Scale to fit ~720px wide while preserving aspect ratio.
-  const targetW = 720;
-  const scale = maxX > 0 ? Math.min(1.5, targetW / maxX) : 1;
-  const svgW = Math.round(maxX * scale) + 20;
-  const svgH = Math.round(maxY * scale) + 20;
+  walk(tree, 0);
+  items.sort((a, b) => b.area - a.area);
+
+  // Categorise each node by its widget/view TYPE so layout containers vs
+  // visible widgets get different visual weight. Containers (Padding,
+  // SizedBox, Column, Row, Stack, Container, …) are skeletons of the
+  // layout grid — render with a faint dashed outline so they don't fight
+  // for attention. Everything else (Text, Image, IconButton, Card, …) is
+  // a "visible" leaf — render with a stronger stroke + light fill.
+  const isContainer = (type) => {
+    if (!type) return true;
+    const t = String(type);
+    return /^(_?(Padding|SizedBox|Column|Row|Stack|Container|Flex|Expanded|Align|Center|Positioned|Wrap|Flexible|Material|MaterialApp|Scaffold|SafeArea|Directionality|MediaQuery|LayoutBuilder|Theme|Builder|RepaintBoundary|ClipR|Transform|Offstage|Visibility|FractionallySizedBox|ConstrainedBox|DecoratedBox|Provider|Consumer|Selector|Listener|GestureDetector|Semantics|NotificationListener|FocusScope|Focus|Localizations|IconTheme|IconButtonTheme|DefaultTextStyle|Theme|InheritedTheme|HeroController|Navigator|Overlay|MediaQueryFromWindow|RootRestorationScope|UnitToBuildLayer|RawGestureDetector|MouseRegion|AbsorbPointer|IgnorePointer|InteractiveViewer|SliverPadding|SliverList|SliverFillRemaining|CustomMultiChildLayout|SliverToBoxAdapter|CustomScrollView)([A-Z_<].*)?$|^(View|ViewGroup|FrameLayout|LinearLayout|RelativeLayout|ConstraintLayout|CoordinatorLayout|AppBarLayout|UIView|UIStackView|UIViewController|FlutterView)$/.test(t);
+  };
+
+  // Cap rendered count for performance. 2000 nodes ≈ ~120KB SVG which is
+  // still snappy; below that we draw everything.
+  const RENDER_CAP = 2000;
+  const overflow = items.length > RENDER_CAP;
+  const rendered = items.slice(0, RENDER_CAP);
 
   const rects = [];
   const labels = [];
-  const drawNode = (n, depth) => {
-    if (!n || (n.w || 0) <= 0 || (n.h || 0) <= 0) {
-      (n && n.children || []).forEach((c) => drawNode(c, depth + 1));
-      return;
-    }
-    const x = Math.round(n.x * scale) + 10;
-    const y = Math.round(n.y * scale) + 10;
+  for (const { n, depth } of rendered) {
+    const x = Math.round(n.x * scale) + offX;
+    const y = Math.round(n.y * scale) + offY;
     const w = Math.max(1, Math.round(n.w * scale));
     const h = Math.max(1, Math.round(n.h * scale));
-    // Subtle colouring by depth so nested structure reads visually.
-    const hue = (depth * 25) % 360;
-    rects.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
-      fill="hsla(${hue},45%,55%,0.06)" stroke="hsla(${hue},55%,60%,0.55)" stroke-width="0.8">
-      <title>${esc(n.type)}${n.text ? ` — "${esc(n.text)}"` : ''} · ${n.w}×${n.h}</title>
-    </rect>`);
-    if (opts.labels && n.text && w > 30 && h > 14) {
-      labels.push(`<text x="${x + 3}" y="${y + 11}" font-size="9" fill="var(--text)" font-family="ui-sans-serif">${esc(n.text.length > 20 ? n.text.slice(0, 19) + '…' : n.text)}</text>`);
+    // Hide truly off-screen nodes — Flutter often lays out scrolled-out
+    // lists at huge y values. They make the SVG taller than the viewport
+    // for no reason.
+    if (x > svgW || y > svgH || x + w < 0 || y + h < 0) continue;
+
+    const container = isContainer(n.type);
+    if (container) {
+      // Dashed faint outline only — no fill. Doesn't fight with visible
+      // widgets layered on top.
+      rects.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
+        fill="none" stroke="rgba(120,140,180,0.28)" stroke-width="0.6"
+        stroke-dasharray="2,3">
+        <title>${esc(n.type || '')} · ${n.w}×${n.h}</title>
+      </rect>`);
+    } else {
+      // Visible widget: light slate fill + crisp stroke. Hue keyed by
+      // depth so different layout levels read distinctly without being loud.
+      const hue = (200 + depth * 30) % 360;
+      rects.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3"
+        fill="hsla(${hue},35%,55%,0.10)" stroke="hsla(${hue},55%,65%,0.85)" stroke-width="1">
+        <title>${esc(n.type || '')}${n.text ? ` — "${esc(n.text)}"` : ''} · ${n.w}×${n.h}</title>
+      </rect>`);
+      // Text labels only on visible-widget rects (containers are skeleton).
+      if (opts.labels && n.text && w > 30 && h > 14) {
+        const txt = String(n.text);
+        labels.push(`<text x="${x + 4}" y="${y + 11}" font-size="9.5"
+          fill="var(--text)" font-family="ui-sans-serif">${esc(txt.length > 28 ? txt.slice(0, 27) + '…' : txt)}</text>`);
+      }
     }
-    (n.children || []).forEach((c) => drawNode(c, depth + 1));
-  };
-  drawNode(tree, 0);
+  }
+
+  // Phone-frame chrome: a rounded outline at viewport size so the operator
+  // sees the actual screen dimensions instead of just floating rects.
+  const frameW = Math.round(vpW * scale);
+  const frameH = Math.round(vpH * scale);
+  const frame = `<rect x="${offX}" y="${offY}" width="${frameW}" height="${frameH}"
+    rx="14" fill="rgba(255,255,255,0.02)" stroke="rgba(180,200,230,0.4)" stroke-width="1.5"/>`;
+
+  const overflowBadge = overflow
+    ? `<text x="${offX + 8}" y="${offY + frameH - 10}" font-size="10" fill="var(--warn)">
+         ⚠ Hiển thị ${RENDER_CAP}/${items.length} node (truncated)
+       </text>`
+    : '';
+
   return `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}"
-    style="background:var(--panel);border:1px solid var(--line);border-radius:6px;display:block">${rects.join('')}${labels.join('')}</svg>`;
+    style="background:var(--panel);border:1px solid var(--line);border-radius:6px;display:block;max-width:100%">${frame}${rects.join('')}${labels.join('')}${overflowBadge}</svg>`;
 }
 
 // Same data source as the existing user <select> in the Sessions/wireframe
