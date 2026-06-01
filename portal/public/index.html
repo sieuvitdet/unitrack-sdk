@@ -2411,6 +2411,7 @@ async function openSessionIDE(pid, sid){
       <span class="muted" style="font-size:12px" id="ideMeta"></span>
       <span id="ideCrashBadge"></span>
       <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
+      <button class="btn ghost sm" id="ideLayout" title="Xem wireframe các màn đã capture">🗺️ Layout</button>
       <button class="btn ghost sm" id="ideClose">✕ Đóng</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px">
@@ -2449,6 +2450,11 @@ async function openSessionIDE(pid, sid){
     ideReplayCleanup();
     ov.style.display = 'none';
   };
+  // Layout dialog — pulls /sessions/:sid/layouts and renders each screen's
+  // tree as an SVG outline. One click reveals the visual structure the SDK
+  // captured (Phase 7 of the audit fix).
+  const layoutBtn = document.getElementById('ideLayout');
+  if (layoutBtn) layoutBtn.onclick = () => openLayoutDialog(pid, sid);
   // Search box filters the middle pane (debounced); see renderIDEMain.
   const searchEl = document.getElementById('ideSearch');
   searchEl.oninput = ()=>{ clearTimeout(searchEl._h); searchEl._h=setTimeout(()=>applyIDEFilter(), 160); };
@@ -3249,6 +3255,144 @@ function renderCrashReport(pid, data, killFn) {
 }
 
 // User-list dialog — opens from the Users card on the project overview.
+// Session layout (wireframe) dialog — fetch each screen the SDK captured
+// for this session and render the view tree as a nested SVG outline.
+// Per Phase 7 of the audit fix: the SDK posts `screen_layout` events with
+// either a gzipped JSON tree (iOS/Android/Flutter) or a raw JSON tree (RN);
+// the server decodes both into a uniform {screen, tree} shape exposed at
+// GET /api/projects/:id/sessions/:sid/layouts.
+async function openLayoutDialog(pid, sid) {
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id = 'layoutDlg'; dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:980px;max-width:96vw;max-height:92vh;padding:0;z-index:120;'
+    + 'display:flex;flex-direction:column;overflow:hidden';
+  dlg.innerHTML = `
+    <div class="dlg-h" style="flex:0 0 auto">🗺️ Wireframe các màn
+      <button class="lay-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div style="flex:0 0 auto;display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);align-items:center;font-size:12px;flex-wrap:wrap">
+      <span class="muted">Màn:</span>
+      <select id="layPick" style="background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;min-width:240px"></select>
+      <span id="layMeta" class="muted" style="font-size:11px"></span>
+      <span style="flex:1"></span>
+      <label class="muted" style="display:flex;align-items:center;gap:5px;font-size:11px">
+        <input id="layShowLabels" type="checkbox" checked> hiện text
+      </label>
+    </div>
+    <div id="layBody" style="flex:1 1 auto;min-height:0;overflow:auto;padding:14px 16px;background:var(--bg);display:block">
+      <div class="muted" style="font-size:12px">Đang tải…</div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
+  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
+  dlg.querySelector('.lay-close').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+
+  let data;
+  try { data = await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}/layouts`); }
+  catch (e) {
+    document.getElementById('layBody').innerHTML =
+      `<div style="color:var(--danger)">Không tải được layout: ${esc(e.message || e)}</div>`;
+    return;
+  }
+  const layouts = (data && data.layouts) || [];
+  if (!layouts.length) {
+    document.getElementById('layBody').innerHTML =
+      '<div class="muted" style="padding:8px">Session này chưa có screen_layout event nào — app cần gọi UniTrackWireframe.snapshot(...) sau mỗi screen change.</div>';
+    return;
+  }
+
+  // Build the picker. Most sessions snapshot 5–20 screens; one option per.
+  const pick = document.getElementById('layPick');
+  pick.innerHTML = layouts.map((l, i) =>
+    `<option value="${i}">${esc(l.screen || '(unknown)')} · ${l.node_count || 0} nodes${l.truncated?' · ⚠ truncated':''}</option>`
+  ).join('');
+
+  const labelsToggle = document.getElementById('layShowLabels');
+  const render = () => {
+    const i = +pick.value || 0;
+    const lay = layouts[i];
+    document.getElementById('layMeta').textContent =
+      `${lay.framework || '?'} · ${lay.node_count} nodes · ${fmtTime(lay.ts)}`;
+    document.getElementById('layBody').innerHTML = renderWireframeSvg(lay.tree, { labels: labelsToggle.checked });
+  };
+  pick.onchange = render;
+  labelsToggle.onchange = render;
+  render();
+}
+
+// Render a tree node (from the SDK wireframe) as nested SVG <rect>s + labels.
+// The tree carries absolute window coordinates on iOS/Android; React Native
+// fibers send 0/0 so the renderer falls back to a flow layout (auto-grid).
+function renderWireframeSvg(tree, opts = {}) {
+  if (!tree) return '<div class="muted">Empty tree.</div>';
+  // Detect "no real coordinates" — every w/h zero means RN fiber path. In
+  // that case fall back to a simple indented text listing of the tree.
+  const hasFrames = (() => {
+    let yes = false;
+    const visit = (n) => {
+      if (!n) return;
+      if ((n.w || 0) > 0 && (n.h || 0) > 0) yes = true;
+      (n.children || []).forEach(visit);
+    };
+    visit(tree);
+    return yes;
+  })();
+
+  if (!hasFrames) {
+    // Indented tree — RN doesn't carry frames. Useful debug listing.
+    const lines = [];
+    const walk = (n, depth) => {
+      const pad = '· '.repeat(depth);
+      const lbl = n.text ? ` <span style="color:var(--accent2)">"${esc(n.text)}"</span>` : '';
+      lines.push(`<div class="mono" style="font-size:11px;line-height:1.5">${pad}<b>${esc(n.type)}</b>${lbl}</div>`);
+      (n.children || []).forEach((c) => walk(c, depth + 1));
+    };
+    walk(tree, 0);
+    return `<div class="muted" style="font-size:11px;margin-bottom:8px">React Native — không có toạ độ, hiển thị dạng cây.</div>${lines.join('')}`;
+  }
+
+  // Compute bounding box of the tree so we can size the SVG.
+  let maxX = 0, maxY = 0;
+  const visit = (n) => {
+    if (!n) return;
+    if ((n.x + n.w) > maxX) maxX = n.x + n.w;
+    if ((n.y + n.h) > maxY) maxY = n.y + n.h;
+    (n.children || []).forEach(visit);
+  };
+  visit(tree);
+  // Scale to fit ~720px wide while preserving aspect ratio.
+  const targetW = 720;
+  const scale = maxX > 0 ? Math.min(1.5, targetW / maxX) : 1;
+  const svgW = Math.round(maxX * scale) + 20;
+  const svgH = Math.round(maxY * scale) + 20;
+
+  const rects = [];
+  const labels = [];
+  const drawNode = (n, depth) => {
+    if (!n || (n.w || 0) <= 0 || (n.h || 0) <= 0) {
+      (n && n.children || []).forEach((c) => drawNode(c, depth + 1));
+      return;
+    }
+    const x = Math.round(n.x * scale) + 10;
+    const y = Math.round(n.y * scale) + 10;
+    const w = Math.max(1, Math.round(n.w * scale));
+    const h = Math.max(1, Math.round(n.h * scale));
+    // Subtle colouring by depth so nested structure reads visually.
+    const hue = (depth * 25) % 360;
+    rects.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
+      fill="hsla(${hue},45%,55%,0.06)" stroke="hsla(${hue},55%,60%,0.55)" stroke-width="0.8">
+      <title>${esc(n.type)}${n.text ? ` — "${esc(n.text)}"` : ''} · ${n.w}×${n.h}</title>
+    </rect>`);
+    if (opts.labels && n.text && w > 30 && h > 14) {
+      labels.push(`<text x="${x + 3}" y="${y + 11}" font-size="9" fill="var(--text)" font-family="ui-sans-serif">${esc(n.text.length > 20 ? n.text.slice(0, 19) + '…' : n.text)}</text>`);
+    }
+    (n.children || []).forEach((c) => drawNode(c, depth + 1));
+  };
+  drawNode(tree, 0);
+  return `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}"
+    style="background:var(--panel);border:1px solid var(--line);border-radius:6px;display:block">${rects.join('')}${labels.join('')}</svg>`;
+}
+
 // Same data source as the existing user <select> in the Sessions/wireframe
 // toolbar, but with search + click-to-filter so picking a user takes the
 // operator straight to that user's sessions.

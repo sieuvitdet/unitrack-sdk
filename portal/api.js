@@ -2,6 +2,7 @@
 // stats, and Excel export. Mounted under {BASE}/api.
 
 const express = require('express');
+const zlib = require('zlib');
 const { db, newApiKey } = require('./db');
 const { buildWorkbook } = require('./export');
 const { namingIssues, isValidName, healthScore } = require('./scoring');
@@ -597,6 +598,50 @@ router.get('/projects/:id/sessions/:sid', ownProject, (req, res) => {
     journey: JSON.parse(row.journey || '[]'),
     device,
   });
+});
+
+// Screen wireframe payloads for a session — one entry per screen the SDK
+// snapshotted. The SDK posts `screen_layout` events with either:
+//   - tree_b64gz (iOS/Android/Flutter) — gzipped JSON, base64-encoded
+//   - tree_json  (React Native)         — raw JSON string
+// We decode here so the SPA receives a homogeneous { screen, tree } shape.
+router.get('/projects/:id/sessions/:sid/layouts', ownProject, (req, res) => {
+  const rows = db.prepare(`
+    SELECT timestamp, screen, screen_name, properties
+    FROM events
+    WHERE project_id = ? AND session_id = ? AND event_name = 'screen_layout'
+    ORDER BY timestamp ASC
+  `).all(req.params.id, req.params.sid);
+  const out = [];
+  for (const r of rows) {
+    let props = {};
+    try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
+    let tree = null;
+    if (typeof props.tree_json === 'string') {
+      try { tree = JSON.parse(props.tree_json); } catch (_) {}
+    } else if (typeof props.tree_b64gz === 'string') {
+      try {
+        const gz = Buffer.from(props.tree_b64gz, 'base64');
+        // zlib.gunzipSync handles both gzip (with magic 1f 8b) AND raw zlib
+        // (Compression.zlib on iOS emits raw deflate w/ zlib header). Try
+        // gunzip first; fall back to inflate if it complains.
+        let raw;
+        try { raw = zlib.gunzipSync(gz); }
+        catch (_) { raw = zlib.inflateSync(gz); }
+        tree = JSON.parse(raw.toString('utf8'));
+      } catch (_) { /* corrupt payload — leave tree null */ }
+    }
+    if (!tree) continue;
+    out.push({
+      ts:         r.timestamp,
+      screen:     r.screen_name || r.screen || '(unknown)',
+      framework:  props.framework || null,
+      node_count: props.node_count || 0,
+      truncated:  props.truncated === true,
+      tree,
+    });
+  }
+  res.json({ layouts: out });
 });
 
 // Detail of one journey event across providers: the same event is stored once
