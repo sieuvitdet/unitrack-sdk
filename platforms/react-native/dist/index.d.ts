@@ -29,6 +29,7 @@ export { UniTrackRemoteConfig } from './remoteConfig';
 export type { AnalyticsProvider } from './analyticsProvider';
 declare class UniTrackClass {
     private initialized;
+    private readonly bootAt;
     private providers;
     /** Register a provider to also receive every event. Call BEFORE initialize();
      *  if called afterwards, the provider is initialized immediately. */
@@ -76,6 +77,9 @@ declare class UniTrackClass {
         data?: EventProperties;
     }): Promise<void>;
     trackWebViewOpen(url: string, screen?: string): Promise<void>;
+    /** A deeplink / universal link opened the app or a screen.
+     *  Adds scheme/host/path/query separately + is_cold flag (true when fired
+     *  within 5s of module load = the link launched the app). */
     trackDeeplink(url: string, source?: string): Promise<void>;
     trackThirdPartyOpen(name: string, screen?: string): Promise<void>;
     /**

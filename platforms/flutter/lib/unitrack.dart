@@ -346,11 +346,33 @@ class UniTrack {
       });
 
   /// A deeplink / universal link opened the app or a screen.
-  Future<void> trackDeeplink(String url, {String? source}) =>
-      track('deeplink', properties: {
-        'url': _hostPath(url),
-        if (source != null) 'source': source,
-      });
+  ///
+  /// Adds scheme/host/path/query as separate fields so portal filters don't
+  /// need to parse the URL each time, and an `is_cold` flag (true when this
+  /// fires within 5s of [_initAt] = the link launched the app).
+  ///
+  /// Apps wire this from `uni_links` / `app_links` (Flutter doesn't have a
+  /// universal Linking listener), e.g.:
+  ///   uriLinkStream.listen((uri) =>
+  ///     UniTrack.instance.trackDeeplink(uri.toString(), source: 'runtime'));
+  Future<void> trackDeeplink(String url, {String? source}) {
+    final props = <String, Object?>{
+      'url': url,            // keep full URL — query included
+    };
+    final u = Uri.tryParse(url);
+    if (u != null) {
+      if (u.scheme.isNotEmpty) props['scheme'] = u.scheme;
+      if (u.host.isNotEmpty)   props['host']   = u.host;
+      if (u.path.isNotEmpty)   props['path']   = u.path;
+      if (u.query.isNotEmpty)  props['query']  = u.query;
+    }
+    if (source != null) props['source'] = source;
+    final boot = _initAt;
+    final isCold = boot != null &&
+        DateTime.now().difference(boot) < const Duration(seconds: 5);
+    props['is_cold'] = isCold;
+    return track('deeplink', properties: props);
+  }
 
   /// A third-party app / SDK was opened (e.g. payment, social share, maps).
   Future<void> trackThirdPartyOpen(String name, {String? screen}) =>

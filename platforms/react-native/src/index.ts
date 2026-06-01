@@ -76,6 +76,12 @@ export type { AnalyticsProvider } from './analyticsProvider';
 class UniTrackClass {
   private initialized = false;
 
+  // Set once at module load — used by trackDeeplink to decide `is_cold`.
+  // (Module load runs during the React Native bridge boot, so deeplinks that
+  // launch the app via Linking.getInitialURL fire within the first few seconds
+  // of this timestamp.)
+  private readonly bootAt: number = Date.now();
+
   // Registered third-party providers (Snowplow, Firebase, …). Every event is
   // forwarded to each one. Empty by default — core has zero such dependencies.
   private providers: AnalyticsProvider[] = [];
@@ -210,8 +216,21 @@ class UniTrackClass {
   trackWebViewOpen(url: string, screen?: string) {
     return this.track('webview_open', { url: hostPath(url), ...(screen ? { screen } : {}) });
   }
+  /** A deeplink / universal link opened the app or a screen.
+   *  Adds scheme/host/path/query separately + is_cold flag (true when fired
+   *  within 5s of module load = the link launched the app). */
   trackDeeplink(url: string, source?: string) {
-    return this.track('deeplink', { url: hostPath(url), ...(source ? { source } : {}) });
+    const props: EventProperties = { url };
+    try {
+      const u = new URL(url);
+      if (u.protocol) props.scheme = u.protocol.replace(/:$/, '');
+      if (u.host)     props.host   = u.host;
+      if (u.pathname) props.path   = u.pathname;
+      if (u.search)   props.query  = u.search.replace(/^\?/, '');
+    } catch (_) { /* malformed — keep just the raw URL */ }
+    if (source) props.source = source;
+    props.is_cold = Date.now() - this.bootAt <= 5_000;
+    return this.track('deeplink', props);
   }
   trackThirdPartyOpen(name: string, screen?: string) {
     return this.track('third_party_open', { target: name, ...(screen ? { screen } : {}) });

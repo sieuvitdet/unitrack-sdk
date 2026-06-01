@@ -214,10 +214,28 @@ object UniTrack {
     @JvmStatic
     fun trackWebViewOpen(url: String) = track("webview_open", mapOf("url" to hostPath(url)))
 
+    // The SDK boot time, used to flag deeplinks that fired within the cold-
+    // start window. android.os.SystemClock.elapsedRealtime() avoids wall-clock
+    // jumps; same source UniTrackDeeplinks reads.
+    internal val bootElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
+    internal val coldDeeplinkWindowMs: Long = 5_000L
+
+    /// A deeplink / universal link opened the app or a screen.
+    /// Adds scheme/host/path/query separately + is_cold flag (true when this
+    /// fires within 5s of SDK boot = the link launched the app).
     @JvmStatic @JvmOverloads
     fun trackDeeplink(url: String, source: String? = null) {
-        val p = mutableMapOf<String, Any?>("url" to hostPath(url))
+        val p = mutableMapOf<String, Any?>("url" to url)
+        runCatching {
+            val u = android.net.Uri.parse(url)
+            u.scheme?.takeIf { it.isNotEmpty() }?.let { p["scheme"] = it }
+            u.host?.takeIf { it.isNotEmpty() }?.let { p["host"] = it }
+            u.path?.takeIf { it.isNotEmpty() }?.let { p["path"] = it }
+            u.query?.takeIf { it.isNotEmpty() }?.let { p["query"] = it }
+        }
         source?.let { p["source"] = it }
+        val elapsed = android.os.SystemClock.elapsedRealtime() - bootElapsedMs
+        p["is_cold"] = elapsed in 0..coldDeeplinkWindowMs
         track("deeplink", p)
     }
 

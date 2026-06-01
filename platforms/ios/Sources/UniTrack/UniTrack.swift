@@ -212,9 +212,23 @@ public final class UniTrack {
         track("webview_open", properties: ["url": hostPath(url)])
     }
 
+    /// A deeplink / universal link opened the app or a screen.
+    /// Adds scheme/host/path/query as separate fields so portal filters don't
+    /// need to parse the URL each time, and an `is_cold` flag (true when fired
+    /// within 5s of cold start = the link launched the app, not a runtime push).
     public static func trackDeeplink(_ url: String, source: String? = nil) {
-        var p: [String: Any] = ["url": hostPath(url)]
+        var p: [String: Any] = ["url": url]   // keep full URL — query included
+        if let u = URL(string: url) {
+            if let s = u.scheme, !s.isEmpty { p["scheme"] = s }
+            if let h = u.host,   !h.isEmpty { p["host"]   = h }
+            if !u.path.isEmpty              { p["path"]   = u.path }
+            if let q = u.query,  !q.isEmpty { p["query"]  = q }
+        }
         if let source = source { p["source"] = source }
+        // ColdStartAt is set when UniTrack singleton spins up — first 5 seconds
+        // of the process lifetime count as "launched from this deeplink".
+        let coldWindowSec = 5.0
+        p["is_cold"] = Date().timeIntervalSince(shared.coldStartAt) <= coldWindowSec
         track("deeplink", properties: p)
     }
 
