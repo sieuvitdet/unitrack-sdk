@@ -44,8 +44,13 @@ class SnowplowProvider extends AnalyticsProvider {
   final String? portalEndpoint;
   final String? portalApiKey;
 
-  /// Snowplow tracker flags the developer controls.
-  final SnowplowOptions options;
+  /// Snowplow tracker flags the developer controls. Mutable because the
+  /// typical wiring is: provider created at app init (sync) → remote config
+  /// fetched a beat later → applyOptions() rebuilds the tracker with the
+  /// portal-supplied flags. The previous SnowplowTracker reference is dropped;
+  /// Snowplow's plugin doesn't expose an explicit close, but a new tracker
+  /// fully replaces the old one on the native side.
+  SnowplowOptions options;
 
   /// Snowplow collector URL.
   final String endpoint;
@@ -76,6 +81,53 @@ class SnowplowProvider extends AnalyticsProvider {
   void setSchemas(Map<String, String> next) {
     schemas = Map<String, String>.from(next);
     debugPrint('[unitrack_snowplow] schemas updated: ${schemas.length} entries');
+  }
+
+  /// Apply the Snowplow TrackerConfiguration flags from remote config. Any
+  /// key NOT in [overrides] keeps its current value, so the operator only
+  /// needs to send the flags they actually changed.
+  ///
+  /// The native tracker is rebuilt — Snowplow's TrackerConfiguration is
+  /// immutable after createTracker, so applying lifecycleAutotracking=true
+  /// (or any other field) requires a fresh tracker. The first event sent
+  /// AFTER applyOptions reflects the new config.
+  Future<void> applyOptions(Map<String, bool> overrides) async {
+    if (overrides.isEmpty) return;
+    final cur = options;
+    options = SnowplowOptions(
+      base64Encoding:               overrides['base64Encoding']               ?? cur.base64Encoding,
+      platformContext:              overrides['platformContext']              ?? cur.platformContext,
+      applicationContext:           overrides['applicationContext']           ?? cur.applicationContext,
+      sessionContext:               overrides['sessionContext']               ?? cur.sessionContext,
+      screenContext:                overrides['screenContext']                ?? cur.screenContext,
+      lifecycleAutotracking:        overrides['lifecycleAutotracking']        ?? cur.lifecycleAutotracking,
+      screenEngagementAutotracking: overrides['screenEngagementAutotracking'] ?? cur.screenEngagementAutotracking,
+    );
+    debugPrint('[unitrack_snowplow] options updated: $overrides — rebuilding tracker');
+    await _rebuildTracker();
+  }
+
+  // Re-create the underlying SnowplowTracker with the current [options] +
+  // endpoint/appId/namespace. Used by applyOptions(); kept private so the
+  // tracker lifecycle stays inside the provider.
+  Future<void> _rebuildTracker() async {
+    if (endpoint.isEmpty) return;
+    _tracker = await Snowplow.createTracker(
+      namespace: namespace,
+      endpoint: endpoint,
+      method: Method.post,
+      trackerConfig: TrackerConfiguration(
+        appId: appId,
+        devicePlatform: DevicePlatform.mob,
+        base64Encoding: options.base64Encoding,
+        platformContext: options.platformContext,
+        applicationContext: options.applicationContext,
+        sessionContext: options.sessionContext,
+        screenContext: options.screenContext,
+        lifecycleAutotracking: options.lifecycleAutotracking,
+        screenEngagementAutotracking: options.screenEngagementAutotracking,
+      ),
+    );
   }
 
   SnowplowTracker? _tracker;

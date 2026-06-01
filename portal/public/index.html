@@ -597,6 +597,38 @@ async function renderConfig(pid){
 
       <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <b style="font-size:13px">Tracker options</b>
+          <span class="muted" style="font-size:11px">các cờ của <span class="mono">TrackerConfiguration</span> (mobile)</span>
+        </div>
+        <div class="muted" style="font-size:11px;margin-bottom:8px">
+          Bật/tắt các context entity Snowplow tự gắn vào mỗi event + auto-tracking.
+          App phải rebuild + pull lại config để các cờ này có hiệu lực (tracker được khởi tạo lại).
+        </div>
+        ${(() => {
+          // Tracker config flags. Names match Snowplow's TrackerConfiguration so
+          // a Snowplow operator reading this UI sees the exact field they know.
+          const opts = sp.options || {};
+          const flags = [
+            ['base64Encoding',                opts.base64Encoding !== false,                'Encode self-describing event data Base64'],
+            ['platformContext',               opts.platformContext !== false,               'Gắn mobile platform context (model/OS/network)'],
+            ['applicationContext',            opts.applicationContext !== false,            'Gắn application context (version/build)'],
+            ['sessionContext',                opts.sessionContext !== false,                'Gắn session context (sessionId/firstEventId)'],
+            ['screenContext',                 opts.screenContext !== false,                 'Gắn screen context (tên màn hiện tại)'],
+            ['lifecycleAutotracking',         opts.lifecycleAutotracking === true,          'Tự bắn application_foreground / application_background'],
+            ['screenEngagementAutotracking',  opts.screenEngagementAutotracking !== false,  'Tự đo screen_engagement (thời gian trên màn)'],
+          ];
+          return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 14px">${
+            flags.map(([k, v, tip]) => `
+              <label class="row" style="gap:6px;font-size:11.5px" title="${esc(tip)}">
+                <input type="checkbox" id="cfSpOpt_${esc(k)}" ${v ? 'checked' : ''}/>
+                <span class="mono">${esc(k)}</span>
+              </label>`).join('')
+          }</div>`;
+        })()}
+      </div>
+
+      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <b style="font-size:13px">Iglu schemas</b>
           <span class="muted" style="font-size:11px">map <span class="mono">event_name</span> → <span class="mono">iglu:vn.fpt.ftel.snowplow/&lt;event&gt;/jsonschema/&lt;version&gt;</span></span>
           <span style="flex:1"></span>
@@ -782,12 +814,20 @@ async function renderConfig(pid){
     // Build the base block then attach flavor_overrides if any flavor box has
     // content. The server treats flavor_overrides as opaque JSON and only
     // strips it on the app-facing read.
+    // Snowplow TrackerConfiguration flags — same names the Flutter SDK exposes
+    // via SnowplowOptions. Reading the checkbox each save keeps the round-trip
+    // simple (no diff tracking needed).
+    const optKeys = ['base64Encoding','platformContext','applicationContext','sessionContext',
+                     'screenContext','lifecycleAutotracking','screenEngagementAutotracking'];
+    const spOpts = Object.fromEntries(optKeys.map((k) =>
+      [k, document.getElementById('cfSpOpt_' + k)?.checked === true]));
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
       userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx'),
       // schemas map: parsed from the kv textarea ("event_name = iglu:..."). Drop
       // empty values so the SDK doesn't try to register a self-describing call
       // with an empty URI.
-      schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)) };
+      schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)),
+      options: spOpts };
     const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 
     const firebase = { enabled:$('#cfFbOn').checked,

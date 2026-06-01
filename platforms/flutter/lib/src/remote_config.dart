@@ -70,6 +70,26 @@ class UniTrackRemoteConfig {
     return 'iglu:vn.fpt.ftel.snowplow/$eventName/jsonschema/$version';
   }
 
+  /// Raw `snowplow.options` map from the portal (Snowplow TrackerConfiguration
+  /// flags: base64Encoding, platformContext, applicationContext, sessionContext,
+  /// screenContext, lifecycleAutotracking, screenEngagementAutotracking).
+  ///
+  /// Returns an empty map when the operator didn't override anything — callers
+  /// fall back to their own defaults (matching Snowplow's recommended setup).
+  /// Defensive read: each value is coerced to bool only when explicitly true /
+  /// false on the wire so a typo doesn't silently flip a flag.
+  Map<String, bool> get snowplowOptions {
+    final raw = snowplow['options'];
+    if (raw is! Map) return const {};
+    final out = <String, bool>{};
+    for (final e in raw.entries) {
+      if (e.key is String && (e.value == true || e.value == false)) {
+        out[e.key as String] = e.value as bool;
+      }
+    }
+    return out;
+  }
+
   /// Map config rules → SDK rules and install them on UniTrack.
   List<UniTrackEventRule> toEventRules() => rules.map((r) {
         final m = Map<String, dynamic>.from(r as Map);
