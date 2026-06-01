@@ -331,6 +331,17 @@ class SnowplowProvider extends AnalyticsProvider {
   void track(String name, Map<String, Object?> properties) {
     final t = _tracker;
     if (t == null) return;
+    // Caller already fired the event into Snowplow directly (legacy
+    // SnowplowService still alive) and only wants the portal mirror —
+    // drop the Snowplow leg here and ONLY forward to the portal.
+    if (properties['_skip_snowplow'] == true) {
+      _mirrorToPortal(name, {
+        '_sp_type': 'self_describing',
+        '_sp_skipped': true,
+        ..._cleanedEventData(properties),
+      });
+      return;
+    }
     Map<String, Object?> mirror;
 
     // Resolution order (richest first → simplest):
