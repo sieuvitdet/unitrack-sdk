@@ -283,6 +283,14 @@ public final class UniTrack {
         if !config.screenLoadEvent.isEmpty {
             UniTrack.screenLoadEventName = config.screenLoadEvent
         }
+
+        // Drain any crash-pending.json BEFORE ut_init runs (see SwiftPackage
+        // mirror for the full story). Core C++ enqueues to its own queue
+        // (→ portal HTTP) but bypasses the Swift forEachProvider fan-out, so
+        // Snowplow / Firebase miss the recovered crash; we read the file
+        // ourselves and re-emit through the provider path below.
+        let recoveredCrashProps = Self.drainPendingCrashFile(dbPath: Self.dbPath())
+
         let cfgJson = UniTrack.buildConfigJson(config)
         context = ut_init(apiKey, cfgJson, UT_PLATFORM_IOS)
         guard context != nil else {
@@ -320,6 +328,44 @@ public final class UniTrack {
 
         // Bring up any providers registered before initialize().
         for p in providers { p.initializeProvider() }
+
+        // Fan recovered crash out to providers AFTER initializeProvider —
+        // re-uses each provider's track() path so Snowplow's convention
+        // helpers + Firebase's sanitizer process it like a live crash.
+        if let recovered = recoveredCrashProps, !providers.isEmpty {
+            var props = recovered
+            props["recovered_on_launch"] = true
+            UniTrack.log("[UniTrack] fan-out recovered crash to %d provider(s)",
+                         providers.count)
+            for p in providers { p.track("crash", props) }
+        }
+    }
+
+    // MARK: - Crash file plumbing
+
+    /// Where ut_init builds the queue DB; the C++ CrashHandler drops
+    /// `crash-pending.json` in the same directory. Must match the path
+    /// emitted in buildConfigJson(…).
+    private static func dbPath() -> String {
+        if let docs = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask).first {
+            return docs.appendingPathComponent("unitrack.db").path
+        }
+        return "unitrack.db"
+    }
+
+    /// Read + delete the crash file before ut_init drains it. Returns the
+    /// parsed properties dict on success, nil if no file / unreadable.
+    private static func drainPendingCrashFile(dbPath: String) -> [String: Any]? {
+        let dir = (dbPath as NSString).deletingLastPathComponent
+        let path = (dir as NSString).appendingPathComponent("crash-pending.json")
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+            try? FileManager.default.removeItem(atPath: path)
+            return nil
+        }
+        try? FileManager.default.removeItem(atPath: path)
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     // MARK: - Helpers
