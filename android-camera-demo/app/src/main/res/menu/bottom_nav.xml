@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/tab_cameras"  android:title="Cameras"   android:icon="@android:drawable/ic_menu_camera" />
+    <item android:id="@+id/tab_vms"      android:title="VMS"       android:icon="@android:drawable/ic_menu_gallery" />
+    <item android:id="@+id/tab_pairing"  android:title="Add"       android:icon="@android:drawable/ic_menu_add" />
+    <item android:id="@+id/tab_alerts"   android:title="Alerts"    android:icon="@android:drawable/ic_popup_reminder" />
+    <item android:id="@+id/tab_settings" android:title="Settings"  android:icon="@android:drawable/ic_menu_preferences" />
+</menu>

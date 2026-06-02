@@ -1,0 +1,23 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        // Local Maven repo first — devs can `./gradlew :unitrack:publishToMavenLocal`
+        // in platforms/android/ to test the demo against an unpushed SDK change.
+        mavenLocal()
+        google()
+        mavenCentral()
+        // JitPack hosts the tagged UniTrack AARs (com.github.sieuvitdet.unitrack-sdk:*).
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+rootProject.name = "UniTrackCameraDemo"
+include ':app'

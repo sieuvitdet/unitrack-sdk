@@ -1,0 +1,56 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace = "com.unitrack.camerademo"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "ftel.isc.mobinetnextgen.staging"   // match iOS bundle so portal pid=3 traffic
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        debug { minifyEnabled false }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildFeatures { viewBinding true }
+}
+
+dependencies {
+    // UniTrack SDK from JitPack (or mavenLocal during SDK development —
+    // run `./gradlew :unitrack:publishToMavenLocal -PVERSION_NAME=0.2.0` in
+    // platforms/android/ to test the demo against an unpublished change).
+    // Bump the tag when the monorepo cuts a new release.
+    implementation 'com.github.sieuvitdet.unitrack-sdk:unitrack:0.2.0'
+    implementation 'com.github.sieuvitdet.unitrack-sdk:unitrack-firebase:0.2.0'
+    implementation 'com.github.sieuvitdet.unitrack-sdk:unitrack-snowplow:0.2.0'
+
+    // Firebase BoM — keeps all Firebase libs versions aligned.
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-analytics-ktx'
+
+    // Snowplow Android tracker — the unitrack-snowplow module brings this in
+    // already via api(), but we list it here too so the demo can opt into a
+    // newer version without editing the SDK.
+    implementation 'com.snowplowanalytics:snowplow-android-tracker:6.0.5'
+
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.fragment:fragment-ktx:1.8.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+}

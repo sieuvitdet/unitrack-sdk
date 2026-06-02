@@ -70,3 +70,10 @@ platforms/ios/.build/
 # Portal local database (runtime data, not source)
 portal/data/
 .claude/
+
+# Android demo build artifacts
+android-camera-demo/.gradle/
+android-camera-demo/build/
+android-camera-demo/app/build/
+android-camera-demo/.idea/
+android-camera-demo/local.properties
