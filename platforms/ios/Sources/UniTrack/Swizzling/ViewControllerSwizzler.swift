@@ -86,10 +86,13 @@ private extension UIViewController {
         UniTrack.setScreen(screen)            // screen_view
 
         // Load time: viewDidLoad → first appearance. Reported once per VC.
+        // Event name resolves from UniTrack.screenLoadEventName (set during
+        // _initialize from config.screenLoadEvent, in turn from portal
+        // `sdk_config.screen_load_event`). Default keeps "screen_load_completed".
         if !ut_loadReported, ut_loadStart > 0 {
             ut_loadReported = true
             let ms = Int((CACurrentMediaTime() - ut_loadStart) * 1000)
-            UniTrack.track("screen_load_completed",
+            UniTrack.track(UniTrack.screenLoadEventName,
                            properties: ["screen": screen, "load_ms": ms])
         }
     }

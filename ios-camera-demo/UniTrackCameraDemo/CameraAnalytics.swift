@@ -49,8 +49,11 @@ enum CameraAnalytics {
     /// Build UniTrack.Config + providers entirely from the fetched remote config.
     static func start(remote cfg: UniTrackRemoteConfig) {
         // Snowplow — only if the portal enabled it.
-        if cfg.snowplow.enabled == true, let spEndpoint = cfg.snowplow.endpoint,
-           let appId = cfg.snowplow.appId, !spEndpoint.isEmpty {
+        // resolvedEndpoint/resolvedAppId apply the snowplow.ios { endpoint,
+        // appId } override on top of the top-level values when present, so a
+        // single project can ship different collectors to iOS vs Android.
+        if cfg.snowplow.enabled == true, let spEndpoint = cfg.snowplow.resolvedEndpoint,
+           let appId = cfg.snowplow.resolvedAppId, !spEndpoint.isEmpty {
             let o = cfg.snowplow.options ?? [:]
             let info = Bundle.main.infoDictionary ?? [:]
             var userCtx: [String: Any] = cfg.snowplow.userContext?.unwrapped() ?? [:]
@@ -126,6 +129,11 @@ enum CameraAnalytics {
         // core defaults to screen_start/screen_end.
         config.screenStartEvent = s.screenStartEvent
         config.screenEndEvent   = s.screenEndEvent
+        // Override viewDidAppear swizzler event name — portal sends empty
+        // string for "keep default"; only apply when actually set.
+        if let load = s.screenLoadEvent, !load.isEmpty {
+            config.screenLoadEvent = load
+        }
         UniTrack.initialize(apiKey: apiKey, config: config)
     }
 

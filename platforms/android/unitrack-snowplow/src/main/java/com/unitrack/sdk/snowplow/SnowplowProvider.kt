@@ -142,6 +142,26 @@ class SnowplowProvider(
         return "iglu:$vendor/$eventName/jsonschema/$defaultVersion"
     }
 
+    /**
+     * Accept any of these inputs from portal entity config and return a
+     * well-formed iglu URI. Defensive — UI guides operator to enter a short
+     * name, but old configs may carry a full URI and a typo can drop the
+     * "iglu:" scheme; we fix both here.
+     *
+     *   "user_context"                                            → iglu:<vendor>/user_context/jsonschema/<defaultVersion>
+     *   "vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0"      → iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0
+     *   "iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0" → unchanged
+     */
+    private fun normalizeEntityURI(raw: String): String? {
+        val s = raw.trim()
+        if (s.isEmpty()) return null
+        if (s.startsWith("iglu:")) return s
+        if (s.contains("/")) return "iglu:$s"
+        val vendor = igluVendor
+        if (vendor.isNullOrEmpty()) return null
+        return "iglu:$vendor/$s/jsonschema/$defaultVersion"
+    }
+
     private fun eventName(kind: String, default: String): String =
         eventNames[kind]?.takeIf { it.isNotEmpty() } ?: default
 
@@ -160,12 +180,12 @@ class SnowplowProvider(
                               skipGlobalContexts: Boolean): List<SelfDescribingJson> {
         val out = mutableListOf<SelfDescribingJson>()
         if (!skipGlobalContexts) {
-            val userSchema = entities["user_context"]
+            val userSchema = entities["user_context"]?.let { normalizeEntityURI(it) }
             if (userSchema != null && userContext.isNotEmpty()) {
                 out.add(SelfDescribingJson(userSchema,
                     userContext.mapValues { it.value ?: "" }))
             }
-            val coreSchema = entities["core_action"]
+            val coreSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
             if (coreSchema != null) {
                 val data = mutableMapOf<String, Any?>(
                     "action_name" to eventName,

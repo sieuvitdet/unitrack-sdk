@@ -71,6 +71,18 @@ function defaults(project) {
       // the portal can reconstruct each session's flow. sessionTimeoutMs is the
       // inactivity/background window after which a session is considered closed.
       journeyCapture: true, sessionTimeoutMs: 1800000,
+      // Screen-lifecycle event taxonomy. Left empty = core SDK does NOT
+      // emit screen_start / screen_end events on transitions (only the
+      // back-compat screen_view fires via setScreen). Set these per project
+      // to "screen_started" / "screen_ended" (or any name) to enable the
+      // pair — screen_end carries dwell_ms (time spent on previous screen).
+      screen_start_event: '',
+      screen_end_event:   '',
+      // Override the swizzler's "screen_load_completed" event name (the one
+      // fired in viewDidAppear with load_ms = viewDidLoad → first appearance).
+      // Empty = keep default. Useful when team rewrites taxonomy to
+      // "screen_load_done" or similar without breaking historic queries.
+      screen_load_event:  '',
     },
     // snowplow.blueprints / entities / event_blueprint_map drive the per-event
     // SelfDescribing payload + attached contexts (user_context, core_action,
@@ -79,6 +91,13 @@ function defaults(project) {
     // "📐 Blueprints & Entities" expander in the portal Config tab.
     snowplow: {
       enabled: false,
+      // Per-platform overrides for endpoint + appId. Both blocks are optional;
+      // when present, the SDK on that platform picks {endpoint, appId} from
+      // here in preference to the top-level snowplow.endpoint/appId. Lets one
+      // project serve different Snowplow collectors per OS (vd MobiX iOS vs
+      // Android targeting different appId in the FPT collector).
+      ios:     { endpoint: '', appId: '' },
+      android: { endpoint: '', appId: '' },
       // Convention layer: the SDK's tracking* helpers (trackingClickEvent,
       // trackingResultEvent, …) build the iglu schema URI by interpolating
       //   iglu:<iglu_vendor>/<event_name>/jsonschema/<default_version>

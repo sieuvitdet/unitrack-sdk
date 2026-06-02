@@ -33,6 +33,19 @@ public final class UniTrack {
         public var journeyCapture: Bool         = true
         public var sessionTimeoutMs: Int        = 1_800_000  // 30 min
 
+        /// Event names emitted on screen transition. Core fires three events
+        /// per transition: screenEndEvent for the previous screen (with
+        /// dwell_ms), `screen_view` (always, back-compat), then
+        /// screenStartEvent for the new screen. Override these per project
+        /// from the portal `sdk_config` so the wire taxonomy matches the
+        /// product spec (e.g. "screen_viewed" / "screen_exited").
+        public var screenStartEvent: String?    = nil
+        public var screenEndEvent:   String?    = nil
+        /// Event name fired by the viewDidAppear swizzler with load_ms.
+        /// Default `screen_load_completed`; override via portal
+        /// `sdk_config.screen_load_event`.
+        public var screenLoadEvent:  String     = "screen_load_completed"
+
         public init() {}
     }
 
@@ -51,6 +64,23 @@ public final class UniTrack {
     // Registered third-party providers (Snowplow, Firebase, …). Every event is
     // forwarded to each one. Empty by default — core has zero such dependencies.
     private var providers: [AnalyticsProvider] = []
+
+    // Per-event NSLog of what flows through UniTrack/Snowplow/Firebase. Default ON
+    // so integrators see traffic immediately while wiring the SDK up; flip to OFF
+    // (UniTrack.verboseLogging = false) before shipping a release build.
+    public static var verboseLogging: Bool = true
+
+    /// Resolved event name for the swizzler's screen_load_completed fire.
+    /// Initialised from `config.screenLoadEvent` on initialize() so swizzlers
+    /// (which have no direct config access) can read a single static.
+    internal static var screenLoadEventName: String = "screen_load_completed"
+
+    /// Provider/helper code uses this instead of NSLog directly so the integrator
+    /// can mute every log line with one flag. Format is the same as NSLog.
+    public static func log(_ format: String, _ args: CVarArg...) {
+        guard verboseLogging else { return }
+        withVaList(args) { NSLogv(format, $0) }
+    }
 
     // MARK: - Public API
 
@@ -97,21 +127,6 @@ public final class UniTrack {
         shared.eventRules = rules
     }
 
-    /// Apply W3C distributed-tracing settings from remote config. Safe to call
-    /// any time (before/after init): the URLProtocol reads the snapshot under
-    /// its own lock. Passing `enabled: false` disables injection without
-    /// uninstalling the protocol — apps stay tracked, just no header added.
-    public static func setTracing(enabled: Bool,
-                                  headerName: String = "traceparent",
-                                  allowlistHosts: [String] = [],
-                                  sampled: Bool = true) {
-        UniTrackURLProtocol.configureTracing(
-            enabled: enabled,
-            headerName: headerName,
-            allowlistHosts: allowlistHosts,
-            sampled: sampled)
-    }
-
     // Returns the rewritten (name, properties) for an event, or nil if no rule
     // matches. First matching rule wins.
     private func applyRules(_ event: String, _ properties: [String: Any]) -> (String, [String: Any])? {
@@ -154,6 +169,16 @@ public final class UniTrack {
         if let (rewritten, rewrittenProps) = shared.applyRules(event, properties) {
             name = rewritten
             props = rewrittenProps
+            UniTrack.log("[UniTrack] rule rewrite: %@ → %@", event, rewritten)
+        }
+        // Visibility — one line per event so the developer can see what's
+        // about to be forwarded and to which provider list. Gated by
+        // UniTrack.verboseLogging so a release build can mute it.
+        if UniTrack.verboseLogging {
+            let provNames = shared.providers.map { String(describing: type(of: $0)) }.joined(separator: ",")
+            UniTrack.log("[UniTrack] track event=\"%@\" props=%@ → providers=[%@]",
+                         name, UniTrack.jsonString(from: props) ?? "{}",
+                         provNames.isEmpty ? "(none)" : provNames)
         }
         // Forward to every registered provider (Snowplow, Firebase, …).
         forEachProvider { $0.track(name, props) }
@@ -187,24 +212,12 @@ public final class UniTrack {
 
     // MARK: - Semantic events (Phase 3)
 
-    /// Notification received/opened/dismissed.
-    /// state: foreground|background|silent  ·  action: received|opened|dismissed
-    /// `notificationId` is the platform identifier (UNNotification.request.identifier
-    /// on iOS / RemoteMessage.getMessageId on Android) so the portal can dedup
-    /// the same push delivered + opened. `data` is the raw payload dict — push
-    /// notifications usually carry routing keys (route, deeplink, campaign_id)
-    /// in there and dropping them blinds the analytics.
-    public static func trackNotification(state: String,
-                                         action: String = "received",
-                                         title: String? = nil,
-                                         body: String? = nil,
-                                         notificationId: String? = nil,
-                                         data: [String: Any]? = nil) {
+    /// Notification received/opened. state: foreground|background|silent.
+    public static func trackNotification(state: String, action: String = "received",
+                                         title: String? = nil, body: String? = nil) {
         var p: [String: Any] = ["state": state, "action": action]
         if let title = title { p["title"] = title }
         if let body = body { p["body"] = body }
-        if let nid = notificationId, !nid.isEmpty { p["notification_id"] = nid }
-        if let data = data, !data.isEmpty { p["data"] = data }
         track("notification", properties: p)
     }
 
@@ -212,23 +225,9 @@ public final class UniTrack {
         track("webview_open", properties: ["url": hostPath(url)])
     }
 
-    /// A deeplink / universal link opened the app or a screen.
-    /// Adds scheme/host/path/query as separate fields so portal filters don't
-    /// need to parse the URL each time, and an `is_cold` flag (true when fired
-    /// within 5s of cold start = the link launched the app, not a runtime push).
     public static func trackDeeplink(_ url: String, source: String? = nil) {
-        var p: [String: Any] = ["url": url]   // keep full URL — query included
-        if let u = URL(string: url) {
-            if let s = u.scheme, !s.isEmpty { p["scheme"] = s }
-            if let h = u.host,   !h.isEmpty { p["host"]   = h }
-            if !u.path.isEmpty              { p["path"]   = u.path }
-            if let q = u.query,  !q.isEmpty { p["query"]  = q }
-        }
+        var p: [String: Any] = ["url": hostPath(url)]
         if let source = source { p["source"] = source }
-        // ColdStartAt is set when UniTrack singleton spins up — first 5 seconds
-        // of the process lifetime count as "launched from this deeplink".
-        let coldWindowSec = 5.0
-        p["is_cold"] = Date().timeIntervalSince(shared.coldStartAt) <= coldWindowSec
         track("deeplink", properties: p)
     }
 
@@ -252,6 +251,11 @@ public final class UniTrack {
             return
         }
 
+        // Wire taxonomy override into the swizzler bridge before installing
+        // the swizzlers below — they read this static at fire time.
+        if !config.screenLoadEvent.isEmpty {
+            UniTrack.screenLoadEventName = config.screenLoadEvent
+        }
         let cfgJson = UniTrack.buildConfigJson(config)
         context = ut_init(apiKey, cfgJson, UT_PLATFORM_IOS)
         guard context != nil else {
@@ -313,6 +317,12 @@ public final class UniTrack {
         parts.append("\"auto_capture\":\(c.autoCapture)")
         parts.append("\"journey_capture\":\(c.journeyCapture)")
         parts.append("\"session_timeout_ms\":\(c.sessionTimeoutMs)")
+        if let s = c.screenStartEvent, !s.isEmpty {
+            parts.append("\"screen_start_event\":\"\(s)\"")
+        }
+        if let s = c.screenEndEvent, !s.isEmpty {
+            parts.append("\"screen_end_event\":\"\(s)\"")
+        }
         if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask).first {
             let dbPath = docs.appendingPathComponent("unitrack.db").path

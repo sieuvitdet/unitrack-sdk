@@ -909,12 +909,80 @@ async function renderConfig(pid){
         <label class="row" style="gap:5px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> network</label>
       </div>
 
+      <!-- Screen lifecycle event names. Empty = core SDK keeps default
+           behavior (no screen_start / screen_end pair, swizzler fires
+           "screen_load_completed"). Set these per project to a custom
+           taxonomy without rebuilding the app. -->
+      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">Screen lifecycle event names <span class="muted" style="font-weight:400">— bỏ trống = giữ default</span></div>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:11.5px">screen_start_event</label>
+            <input id="cfScreenStart" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                   placeholder="vd: screen_started (trống = không emit)"
+                   value="${esc(s.screen_start_event||s.screenStartEvent||'')}"/>
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:11.5px">screen_end_event</label>
+            <input id="cfScreenEnd" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                   placeholder="vd: screen_ended (trống = không emit)"
+                   value="${esc(s.screen_end_event||s.screenEndEvent||'')}"/>
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:11.5px">screen_load_event</label>
+            <input id="cfScreenLoad" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                   placeholder="default: screen_load_completed"
+                   value="${esc(s.screen_load_event||s.screenLoadEvent||'')}"/>
+          </div>
+        </div>
+        <div class="muted" style="font-size:10.5px;margin-top:6px">
+          <b>start/end</b>: core fire khi đổi screen (end kèm dwell_ms cho màn trước). Trống = không emit.
+          <b>load</b>: swizzler fire ở viewDidAppear kèm load_ms (viewDidLoad → first appearance). Default: <span class="mono">screen_load_completed</span>.
+        </div>
+      </div>
+
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}> Snowplow</label></h3>
       <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
       <div class="row" style="gap:10px;margin-top:8px">
         <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
       </div>
+
+      <!-- Per-platform override — SDK trên iOS pick {endpoint, appId} từ
+           snowplow.ios nếu non-empty, fallback các value chung ở trên.
+           Same cho Android. Để trống = dùng chung — không phải project nào
+           cũng cần collector / appId khác nhau giữa 2 platform. -->
+      <details style="margin-top:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
+        <summary style="cursor:pointer;padding:8px 10px;font-size:12px;font-weight:600;color:var(--muted)">
+          📱 Per-platform override <span style="font-weight:400">— endpoint + appId riêng cho iOS / Android (tuỳ chọn)</span>
+        </summary>
+        <div style="padding:0 10px 10px">
+          ${(() => {
+            const iosOv = sp.ios || {};
+            const andOv = sp.android || {};
+            const renderRow = (label, ovEp, ovAppId, epId, appIdId) => `
+              <div style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:5px">
+                <div style="font-size:11.5px;font-weight:600;margin-bottom:4px">${label}</div>
+                <div class="row" style="gap:8px;flex-wrap:wrap">
+                  <div style="flex:2;min-width:200px">
+                    <label style="font-size:11px">Collector endpoint</label>
+                    <input id="${epId}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                           placeholder="trống = dùng collector chung ở trên"
+                           value="${esc(ovEp||'')}"/>
+                  </div>
+                  <div style="flex:1;min-width:120px">
+                    <label style="font-size:11px">appId</label>
+                    <input id="${appIdId}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                           placeholder="trống = dùng appId chung"
+                           value="${esc(ovAppId||'')}"/>
+                  </div>
+                </div>
+              </div>`;
+            return renderRow('iOS',     iosOv.endpoint, iosOv.appId, 'cfSpIosEp', 'cfSpIosApp')
+                 + renderRow('Android', andOv.endpoint, andOv.appId, 'cfSpAndEp', 'cfSpAndApp');
+          })()}
+        </div>
+      </details>
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
 
@@ -1006,8 +1074,8 @@ async function renderConfig(pid){
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:var(--bg-tab,#1a1a1a)">
                 <tr>
-                  <th style="text-align:left;padding:6px 10px;font-weight:600;width:25%">Entity name</th>
-                  <th style="text-align:left;padding:6px 10px;font-weight:600">Schema URI (iglu)</th>
+                  <th style="text-align:left;padding:6px 10px;font-weight:600;width:28%">Entity name</th>
+                  <th style="text-align:left;padding:6px 10px;font-weight:600">Schema short name <span class="muted" style="font-weight:400">— SDK build URI từ vendor + version ở trên</span></th>
                   <th style="width:36px"></th>
                 </tr>
               </thead>
@@ -1015,15 +1083,25 @@ async function renderConfig(pid){
                 ${(() => {
                   // Render saved entities + always seed user_context + core_action
                   // if missing so the operator sees the built-ins right away.
+                  // Legacy values may carry a full URI ("iglu:.../foo/jsonschema/1-0-0")
+                  // or a half-typed path ("vn.fpt.ftel.snowplow/foo/jsonschema/1-0-0").
+                  // Show those as-is so the operator sees what's stored; the SDK
+                  // normalizeEntityURI() accepts both shapes.
                   const seed = sp.entities || {};
                   const builtin = ['user_context', 'core_action'];
                   const rows = [];
                   for (const k of builtin) {
-                    rows.push([k, seed[k] || '']);
+                    rows.push([k, seed[k] || k]);       // default short name = the entity name itself
                   }
                   for (const [k, v] of Object.entries(seed)) {
                     if (!builtin.includes(k)) rows.push([k, v]);
                   }
+                  // Prefix/suffix labels around the input show the exact URI that
+                  // gets built — the operator types only the variable middle.
+                  const vendor = sp.iglu_vendor || sp.igluVendor || 'vn.fpt.ftel.snowplow';
+                  const version = sp.default_version || sp.defaultVersion || '1-0-0';
+                  const prefix = `iglu:${esc(vendor)}/`;
+                  const suffix = `/jsonschema/${esc(version)}`;
                   return rows.map(([name, schema], i) => `
                     <tr data-row="${i}" style="border-top:1px solid var(--line)">
                       <td style="padding:4px 8px">
@@ -1031,9 +1109,14 @@ async function renderConfig(pid){
                                value="${esc(name)}" ${builtin.includes(name) ? 'readonly title="Built-in entity — SDK fills the data"' : ''}/>
                       </td>
                       <td style="padding:4px 8px">
-                        <input class="cf-sp-ent-schema" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                               placeholder="iglu:vn.fpt.ftel.snowplow/${esc(name || 'entity_name')}/jsonschema/1-0-0"
-                               value="${esc(schema)}"/>
+                        <div style="display:flex;align-items:center;font-family:ui-monospace,monospace;font-size:11px;gap:2px">
+                          <span class="muted" style="white-space:nowrap;user-select:all">${prefix}</span>
+                          <input class="cf-sp-ent-schema" style="flex:1;min-width:80px;font-family:ui-monospace,monospace;font-size:11.5px"
+                                 placeholder="${esc(name || 'entity_name')}"
+                                 title="Chỉ cần nhập short name. URI = prefix + name + suffix"
+                                 value="${esc(schema)}"/>
+                          <span class="muted" style="white-space:nowrap;user-select:all">${suffix}</span>
+                        </div>
                       </td>
                       <td style="padding:4px 6px;text-align:center">
                         ${builtin.includes(name)
@@ -1046,7 +1129,7 @@ async function renderConfig(pid){
             </table>
           </div>
           <div class="muted" style="font-size:10.5px;margin-top:6px">
-            Bỏ trống schema URI → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name (event resolved), timestamp (now), screen, element_key. Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>.
+            Bỏ trống short name → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name (event resolved), timestamp (now), screen, element_key. Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>. SDK chấp nhận cả full URI (legacy) — chỉ short name là khuyến nghị.
           </div>
         </div>
       </div>
@@ -1186,6 +1269,12 @@ async function renderConfig(pid){
   const entBody = document.getElementById('cfSpEntBody');
   document.getElementById('cfSpEntAdd')?.addEventListener('click', () => {
     if (!entBody) return;
+    // Read the live vendor + version off the form so the prefix/suffix
+    // labels match what the operator just typed (not the saved values).
+    const vendor  = (document.getElementById('cfSpIgluVendor')?.value || 'vn.fpt.ftel.snowplow').trim();
+    const version = (document.getElementById('cfSpDefVersion')?.value || '1-0-0').trim();
+    const prefix  = `iglu:${vendor}/`;
+    const suffix  = `/jsonschema/${version}`;
     const i = entBody.children.length;
     const tr = document.createElement('tr');
     tr.setAttribute('data-row', String(i));
@@ -1196,8 +1285,13 @@ async function renderConfig(pid){
                style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
       </td>
       <td style="padding:4px 8px">
-        <input class="cf-sp-ent-schema" placeholder="iglu:vn.fpt.ftel.snowplow/&lt;name&gt;/jsonschema/1-0-0"
-               style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
+        <div style="display:flex;align-items:center;font-family:ui-monospace,monospace;font-size:11px;gap:2px">
+          <span class="muted" style="white-space:nowrap;user-select:all">${prefix}</span>
+          <input class="cf-sp-ent-schema" placeholder="entity_name"
+                 title="Chỉ cần nhập short name"
+                 style="flex:1;min-width:80px;font-family:ui-monospace,monospace;font-size:11.5px"/>
+          <span class="muted" style="white-space:nowrap;user-select:all">${suffix}</span>
+        </div>
       </td>
       <td style="padding:4px 6px;text-align:center">
         <button class="cf-sp-ent-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
@@ -1440,6 +1534,16 @@ async function renderConfig(pid){
       if (name && schema) spEntities[name] = schema;
     });
 
+    // Per-platform override — only persist a block when at least one of its
+    // fields is non-empty. Keeps the saved config small + easy to diff.
+    const platOv = (epId, appId) => {
+      const ep = ($('#' + epId)?.value || '').trim();
+      const ap = ($('#' + appId)?.value || '').trim();
+      return (ep || ap) ? { endpoint: ep || undefined, appId: ap || undefined } : undefined;
+    };
+    const iosOv = platOv('cfSpIosEp', 'cfSpIosApp');
+    const andOv = platOv('cfSpAndEp', 'cfSpAndApp');
+
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
       userContext: parseKV('#cfSpCtx'),
       iglu_vendor:     $('#cfSpIgluVendor').value.trim() || undefined,
@@ -1447,6 +1551,8 @@ async function renderConfig(pid){
       event_names:     eventNames,
       entities:        spEntities,
       options: spOpts };
+    if (iosOv) snowplow.ios     = iosOv;
+    if (andOv) snowplow.android = andOv;
     const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 
     const firebase = { enabled:$('#cfFbOn').checked,
@@ -1468,7 +1574,13 @@ async function renderConfig(pid){
     const body = {
       endpoint: $('#cfEndpoint').value.trim(),
       sdk_config: { batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
-        autoCapture:$('#cfAuto').checked, trackScreens:$('#cfScreens').checked, trackTaps:$('#cfTaps').checked, trackNetwork:$('#cfNet').checked },
+        autoCapture:$('#cfAuto').checked, trackScreens:$('#cfScreens').checked, trackTaps:$('#cfTaps').checked, trackNetwork:$('#cfNet').checked,
+        // Wire-taxonomy overrides for screen lifecycle. Empty string = SDK
+        // keeps its default (no start/end emit, swizzler fires legacy name).
+        screen_start_event: $('#cfScreenStart').value.trim(),
+        screen_end_event:   $('#cfScreenEnd').value.trim(),
+        screen_load_event:  $('#cfScreenLoad').value.trim(),
+      },
       snowplow, firebase, tracing,
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

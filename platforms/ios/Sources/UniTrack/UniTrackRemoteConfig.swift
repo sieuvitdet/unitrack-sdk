@@ -60,6 +60,24 @@ public struct UniTrackRemoteConfig: Codable {
         public var logLevel: String?
         public var journeyCapture: Bool?
         public var sessionTimeoutMs: Int?
+        /// Wire-taxonomy overrides — empty = SDK keeps default name.
+        public var screenStartEvent: String?
+        public var screenEndEvent:   String?
+        public var screenLoadEvent:  String?
+        enum CodingKeys: String, CodingKey {
+            case batchSize, flushIntervalMs, samplingRate
+            case autoCapture, trackScreens, trackTaps, trackNetwork
+            case logLevel, journeyCapture, sessionTimeoutMs
+            case screenStartEvent = "screen_start_event"
+            case screenEndEvent   = "screen_end_event"
+            case screenLoadEvent  = "screen_load_event"
+        }
+    }
+
+    /// Per-platform { endpoint, appId } override (mirror of SwiftPackage).
+    public struct SnowplowPlatformOverride: Codable {
+        public var endpoint: String?
+        public var appId: String?
     }
 
     public struct SnowplowConfig: Codable {
@@ -69,6 +87,21 @@ public struct UniTrackRemoteConfig: Codable {
         public var namespace: String?
         public var userContext: [String: AnyCodable]?
         public var options: [String: Bool]?
+        public var ios:     SnowplowPlatformOverride?
+        public var android: SnowplowPlatformOverride?
+
+        public var resolvedEndpoint: String? {
+            #if os(iOS)
+            if let v = ios?.endpoint, !v.isEmpty { return v }
+            #endif
+            return endpoint
+        }
+        public var resolvedAppId: String? {
+            #if os(iOS)
+            if let v = ios?.appId, !v.isEmpty { return v }
+            #endif
+            return appId
+        }
         /// Convention vendor + version for the tracking* helpers — the helper
         /// builds `iglu:<igluVendor>/<event_name>/jsonschema/<defaultVersion>`
         /// at call site. App ships only the convention name; bumping a schema
@@ -84,6 +117,7 @@ public struct UniTrackRemoteConfig: Codable {
         enum CodingKeys: String, CodingKey {
             case enabled, endpoint, appId, namespace, options
             case userContext
+            case ios, android
             case igluVendor     = "iglu_vendor"
             case defaultVersion = "default_version"
             case eventNames     = "event_names"

@@ -201,6 +201,25 @@ public final class SnowplowProvider: AnalyticsProvider {
         return "iglu:\(vendor)/\(eventName)/jsonschema/\(defaultVersion)"
     }
 
+    /// Accept any of these inputs from portal entity config and return a
+    /// well-formed iglu URI. Defensive — the portal UI guides the operator
+    /// to enter a short name, but old configs may carry a full URI and a
+    /// typo can drop the "iglu:" scheme; we fix both here.
+    ///
+    ///   "user_context"                                                  → iglu:<vendor>/user_context/jsonschema/<defaultVersion>
+    ///   "vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0"            → iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0
+    ///   "iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0"       → unchanged
+    private func normalizeEntityURI(_ raw: String) -> String? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return nil }
+        if s.hasPrefix("iglu:") { return s }
+        // Any "/" → caller typed a path (likely missing the iglu: scheme).
+        if s.contains("/") { return "iglu:" + s }
+        // Short name path: build the full URI from vendor + version.
+        guard let vendor = igluVendor, !vendor.isEmpty else { return nil }
+        return "iglu:\(vendor)/\(s)/jsonschema/\(defaultVersion)"
+    }
+
     /// Resolve a convention kind ("click", "result", …) to the actual event
     /// name. Portal-supplied value wins; otherwise the SDK default fallback.
     private func resolveEventName(kind: String, defaultName: String) -> String {
@@ -222,10 +241,13 @@ public final class SnowplowProvider: AnalyticsProvider {
                                skipGlobalContexts: Bool) -> [SelfDescribingJson] {
         var out: [SelfDescribingJson] = []
         if !skipGlobalContexts {
-            if let userSchema = entities["user_context"], !userContext.isEmpty {
+            if let userRaw = entities["user_context"],
+               let userSchema = normalizeEntityURI(userRaw),
+               !userContext.isEmpty {
                 out.append(SelfDescribingJson(schema: userSchema, andData: userContext))
             }
-            if let coreSchema = entities["core_action"] {
+            if let coreRaw = entities["core_action"],
+               let coreSchema = normalizeEntityURI(coreRaw) {
                 var data: [String: Any] = [
                     "action_name": name,
                     "timestamp":   isoNow(),
