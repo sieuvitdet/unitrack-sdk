@@ -1020,42 +1020,76 @@ async function renderConfig(pid){
           </div>
         </div>
         ${(() => {
-          // 5 convention kinds — keys MUST match what SnowplowProvider.eventName(for:)
-          // looks up (click / result / screen_view / crash / api). Adding a new
-          // kind here requires a matching helper on the SDK side.
+          // Convention table mixes two row types:
+          //   1) 5 built-in "kinds" (click / result / screen_view / crash / api)
+          //      — drive the typed tracking* helpers on the SDK side.
+          //   2) N custom "raw event" rows — rewrite SDK auto-events
+          //      (tap / network_request / crash / camera_stream_buffering / …)
+          //      onto custom names before the schema URI is built.
+          // SDK lookup: convention helpers read by kind, track(name, …) reads
+          // by raw name. Both share the same eventNames map on the wire.
           const ev = sp.event_names || sp.eventNames || {};
-          const rows = [
+          const builtin = [
             ['click',       'event_click',        'trackingClickEvent'],
             ['result',      'event_result',       'trackingResultEvent'],
             ['screen_view', 'event_screen_view',  'trackingScreenView'],
             ['crash',       'event_crash',        'trackingCrash'],
             ['api',         'event_api',          'trackingAPI'],
           ];
+          const builtinKeys = new Set(builtin.map((r) => r[0]));
+          // Anything in event_names that isn't a built-in kind is a custom row.
+          const customRows = Object.entries(ev)
+            .filter(([k]) => !builtinKeys.has(k))
+            .map(([k, v]) => [k, v || '']);
           return `
             <div style="margin-top:12px;border:1px solid var(--line);border-radius:6px;overflow:hidden">
               <table style="width:100%;border-collapse:collapse;font-size:12px">
                 <thead style="background:var(--bg-tab,#1a1a1a)">
                   <tr>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:22%">Helper</th>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:18%">Kind</th>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600">Event name</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:24%">Source</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:24%">Raw event</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600">Resolved event name</th>
+                    <th style="width:36px"></th>
                   </tr>
                 </thead>
-                <tbody>${rows.map(([kind, def, helper]) => `
-                  <tr style="border-top:1px solid var(--line)">
-                    <td style="padding:6px 10px"><span class="mono" style="font-size:11px">${esc(helper)}</span></td>
-                    <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">${esc(kind)}</span></td>
-                    <td style="padding:4px 8px">
-                      <input id="cfSpEvName_${esc(kind)}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                             placeholder="${esc(def)}"
-                             value="${esc(ev[kind] || '')}"/>
-                    </td>
-                  </tr>`).join('')}</tbody>
+                <tbody id="cfSpEvBody">
+                  ${builtin.map(([kind, def, helper]) => `
+                    <tr data-builtin="1" style="border-top:1px solid var(--line)">
+                      <td style="padding:6px 10px"><span class="mono" style="font-size:11px">${esc(helper)}</span></td>
+                      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">${esc(kind)}</span></td>
+                      <td style="padding:4px 8px">
+                        <input id="cfSpEvName_${esc(kind)}" class="cf-sp-ev-resolved" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               placeholder="${esc(def)}"
+                               value="${esc(ev[kind] || '')}"/>
+                      </td>
+                      <td style="padding:4px 6px;text-align:center"><span class="muted" title="Built-in kind — cannot remove" style="font-size:13px">—</span></td>
+                    </tr>`).join('')}
+                  ${customRows.map(([raw, resolved]) => `
+                    <tr data-builtin="0" style="border-top:1px solid var(--line)">
+                      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">UniTrack.track(…)</span></td>
+                      <td style="padding:4px 8px">
+                        <input class="cf-sp-ev-raw" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               placeholder="vd: tap"
+                               value="${esc(raw)}"/>
+                      </td>
+                      <td style="padding:4px 8px">
+                        <input class="cf-sp-ev-resolved" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               placeholder="(trống = giữ raw name)"
+                               value="${esc(resolved)}"/>
+                      </td>
+                      <td style="padding:4px 6px;text-align:center">
+                        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
+                      </td>
+                    </tr>`).join('')}
+                </tbody>
               </table>
             </div>
-            <div class="muted" style="font-size:10.5px;margin-top:6px">
-              Để trống = dùng default (<span class="mono">event_click</span>, <span class="mono">event_result</span>, …).
-              App fetch lại config sau khi save sẽ áp dụng ngay (không cần rebuild).
+            <div class="row" style="margin-top:8px;justify-content:space-between;align-items:center;gap:8px">
+              <div class="muted" style="font-size:10.5px;flex:1">
+                <b>Built-in kinds</b>: convention helper trên app dùng (vd <span class="mono">trackingClickEvent</span> → kind "click").
+                <b>Raw event rows</b>: rewrite auto-event SDK swizzler (<span class="mono">tap</span>, <span class="mono">network_request</span>, …) hoặc manual <span class="mono">UniTrack.track("X", …)</span> sang tên khác trước khi build schema iglu.
+              </div>
+              <button class="btn ghost sm" id="cfSpEvAdd" type="button" title="Thêm 1 row map raw event → resolved name">+ Add event</button>
             </div>`;
         })()}
 
@@ -1304,6 +1338,37 @@ async function renderConfig(pid){
     if (btn) btn.closest('tr')?.remove();
   });
 
+  // ── Convention table — Add custom raw-event row (+/×) ─────────────────
+  // 5 built-in kind rows above are read-only; this lets the operator append
+  // N raw-event mappings (vd "tap" → "isc_event_click", "camera_stream_buffering"
+  // → "isc_event_buffering") so SDK auto-fire events land under a small set
+  // of iglu schemas the backend already registered.
+  const evBody = document.getElementById('cfSpEvBody');
+  document.getElementById('cfSpEvAdd')?.addEventListener('click', () => {
+    if (!evBody) return;
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-builtin', '0');
+    tr.style.borderTop = '1px solid var(--line)';
+    tr.innerHTML = `
+      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">UniTrack.track(…)</span></td>
+      <td style="padding:4px 8px">
+        <input class="cf-sp-ev-raw" placeholder="vd: tap"
+               style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
+      </td>
+      <td style="padding:4px 8px">
+        <input class="cf-sp-ev-resolved" placeholder="(trống = giữ raw name)"
+               style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
+      </td>
+      <td style="padding:4px 6px;text-align:center">
+        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
+      </td>`;
+    evBody.appendChild(tr);
+  });
+  evBody?.addEventListener('click', (e) => {
+    const btn = (e.target instanceof Element) ? e.target.closest('.cf-sp-ev-del') : null;
+    if (btn) btn.closest('tr')?.remove();
+  });
+
   // Legacy blueprint / schemas / preview handlers removed — those sections
   // were deleted from the UI. The Convention layer + Auto-attached entities
   // table above replace them; the SDK now treats every track() call as a
@@ -1523,6 +1588,16 @@ async function renderConfig(pid){
         .map((k) => [k, ($('#cfSpEvName_' + k)?.value || '').trim()])
         .filter(([_, v]) => v)
     );
+
+    // Custom raw-event rows — append below the 5 built-in kinds. Each row
+    // becomes another key in event_names so SDK SnowplowProvider.track(raw)
+    // rewrites to the resolved value. Skip rows missing the raw input;
+    // empty resolved = no rewrite (last row wins on duplicate raw).
+    document.querySelectorAll('#cfSpEvBody tr[data-builtin="0"]').forEach((tr) => {
+      const raw      = (tr.querySelector('.cf-sp-ev-raw')?.value      || '').trim();
+      const resolved = (tr.querySelector('.cf-sp-ev-resolved')?.value || '').trim();
+      if (raw && resolved) eventNames[raw] = resolved;
+    });
 
     // Auto-attached entities: walk every row of the dynamic table. Skip rows
     // missing either the name or the schema URI; deduplicate by name (last
