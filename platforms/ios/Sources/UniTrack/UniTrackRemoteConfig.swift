@@ -36,12 +36,14 @@ public struct UniTrackRemoteConfig: Codable {
         public var matchEvent: String
         public var matchScreen: String?
         public var matchElementKey: String?
+        public var matchClassName: String?
         public var toName: String
         public var addProps: [String: AnyCodable]?
         enum CodingKeys: String, CodingKey {
             case matchEvent = "match_event"
             case matchScreen = "match_screen"
             case matchElementKey = "match_element_key"
+            case matchClassName = "match_class_name"
             case toName = "to_name"
             case addProps = "add_props"
         }
@@ -69,6 +71,27 @@ public struct UniTrackRemoteConfig: Codable {
         public var userContextSchema: String?
         public var options: [String: Bool]?
         public var schemas: [String: String]?
+        /// Convention vendor + version for the tracking* helpers — the helper
+        /// builds `iglu:<igluVendor>/<event_name>/jsonschema/<defaultVersion>`
+        /// at call site. App ships only the convention name; bumping a schema
+        /// across all events = updating this on the portal, no app rebuild.
+        /// Portal wire key is snake_case (`iglu_vendor`, `default_version`);
+        /// other fields stay camelCase to match the existing portal payload.
+        public var igluVendor: String?
+        public var defaultVersion: String?
+        /// Override map for the convention event names (kind → name). Lets a
+        /// third-party app re-use the SDK helpers under their own taxonomy
+        /// (e.g. "fss_event_click"). Recognized kinds: click, result,
+        /// screen_view, crash, api. Missing kind → SDK falls back to its
+        /// built-in default. Wire key: snake_case `event_names`.
+        public var eventNames: [String: String]?
+        enum CodingKeys: String, CodingKey {
+            case enabled, endpoint, appId, namespace, options, schemas
+            case userContext, userContextSchema
+            case igluVendor     = "iglu_vendor"
+            case defaultVersion = "default_version"
+            case eventNames     = "event_names"
+        }
     }
 
     public struct FirebaseConfig: Codable {
@@ -132,6 +155,7 @@ public struct UniTrackRemoteConfig: Codable {
                 matchEvent: r.matchEvent,
                 matchScreen: r.matchScreen,
                 matchElementKey: r.matchElementKey,
+                matchClassName: r.matchClassName,
                 toName: r.toName,
                 addProps: r.addProps?.unwrapped() ?? [:])
         }

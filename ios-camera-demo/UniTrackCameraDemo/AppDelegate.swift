@@ -30,6 +30,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             CameraAnalytics.identify(userId: "demo_user_42", plan: "b2c_premium")
             CameraAnalytics.sessionStarted()
             self.checkNotificationPermission()
+            // Smoke-test hook — when launched with UNITRACK_AUTOFIRE_ALL=1, fire
+            // every semantic helper once so the portal sees the full 30-event
+            // taxonomy without UI driving. Off by default (production builds
+            // won't see the env var set).
+//            if ProcessInfo.processInfo.environment["UNITRACK_AUTOFIRE_ALL"] == "1" {
+//                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+//                    CameraAnalytics.fireAllForSmokeTest()
+//                }
+//            }
         }
 
         // 2. Auto-capture push/local notifications (received + opened). Safe to

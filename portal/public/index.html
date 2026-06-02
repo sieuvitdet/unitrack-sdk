@@ -919,6 +919,80 @@ async function renderConfig(pid){
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
 
+      <!-- Convention layer: the SDK's tracking* helpers (trackingClickEvent,
+           trackingResultEvent, trackingScreenView, trackingCrash, trackingAPI)
+           build the iglu schema URI as
+              iglu:<iglu_vendor>/<event_name>/jsonschema/<default_version>
+           Vendor + version live here so a schema bump (1-0-0 → 1-1-0) is one
+           portal save instead of an App Store / Play release. The event_names
+           table below lets a third-party integrator (e.g. FSS team) re-skin
+           the 5 helpers under their own taxonomy ("fss_event_click", …)
+           without forking the SDK. -->
+      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <b style="font-size:13px">Convention layer</b>
+          <span class="muted" style="font-size:11px">schema URI cho 5 helper <span class="mono">tracking*</span> ở app</span>
+        </div>
+        <div class="muted" style="font-size:11px;margin-bottom:10px">
+          App gọi <span class="mono">trackingClickEvent(...)</span>; SDK build URI
+          <span class="mono">iglu:&lt;vendor&gt;/&lt;event name&gt;/jsonschema/&lt;version&gt;</span>.
+          Mỗi dòng dưới là 1 helper — đổi cột "Event name" để override convention default.
+        </div>
+        <div class="row" style="gap:10px">
+          <div style="flex:2">
+            <label style="font-size:12px">Iglu vendor</label>
+            <input id="cfSpIgluVendor" style="width:100%"
+                   placeholder="vn.fpt.ftel.snowplow"
+                   value="${esc(sp.iglu_vendor || sp.igluVendor || '')}"/>
+          </div>
+          <div style="flex:1">
+            <label style="font-size:12px">Default version</label>
+            <input id="cfSpDefVersion" style="width:100%"
+                   placeholder="1-0-0"
+                   value="${esc(sp.default_version || sp.defaultVersion || '')}"/>
+          </div>
+        </div>
+        ${(() => {
+          // 5 convention kinds — keys MUST match what SnowplowProvider.eventName(for:)
+          // looks up (click / result / screen_view / crash / api). Adding a new
+          // kind here requires a matching helper on the SDK side.
+          const ev = sp.event_names || sp.eventNames || {};
+          const rows = [
+            ['click',       'event_click',        'trackingClickEvent'],
+            ['result',      'event_result',       'trackingResultEvent'],
+            ['screen_view', 'event_screen_view',  'trackingScreenView'],
+            ['crash',       'event_crash',        'trackingCrash'],
+            ['api',         'event_api',          'trackingAPI'],
+          ];
+          return `
+            <div style="margin-top:12px;border:1px solid var(--line);border-radius:6px;overflow:hidden">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead style="background:var(--bg-tab,#1a1a1a)">
+                  <tr>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:22%">Helper</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:18%">Kind</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600">Event name</th>
+                  </tr>
+                </thead>
+                <tbody>${rows.map(([kind, def, helper]) => `
+                  <tr style="border-top:1px solid var(--line)">
+                    <td style="padding:6px 10px"><span class="mono" style="font-size:11px">${esc(helper)}</span></td>
+                    <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">${esc(kind)}</span></td>
+                    <td style="padding:4px 8px">
+                      <input id="cfSpEvName_${esc(kind)}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                             placeholder="${esc(def)}"
+                             value="${esc(ev[kind] || '')}"/>
+                    </td>
+                  </tr>`).join('')}</tbody>
+              </table>
+            </div>
+            <div class="muted" style="font-size:10.5px;margin-top:6px">
+              Để trống = dùng default (<span class="mono">event_click</span>, <span class="mono">event_result</span>, …).
+              App fetch lại config sau khi save sẽ áp dụng ngay (không cần rebuild).
+            </div>`;
+        })()}
+      </div>
+
       <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <b style="font-size:13px">Tracker options</b>
@@ -1354,12 +1428,25 @@ async function renderConfig(pid){
       catch (_) { toast(`JSON ở ${id} không hợp lệ — bỏ qua`, 'err'); return fallback; }
     };
 
+    // Convention layer — vendor + version + per-kind event name overrides.
+    // Empty input = keep the SDK default; we drop blanks here so the saved
+    // map only carries genuine overrides (smaller wire payload, easier diff).
+    const conventionKinds = ['click', 'result', 'screen_view', 'crash', 'api'];
+    const eventNames = Object.fromEntries(
+      conventionKinds
+        .map((k) => [k, ($('#cfSpEvName_' + k)?.value || '').trim()])
+        .filter(([_, v]) => v)
+    );
+
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
       userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx'),
       // schemas map: parsed from the kv textarea ("event_name = iglu:..."). Drop
       // empty values so the SDK doesn't try to register a self-describing call
       // with an empty URI.
       schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)),
+      iglu_vendor:     $('#cfSpIgluVendor').value.trim() || undefined,
+      default_version: $('#cfSpDefVersion').value.trim() || undefined,
+      event_names:     eventNames,
       blueprints: parseJsonOr('cfSpBlueprints', {}),
       entities:   parseJsonOr('cfSpEntities', {}),
       event_blueprint_map: parseJsonOr('cfSpEventBpMap', {}),
@@ -3539,11 +3626,18 @@ function showActionDetail(a){
 
     // Tap-only: a quick affordance to map this element_key → a business event
     // name (the existing rewrite-rules feature). Resolved via openEventMapDialog
-    // wired below.
+    // wired below. The Snowplow forwarder button below is the server-side twin:
+    // same outcome, but no app rebuild — portal renames + forwards the event.
     const ruleBtn = (isTap && a.element_key)
       ? `<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
-          <button class="btn ghost sm" id="actMapBtn">🏷️ Gán element key này thành event nghiệp vụ…</button>
-          <div class="muted" style="font-size:10.5px;margin-top:4px">Tạo rule remote-config để mọi tap vào <span class="mono">${esc(a.element_key)}</span> trên <span class="mono">${esc(screen || '—')}</span> trở thành event riêng (vd <span class="mono">cart_open</span>).</div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <button class="btn ghost sm" id="actMapBtn">🏷️ Gán element key (rebuild app)…</button>
+            <button class="btn ghost sm" id="actSpFwdBtn">📤 Map sang Snowplow (server-side, no rebuild)…</button>
+          </div>
+          <div class="muted" style="font-size:10.5px;margin-top:4px">
+            <b>Rebuild</b>: rule remote-config — app pull về và đổi tên event chính nó. <br>
+            <b>Server-side</b>: portal đặt 1 event_def + forward sang Snowplow collector với schema iglu đã chọn. App không cần build lại.
+          </div>
         </div>`
       : '';
 
@@ -3571,12 +3665,34 @@ function showActionDetail(a){
   const mapBtn = dlg.querySelector('#actMapBtn');
   if (mapBtn) mapBtn.onclick = () => {
     const screen = (a.props && (a.props.screen || a.props.screen_name)) || _ideState?.segs?.find(s => s.screen)?.screen || '';
+    // Pre-fill class name from the tap props so the operator can keep the
+    // narrower match without retyping. wrapper_class (CustomButton-style) wins
+    // over the raw interactive type — that's the stable handle apps care about.
+    const cls = (a.props && (a.props.wrapper_class || a.props.class_name)) || '';
     openQuickRuleDialog({
       pid: route?.pid,
       matchEvent: 'tap',
       matchScreen: screen,
       matchElementKey: a.element_key,
+      matchClassName: cls,
       onSaved: () => { kill(); toast('Đã gán event nghiệp vụ — rebuild app sẽ áp dụng'); },
+    });
+  };
+
+  // Tap-only: the server-side twin. Configures an event_def + element_key
+  // mapping so the portal will forward this tap to the Snowplow collector
+  // under a new event name + iglu schema. The app keeps shipping "tap"
+  // events as before — the rename happens in maybeForwardToSnowplow.
+  const spFwdBtn = dlg.querySelector('#actSpFwdBtn');
+  if (spFwdBtn) spFwdBtn.onclick = () => {
+    const screen = (a.props && (a.props.screen || a.props.screen_name)) || _ideState?.segs?.find(s => s.screen)?.screen || '';
+    const suggested = 'ev_click_' + String(a.element_key || '').replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase();
+    openSnowplowMapDialog({
+      pid: route?.pid,
+      elementKey: a.element_key,
+      screen,
+      suggestedName: suggested,
+      onSaved: () => { kill(); toast('Đã gán Snowplow — lần tap kế tiếp portal tự forward'); },
     });
   };
 }
@@ -3585,7 +3701,7 @@ function showActionDetail(a){
 // and PUT it into project_config.rules. Reuses the same merge behaviour as
 // the tree tab — remove any existing rule with the same match keys, then
 // append the new one.
-function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, onSaved }) {
+function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, matchClassName, onSaved }) {
   if (!pid) return;
   closeAllUtilDialogs();
   const dlg = document.createElement('dialog'); dlg.id = 'quickRuleDlg'; dlg.className = 'ut-util-dlg';
@@ -3598,10 +3714,16 @@ function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, on
         Khi app rebuild + pull lại config, mọi <b>${esc(matchEvent)}</b> trên
         màn <span class="mono">${esc(matchScreen || '(bất kỳ)')}</span>
         ${matchElementKey ? `vào <span class="mono">${esc(matchElementKey)}</span>` : ''}
-        sẽ được đổi tên thành event dưới đây.
+        sẽ được đổi tên thành event dưới đây. Class widget thu hẹp phạm vi theo
+        component (vd chỉ <span class="mono">CustomButton</span>), bỏ trống = match mọi class.
       </div>
       <label style="font-size:12px">Tên event nghiệp vụ</label>
       <input id="qrToName" placeholder="vd: cart_open" style="width:100%" autocomplete="off"/>
+      <label style="font-size:12px;margin-top:8px">
+        Class widget (tuỳ chọn — chặn nhầm khi nhiều nơi cùng label)
+        <span class="muted" style="font-weight:400">— vd <span class="mono">CustomButton</span>, <span class="mono">ElevatedButton</span></span>
+      </label>
+      <input id="qrClassName" placeholder="vd: CustomButton" value="${esc(matchClassName || '')}" style="width:100%" autocomplete="off"/>
       <label style="font-size:12px;margin-top:8px">Schema iglu (tuỳ chọn — Snowplow self-describing)</label>
       <input id="qrSchema" placeholder="iglu:com.acme/cart_open/jsonschema/1-0-0" style="width:100%" autocomplete="off"/>
       <div class="row" style="margin-top:14px;justify-content:flex-end;gap:8px">
@@ -3621,27 +3743,121 @@ function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, on
     const toName = dlg.querySelector('#qrToName').value.trim();
     if (!toName) { toast('Nhập tên event nghiệp vụ', 'err'); return; }
     const schema = dlg.querySelector('#qrSchema').value.trim();
+    const className = dlg.querySelector('#qrClassName').value.trim();
     // Pull current rules so we don't wipe siblings.
     let rules = [];
     try {
       const c = await api(`/api/projects/${pid}/config`);
       rules = c.rules || [];
     } catch (_) {}
-    // Replace any existing rule with the same match keys, then append.
+    // Replace any existing rule with the same match keys (incl. class_name)
+    // — apps that re-open the dialog with the same triple should overwrite
+    // their previous entry instead of accumulating duplicates.
     rules = rules.filter((r) => !(
       r.match_event === matchEvent
       && (r.match_screen || '') === (matchScreen || '')
       && (r.match_element_key || '') === (matchElementKey || '')
+      && (r.match_class_name || '') === (className || '')
     ));
     const rule = { match_event: matchEvent, to_name: toName };
     if (matchScreen) rule.match_screen = matchScreen;
     if (matchElementKey) rule.match_element_key = matchElementKey;
+    if (className) rule.match_class_name = className;
     if (schema) rule.add_props = { _schema: schema };
     rules.push(rule);
     await api(`/api/projects/${pid}/config`,
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }) });
     kill();
     if (onSaved) onSaved();
+  };
+}
+
+// Server-side Snowplow mapping dialog. Different from openQuickRuleDialog —
+// that one writes a remote-config rule and requires the app to pull + apply.
+// This writes an event_def + element_key mapping so the portal renames + relays
+// the event to the Snowplow collector at ingest time, without the app even
+// knowing. When the app later wires UniTrack.track(<new_name>, ...) directly
+// at the call site, the by-event_name resolver path takes over and this
+// mapping becomes a no-op (handled by maybeForwardToSnowplow).
+async function openSnowplowMapDialog({ pid, elementKey, screen, suggestedName, onSaved }) {
+  if (!pid || !elementKey) return;
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog'); dlg.id = 'spMapDlg'; dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:560px;max-width:92vw;z-index:110';
+  // Entity names must match the builders in snowplow.js (ENTITY_BUILDERS).
+  // Keep this list in sync — anything added there needs a checkbox here.
+  const ENTITY_OPTS = [
+    { id: 'user_context', label: 'user_context — username, device, app_version' },
+    { id: 'core_action',  label: 'core_action — start_time (wall-clock)' },
+  ];
+  dlg.innerHTML = `
+    <div class="dlg-h">📤 Map tap → Snowplow event (server-side)
+      <button class="sp-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
+    <div class="dlg-b">
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        Mọi tap có <span class="mono">element_key=${esc(elementKey)}</span>
+        ${screen ? `trên màn <span class="mono">${esc(screen)}</span>` : ''}
+        sẽ được portal forward sang Snowplow collector dưới tên + schema dưới đây.
+        App <b>không cần</b> build lại.
+      </div>
+      <label style="font-size:12px">Tên event Snowplow</label>
+      <input id="spName" placeholder="vd: ev_click_show_testautomations" value="${esc(suggestedName || '')}" style="width:100%" autocomplete="off"/>
+      <label style="font-size:12px;margin-top:8px">Schema iglu (self-describing)</label>
+      <input id="spSchema" placeholder="iglu:vn.fpt.ftel.snowplow/ev_click/jsonschema/1-0-0" style="width:100%" autocomplete="off"/>
+      <label style="font-size:12px;margin-top:8px">Entities đính kèm</label>
+      <div id="spEntities" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+        ${ENTITY_OPTS.map((o) => `
+          <label style="font-size:12px;display:flex;gap:6px;align-items:center;font-weight:400">
+            <input type="checkbox" data-ent="${esc(o.id)}" ${o.id === 'user_context' ? 'checked' : ''}/>
+            <span class="mono">${esc(o.id)}</span>
+            <span class="muted" style="font-size:10.5px">— ${esc(o.label.split('—')[1] || '')}</span>
+          </label>`).join('')}
+      </div>
+      <label style="font-size:12px;margin-top:10px;display:flex;gap:6px;align-items:center;font-weight:400">
+        <input type="checkbox" id="spForward" checked/>
+        Bật forward ngay (off = lưu config nhưng chưa relay)
+      </label>
+      <div class="row" style="margin-top:14px;justify-content:flex-end;gap:8px">
+        <button class="btn ghost sm sp-cancel">Huỷ</button>
+        <button class="btn sm" id="spSave">Lưu mapping</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
+  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
+  dlg.querySelector('.sp-close').onclick = kill;
+  dlg.querySelector('.sp-cancel').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+  dlg.querySelector('#spName').focus();
+
+  dlg.querySelector('#spSave').onclick = async () => {
+    const name = dlg.querySelector('#spName').value.trim();
+    const schema = dlg.querySelector('#spSchema').value.trim();
+    const forward = dlg.querySelector('#spForward').checked;
+    if (!name) { toast('Nhập tên event Snowplow', 'err'); return; }
+    if (forward && !schema) { toast('Cần schema iglu khi bật forward', 'err'); return; }
+    const entities = Array.from(dlg.querySelectorAll('#spEntities input[type=checkbox]:checked'))
+      .map((i) => i.dataset.ent);
+    try {
+      // 1) Upsert event_def with the Snowplow config.
+      const def = await api(`/api/projects/${pid}/defs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, sp_schema: schema || null, sp_forward: forward, sp_entities: entities }),
+      });
+      if (!def || !def.id) throw new Error('def_save_failed');
+      // 2) Wire element_key → this def (drag-drop equivalent). Any prior
+      //    mapping for this element_key is overwritten by the API ON CONFLICT.
+      await api(`/api/projects/${pid}/mappings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ element_key: elementKey, event_def_id: def.id }),
+      });
+      kill();
+      if (onSaved) onSaved();
+    } catch (e) {
+      toast('Lưu mapping thất bại: ' + (e.message || e), 'err');
+    }
   };
 }
 

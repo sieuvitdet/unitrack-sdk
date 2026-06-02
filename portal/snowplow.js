@@ -25,6 +25,76 @@ const findMap = db.prepare(
 );
 const findProjectForward = db.prepare('SELECT sp_forward_url FROM projects WHERE id = ?');
 
+// Fallback path: an event without a sp_event_maps row may still be forwardable
+// if (a) the project has a drag-drop mapping for the event's element_key, AND
+// (b) the target event_def has sp_schema + sp_forward set. This is the
+// "configure Snowplow on the portal without rebuilding the app" path — a tap
+// event with element_key="show_testautomations" can be renamed to
+// "ev_click_show_testautomations" + forwarded against schema iglu:.../ev_click
+// purely by adding a row in event_defs/event_mappings on the portal.
+const findDefByElementKey = db.prepare(`
+  SELECT d.name, d.sp_schema AS schema, d.sp_forward AS forward, d.sp_entities
+    FROM event_mappings m
+    JOIN event_defs d ON d.id = m.event_def_id
+   WHERE m.project_id = ? AND m.element_key = ?
+`);
+// Same idea matched on event_name (so an app that has already started calling
+// UniTrack.track("ev_click_show_testautomations", ...) keeps forwarding without
+// requiring a parallel sp_event_maps row — the event_def IS the config).
+const findDefByName = db.prepare(`
+  SELECT name, sp_schema AS schema, sp_forward AS forward, sp_entities
+    FROM event_defs
+   WHERE project_id = ? AND name = ?
+`);
+
+// Builders for the iglu entities we know how to fill from the event itself.
+// Add a new builder here when the Snowplow team rolls out a new entity schema;
+// the portal then exposes the name in the SPA multi-select (no app rebuild).
+const ENTITY_BUILDERS = {
+  // The user_context schema FPT-Life ships today. Field names match its iglu
+  // jsonschema; missing fields are dropped (Snowplow Enrich tolerates that).
+  user_context: (evt, device) => ({
+    schema: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
+    data: dropEmpty({
+      username:     evt.user_id,
+      epcode:       evt.properties?.epcode,
+      platform:     device?.platform || evt.platform,
+      device_name:  device?.model,
+      device_model: device?.model_family || device?.model,
+      device_imei:  device?.install_id,
+      app_version:  device?.app_version || evt.app_version,
+    }),
+  }),
+  // core_action carries the wall-clock at which the action started. Snowplow's
+  // own `dtm` is collector-side; this is what the app saw.
+  core_action: (evt) => ({
+    schema: 'iglu:vn.fpt.ftel.snowplow/core_action/jsonschema/1-0-0',
+    data: { start_time: fmtTs(evt.timestamp) },
+  }),
+};
+
+function dropEmpty(o) {
+  const out = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
+  return out;
+}
+function fmtTs(ms) {
+  const d = new Date(Number(ms) || Date.now());
+  // "YYYY-MM-DD HH:mm:ss" — matches the format FPT-Life ships.
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function parseEntityList(json) {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : [];
+  } catch (_) { return []; }
+}
+
 function b64json(s) {
   try { return JSON.parse(Buffer.from(s, 'base64').toString('utf8')); }
   catch (_) { return null; }
@@ -149,46 +219,112 @@ function handleSnowplow(req, res) {
 }
 
 // ─── UniTrack → Snowplow forwarding ────────────────────────────────────────
-// When a UniTrack event arrives and the project has a forward mapping for that
-// event name, the portal builds a Snowplow tp2 payload (self-describing or
-// structured per the mapping) and relays it to the project's real collector.
-// This lets you onboard a NEW Snowplow event by adding a mapping row — no app
-// rebuild. Events already sent to Snowplow by the app (no mapping) are skipped.
+// When a UniTrack event arrives the portal looks up a mapping in three places,
+// in order. The first hit wins. All three describe the same thing — "send this
+// event to Snowplow as schema X" — but at different abstraction levels:
 //
+//   1. sp_event_maps  (legacy)  by event_name. Quick mapping for an event the
+//                                app already calls UniTrack.track() with.
+//   2. event_defs.name          by event_name. The drag-drop "Define event"
+//                                row, now extended with sp_schema/sp_forward.
+//                                Used when the app calls UniTrack.track() with
+//                                the new event name AFTER it's been wired up.
+//   3. event_mappings           by element_key. The "I don't want to rebuild
+//                                the app" path: a tap event keeps event_name
+//                                "tap" but is forwarded under the def.name
+//                                + def.sp_schema picked on the portal.
+//
+// Renaming a tap into "ev_click_show_testautomations" + relaying it under the
+// FPT-Life schema therefore needs no app change — only an event_def + mapping.
+function resolveSnowplowConfig(evt, projectId) {
+  // (1) explicit sp_event_maps by event_name.
+  const raw = findMap.get(projectId, evt.event_name);
+  if (raw && raw.forward) {
+    return {
+      forwardName: evt.event_name,
+      mode: raw.mode,
+      schema: raw.schema,
+      entities: [],                                  // legacy path has no entity config
+    };
+  }
+  // (2) event_defs by event_name — app already calls the new name directly.
+  const byName = findDefByName.get(projectId, evt.event_name);
+  if (byName && byName.forward && byName.schema) {
+    return {
+      forwardName: byName.name,
+      mode: 'self_describing',
+      schema: byName.schema,
+      entities: parseEntityList(byName.sp_entities),
+    };
+  }
+  // (3) event_mappings by element_key — tap not renamed at the app side.
+  const elKey = evt.element_key
+    || (evt.properties && (evt.properties.element_key || evt.properties.element));
+  if (elKey) {
+    const byEl = findDefByElementKey.get(projectId, elKey);
+    if (byEl && byEl.forward && byEl.schema) {
+      return {
+        forwardName: byEl.name,
+        mode: 'self_describing',
+        schema: byEl.schema,
+        entities: parseEntityList(byEl.sp_entities),
+      };
+    }
+  }
+  return null;
+}
+
 // `evt` is the raw UniTrack event object (event_name, properties, …).
 function maybeForwardToSnowplow(evt, projectId) {
   if (!projectId || !evt || !evt.event_name) return;
-  const map = findMap.get(projectId, evt.event_name);
-  if (!map || !map.forward) return;                 // no mapping / forward off
+  const cfg = resolveSnowplowConfig(evt, projectId);
+  if (!cfg) return;                                  // no mapping / forward off
   const proj = findProjectForward.get(projectId);
-  if (!proj || !proj.sp_forward_url) return;        // no collector configured
+  if (!proj || !proj.sp_forward_url) return;         // no collector configured
 
   const props = evt.properties || {};
+  const device = evt.device || props.device || null;
   const nowMs = String(Date.now());
   const eid = crypto.randomUUID();
 
   let spEvent;
-  if (map.mode === 'structured') {
+  if (cfg.mode === 'structured') {
     spEvent = {
       e: 'se', eid, dtm: nowMs, p: 'srv',
       se_ca: 'unitrack',
-      se_ac: evt.event_name,
-      se_la: props.screen || props.screen_name || undefined,
+      se_ac: cfg.forwardName,
+      se_la: props.screen || props.screen_name || evt.screen || undefined,
     };
   } else {
     // self-describing: wrap props under the configured iglu schema.
     const ue = {
       schema: 'iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0',
-      data: { schema: map.schema, data: props },
+      data: { schema: cfg.schema, data: props },
     };
     spEvent = { e: 'ue', eid, dtm: nowMs, p: 'srv', ue_pr: JSON.stringify(ue) };
   }
   if (evt.user_id) spEvent.uid = evt.user_id;
 
+  // Attach configured entity contexts (user_context, core_action, …). Each
+  // builder turns the event + device blob into one SelfDescribingJson.
+  if (cfg.entities.length) {
+    const builders = cfg.entities
+      .map((n) => ENTITY_BUILDERS[n])
+      .filter(Boolean);
+    if (builders.length) {
+      const co = {
+        schema: 'iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1',
+        data: builders.map((b) => b(evt, device)),
+      };
+      spEvent.co = JSON.stringify(co);
+    }
+  }
+
   const tp2Body = JSON.stringify({
     schema: 'iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4',
     data: [spEvent],
   });
+  console.log(`[snowplow] forward ${evt.event_name}→${cfg.forwardName} (${cfg.schema || cfg.mode}) entities=${cfg.entities.length} → ${proj.sp_forward_url}`);
   forwardToCollector(proj.sp_forward_url, tp2Body, { 'content-type': 'application/json' });
 }
 

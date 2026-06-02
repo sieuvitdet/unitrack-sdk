@@ -79,6 +79,27 @@ function defaults(project) {
     // "📐 Blueprints & Entities" expander in the portal Config tab.
     snowplow: {
       enabled: false,
+      // Convention layer: the SDK's tracking* helpers (trackingClickEvent,
+      // trackingResultEvent, …) build the iglu schema URI by interpolating
+      //   iglu:<iglu_vendor>/<event_name>/jsonschema/<default_version>
+      // The app side passes only the convention KIND ("click", "result", …);
+      // event_names below maps each kind to the actual event name. Both
+      // vendor/version and the mapping live here so a third-party app can
+      // re-use the same SDK helpers under their own taxonomy (e.g.
+      // "fss_event_click") without forking. Left empty → helpers no-op + warn.
+      iglu_vendor:    'vn.fpt.ftel.snowplow',
+      default_version: '1-0-0',
+      // Map convention kind → event name. Override per project on the portal
+      // when a third party wires UniTrack into their own iglu taxonomy.
+      // The SDK falls back to the kind itself prefixed with "event_" if a
+      // key is missing — so a partial override is safe.
+      event_names: {
+        click:       'event_click',
+        result:      'event_result',
+        screen_view: 'event_screen_view',
+        crash:       'event_crash',
+        api:         'event_api',
+      },
       blueprints: {},
       entities: {},
       event_blueprint_map: {},

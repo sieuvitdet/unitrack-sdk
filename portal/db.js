@@ -216,6 +216,19 @@ ensureColumn('project_config', 'tracing', 'TEXT');
 // OpenAI-compatible endpoint). Add it to existing databases.
 ensureColumn('agent_config', 'llm_model', 'TEXT');
 
+// event_defs may predate the Snowplow-mapping columns. When set, an event def
+// doubles as a forwarder config: the portal will relay any UniTrack event whose
+// name matches def.name (or whose element_key maps to this def) to the project
+// Snowplow collector, using sp_schema + sp_entities to build the tp2 payload.
+//   sp_schema   — iglu URI (self-describing only). Required if sp_forward=1.
+//   sp_forward  — 1 to relay to the project sp_forward_url, 0 to skip.
+//   sp_entities — JSON array of entity names: ["user_context","core_action"].
+//                 Each name resolves to a builder in snowplow.js that fills a
+//                 SelfDescribingJson context from the event's device + user.
+ensureColumn('event_defs', 'sp_schema',   'TEXT');
+ensureColumn('event_defs', 'sp_forward',  'INTEGER DEFAULT 0');
+ensureColumn('event_defs', 'sp_entities', 'TEXT');
+
 // 3) Now the columns exist on every database — create the indexes.
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_project  ON events(project_id);

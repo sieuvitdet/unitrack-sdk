@@ -237,17 +237,62 @@ router.get('/projects/:id/defs', ownProject, (req, res) => {
   res.json(db.prepare('SELECT * FROM event_defs WHERE project_id = ? ORDER BY name').all(req.params.id));
 });
 
+// Create OR update an event_def by name (upsert). Body may include the
+// Snowplow forwarder fields — leave them blank to keep the def as a pure
+// "name a UniTrack event" record, or fill them in to also relay this event
+// (or every element_key mapped to it) to the project Snowplow collector.
+//   sp_schema   — iglu URI, required when sp_forward is true
+//   sp_forward  — boolean, default false
+//   sp_entities — string[] of entity builder names (e.g. ["user_context"])
 router.post('/projects/:id/defs', ownProject, (req, res) => {
-  const { name, description } = req.body || {};
+  const { name, description, sp_schema, sp_forward, sp_entities } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name_required' });
-  try {
-    const info = db.prepare(`
-      INSERT INTO event_defs (project_id, name, description, created_at) VALUES (?, ?, ?, ?)
-    `).run(req.params.id, name, description ?? null, now());
-    res.json(db.prepare('SELECT * FROM event_defs WHERE id = ?').get(info.lastInsertRowid));
-  } catch (e) {
-    res.status(409).json({ error: 'duplicate' });
+  if (sp_forward && !sp_schema) {
+    return res.status(400).json({ error: 'sp_schema_required_when_forwarding' });
   }
+  const entitiesJson = Array.isArray(sp_entities)
+    ? JSON.stringify(sp_entities.filter((s) => typeof s === 'string'))
+    : null;
+  try {
+    db.prepare(`
+      INSERT INTO event_defs (project_id, name, description, sp_schema, sp_forward, sp_entities, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, name) DO UPDATE SET
+        description = excluded.description,
+        sp_schema   = excluded.sp_schema,
+        sp_forward  = excluded.sp_forward,
+        sp_entities = excluded.sp_entities
+    `).run(
+      req.params.id, name, description ?? null,
+      sp_schema || null, sp_forward ? 1 : 0, entitiesJson,
+      now()
+    );
+    res.json(db.prepare('SELECT * FROM event_defs WHERE project_id = ? AND name = ?')
+      .get(req.params.id, name));
+  } catch (e) {
+    res.status(500).json({ error: 'save_failed', detail: e.message });
+  }
+});
+
+// Update Snowplow-mapping fields on an existing def by id. Description and
+// rename are not supported here on purpose — POST upsert handles those.
+router.patch('/defs/:defId', (req, res) => {
+  const def = db.prepare('SELECT d.id, d.name, p.owner_id, p.id AS project_id FROM event_defs d JOIN projects p ON p.id = d.project_id WHERE d.id = ?').get(req.params.defId);
+  if (!def) return res.status(404).json({ error: 'not_found' });
+  if (req.user.role !== 'admin' && def.owner_id !== req.user.id) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { sp_schema, sp_forward, sp_entities } = req.body || {};
+  if (sp_forward && !sp_schema) {
+    return res.status(400).json({ error: 'sp_schema_required_when_forwarding' });
+  }
+  const entitiesJson = Array.isArray(sp_entities)
+    ? JSON.stringify(sp_entities.filter((s) => typeof s === 'string'))
+    : null;
+  db.prepare(`
+    UPDATE event_defs SET sp_schema = ?, sp_forward = ?, sp_entities = ? WHERE id = ?
+  `).run(sp_schema || null, sp_forward ? 1 : 0, entitiesJson, req.params.defId);
+  res.json(db.prepare('SELECT * FROM event_defs WHERE id = ?').get(req.params.defId));
 });
 
 router.delete('/defs/:defId', (req, res) => {
