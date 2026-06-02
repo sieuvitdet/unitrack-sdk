@@ -241,6 +241,33 @@ public final class UniTrack {
         return u.path
     }
 
+    // MARK: - W3C Trace Context
+
+    /// One outbound HTTP call's identifying triple. `traceId` is 32 lowercase
+    /// hex (128 bit), `spanId` is 16 lowercase hex (64 bit), and `header` is
+    /// the ready-to-attach value for the `traceparent` request header.
+    public struct Trace {
+        public let traceId: String
+        public let spanId:  String
+        public let header:  String     // "00-<trace>-<span>-01"
+    }
+
+    /// Allocate a fresh trace_id + span_id pair. Cheap (one PRNG call) — safe
+    /// to call per HTTP request.
+    public static func newTrace(sampled: Bool = true) -> Trace {
+        var ids = ut_new_trace()
+        let traceId = withUnsafePointer(to: &ids.trace_id) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 33) { String(cString: $0) }
+        }
+        let spanId  = withUnsafePointer(to: &ids.span_id) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 17) { String(cString: $0) }
+        }
+        var buf = [CChar](repeating: 0, count: 64)
+        let n = ut_format_traceparent(&ids, sampled ? 1 : 0, &buf, buf.count)
+        let header: String = n > 0 ? String(cString: buf) : ""
+        return Trace(traceId: traceId, spanId: spanId, header: header)
+    }
+
     // MARK: - Internal
 
     var contextHandle: OpaquePointer? { context }

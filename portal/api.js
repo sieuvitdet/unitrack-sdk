@@ -176,8 +176,12 @@ router.get('/projects/:id/events', ownProject, (req, res) => {
   if (req.query.session)  { where.push('session_id = ?'); args.push(req.query.session); }
   if (req.query.provider) { where.push('provider = ?');   args.push(req.query.provider); }
   if (req.query.q) {
-    where.push('(event_name LIKE ? OR screen_name LIKE ? OR class_name LIKE ? OR element_key LIKE ?)');
-    const k = `%${req.query.q}%`; args.push(k, k, k, k);
+    // Search across stable identifiers + the raw properties blob so users
+    // can paste a trace_id / span_id / arbitrary prop value and find it.
+    // properties is TEXT-encoded JSON in SQLite — LIKE works on the raw
+    // string, no schema-aware extraction needed.
+    where.push('(event_name LIKE ? OR screen_name LIKE ? OR class_name LIKE ? OR element_key LIKE ? OR properties LIKE ?)');
+    const k = `%${req.query.q}%`; args.push(k, k, k, k, k);
   }
   args.push(limit);
   const rows = db.prepare(`
