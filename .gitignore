@@ -77,3 +77,13 @@ android-camera-demo/build/
 android-camera-demo/app/build/
 android-camera-demo/.idea/
 android-camera-demo/local.properties
+
+# Demo apps — kept out of the public SDK repo. They consume the SDK as
+# external artifacts (JitPack / Swift Package URL); their source lives in
+# their own repos (or just on developer machines for now).
+android-camera-demo/
+ios-camera-demo/
+ios-uikit-demo/
+react-native-demo/
+flutter-tracking-app/
+examples/
