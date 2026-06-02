@@ -100,9 +100,18 @@ function defaults(project) {
         crash:       'event_crash',
         api:         'event_api',
       },
-      blueprints: {},
-      entities: {},
-      event_blueprint_map: {},
+      // Auto-attached context entities for every tracking* call. Two names
+      // are built into the SDK (data sourced from setUser + event meta):
+      //   user_context — fields populated from userContext + setUser traits.
+      //   core_action  — action_name (event_names value), timestamp, screen,
+      //                  element_key.
+      // Any other name added here is registered too, but the app must pass
+      // its data via the helper's extraContexts: parameter — the SDK only
+      // knows how to build the two above without app input.
+      entities: {
+        user_context: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
+        core_action:  'iglu:vn.fpt.ftel.snowplow/core_action/jsonschema/1-0-0',
+      },
     },
     firebase: { enabled: false },
     event_registry: [],

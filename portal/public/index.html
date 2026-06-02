@@ -914,7 +914,6 @@ async function renderConfig(pid){
       <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
       <div class="row" style="gap:10px;margin-top:8px">
         <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
-        <div style="flex:2"><label>userContext schema (iglu)</label><input id="cfSpSchema" style="width:100%" value="${esc(sp.userContextSchema||'')}"/></div>
       </div>
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
@@ -991,6 +990,65 @@ async function renderConfig(pid){
               App fetch lại config sau khi save sẽ áp dụng ngay (không cần rebuild).
             </div>`;
         })()}
+
+        <!-- Auto-attached entities — context entities the SDK glues onto
+             every tracking* call. user_context + core_action are built-in
+             (the SDK fills their data from setUser + event meta). Adding
+             any other row registers its schema but the app must pass that
+             entity's data via the helper's extraContexts: parameter. -->
+        <div style="margin-top:14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <b style="font-size:12.5px">Auto-attached entities</b>
+            <span class="muted" style="font-size:11px;flex:1">SDK đính entity này vào mọi event tracking*. Built-in: <span class="mono">user_context</span>, <span class="mono">core_action</span></span>
+            <button class="btn ghost sm" id="cfSpEntAdd" type="button" title="Thêm entity ngoài built-in">+ Add entity</button>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead style="background:var(--bg-tab,#1a1a1a)">
+                <tr>
+                  <th style="text-align:left;padding:6px 10px;font-weight:600;width:25%">Entity name</th>
+                  <th style="text-align:left;padding:6px 10px;font-weight:600">Schema URI (iglu)</th>
+                  <th style="width:36px"></th>
+                </tr>
+              </thead>
+              <tbody id="cfSpEntBody">
+                ${(() => {
+                  // Render saved entities + always seed user_context + core_action
+                  // if missing so the operator sees the built-ins right away.
+                  const seed = sp.entities || {};
+                  const builtin = ['user_context', 'core_action'];
+                  const rows = [];
+                  for (const k of builtin) {
+                    rows.push([k, seed[k] || '']);
+                  }
+                  for (const [k, v] of Object.entries(seed)) {
+                    if (!builtin.includes(k)) rows.push([k, v]);
+                  }
+                  return rows.map(([name, schema], i) => `
+                    <tr data-row="${i}" style="border-top:1px solid var(--line)">
+                      <td style="padding:4px 8px">
+                        <input class="cf-sp-ent-name" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               value="${esc(name)}" ${builtin.includes(name) ? 'readonly title="Built-in entity — SDK fills the data"' : ''}/>
+                      </td>
+                      <td style="padding:4px 8px">
+                        <input class="cf-sp-ent-schema" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               placeholder="iglu:vn.fpt.ftel.snowplow/${esc(name || 'entity_name')}/jsonschema/1-0-0"
+                               value="${esc(schema)}"/>
+                      </td>
+                      <td style="padding:4px 6px;text-align:center">
+                        ${builtin.includes(name)
+                          ? '<span class="muted" title="Built-in — cannot remove" style="font-size:13px">—</span>'
+                          : '<button class="cf-sp-ent-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>'}
+                      </td>
+                    </tr>`).join('');
+                })()}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="font-size:10.5px;margin-top:6px">
+            Bỏ trống schema URI → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name (event resolved), timestamp (now), screen, element_key. Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>.
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
@@ -1025,91 +1083,6 @@ async function renderConfig(pid){
         })()}
       </div>
 
-
-      <!-- Blueprints + Entities — the previous "Iglu schemas" map only
-           covers 1 event => 1 schema URI. FPT's analytics taxonomy ships a
-           core_action + user_context entity alongside every click/result
-           event, with field maps the backend team defines per-app.
-           Blueprints encode that as JSON so the app stays free of schema
-           URIs and entity shapes. -->
-      <details style="margin-top:14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0">
-        <summary style="cursor:pointer;padding:12px;font-size:13px;font-weight:600;color:var(--accent2)">
-          📐 Blueprints &amp; Entities <span class="muted" style="font-weight:400;font-size:11px">— xây event với SelfDescribing + context entities (core_action, user_context, …)</span>
-        </summary>
-        <div style="padding:0 12px 12px">
-          <div class="muted" style="font-size:11px;margin-bottom:10px">
-            Mỗi <b>blueprint</b> là 1 cách dựng event (schema + entities gắn kèm). Mỗi <b>entity</b>
-            có schema riêng + map field từ <span class="mono">globals/device/props/literal</span>.
-            Map dưới cùng tên event → blueprint id. Wildcard <span class="mono">prefix_*</span> match prefix.
-          </div>
-
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <b style="font-size:12px">Blueprints</b>
-            <span class="muted" style="font-size:11px;flex:1">JSON object — <span class="mono">{ "click_event": { "schema": "iglu:...", "attach_entities": ["user_context","core_action"] } }</span></span>
-            <button class="btn ghost sm" id="cfSpBpSeed" type="button" title="Sinh blueprint + entities mẫu theo FPT taxonomy (click_event, result_event, screen_event + user_context, core_action, attendance)">
-              ✨ Seed FPT taxonomy
-            </button>
-          </div>
-          <textarea id="cfSpBlueprints"
-            style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px">${esc(JSON.stringify(sp.blueprints || {}, null, 2))}</textarea>
-
-          <div style="margin-top:10px"><b style="font-size:12px">Entities</b>
-            <span class="muted" style="font-size:11px;margin-left:6px">JSON — entity_id → { schema, fields: { name: { from, key, default? } } }</span></div>
-          <textarea id="cfSpEntities"
-            style="width:100%;height:200px;font-family:ui-monospace,monospace;font-size:11px;margin-top:4px">${esc(JSON.stringify(sp.entities || {}, null, 2))}</textarea>
-
-          <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
-            <b style="font-size:12px">Event → Blueprint map</b>
-            <span class="muted" style="font-size:11px;flex:1">JSON object — exact "ev_click_check_in":"click_event" hoặc wildcard "ev_click_*":"click_event"</span>
-            <button class="btn ghost sm" id="cfSpMapSeed" type="button" title="Auto-fill wildcard: ev_click_* → click_event, ev_result_* → result_event, …">
-              ✨ Sinh wildcard từ event đã thấy
-            </button>
-          </div>
-          <textarea id="cfSpEventBpMap"
-            style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11px;margin-top:4px">${esc(JSON.stringify(sp.event_blueprint_map || {}, null, 2))}</textarea>
-
-          <div style="margin-top:12px;padding:10px;border:1px dashed var(--line);border-radius:6px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <b style="font-size:12px">🧪 Test với event name</b>
-              <span class="muted" style="font-size:11px">paste event + props mẫu → preview Snowplow payload thực tế</span>
-            </div>
-            <div class="row" style="gap:8px">
-              <input id="cfSpTestName" placeholder="ev_click_check_in"
-                style="flex:1;min-width:180px;font-family:ui-monospace,monospace;font-size:11px"/>
-              <button class="btn sm" id="cfSpTestRun" type="button">Preview</button>
-            </div>
-            <textarea id="cfSpTestProps" placeholder='{"event_action":"check_in_button","contract_id":"X123","_start_time":"2026-06-01T10:00:00"}'
-              style="width:100%;height:60px;margin-top:6px;font-family:ui-monospace,monospace;font-size:11px"></textarea>
-            <pre id="cfSpTestOut" class="mono"
-              style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;margin-top:6px;max-height:240px;overflow:auto;display:none"></pre>
-          </div>
-        </div>
-      </details>
-
-      <!-- Per-event schema override (fallback path). Used to be the only way
-           to attach an iglu schema; with Blueprints above it's mostly dead
-           code for FPT taxonomy apps (one schema URI serves 21 events).
-           Kept collapsed by default — open when one event needs its OWN
-           schema that the matching blueprint can't express. -->
-      <details style="margin-top:10px;border:1px dashed var(--line);border-radius:8px;background:var(--bg);padding:0">
-        <summary style="cursor:pointer;padding:10px 12px;font-size:12px;font-weight:600;color:var(--muted)">
-          🪪 Iglu schemas map <span style="font-weight:400">(legacy / per-event override — chỉ dùng khi 1 event có schema riêng mà Blueprint không cover)</span>
-        </summary>
-        <div style="padding:0 12px 12px">
-          <div class="muted" style="font-size:11px;margin-bottom:6px">
-            Resolution order ở SDK: <b>Blueprint match</b> (ở trên) → fallback <b>schemas map</b> dưới đây → Structured event.
-            Một dòng / event: <span class="mono">event_name = iglu:vn.fpt.ftel.snowplow/&lt;event&gt;/jsonschema/&lt;version&gt;</span>
-          </div>
-          <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
-            <button class="btn ghost sm" id="cfSpSchemaSeed" type="button"
-              title="Sinh schemas 1-1 mặc định cho mọi event đã thấy. Hữu ích cho project KHÔNG dùng FPT taxonomy">
-              ✨ Tự sinh từ event đang có
-            </button>
-          </div>
-          <textarea id="cfSpSchemas" placeholder="ev_click_check_in = iglu:vn.fpt.ftel.snowplow/ev_click_check_in/jsonschema/1-0-0"
-            style="width:100%;height:120px;font-family:ui-monospace,monospace;font-size:11px">${esc(kvText(sp.schemas))}</textarea>
-        </div>
-      </details>
 
       ${flavorOverrideHtml('Sp', sp)}
 
@@ -1206,24 +1179,42 @@ async function renderConfig(pid){
     return Object.keys(out).length ? out : undefined;
   }
 
-  // ── Snowplow schemas auto-seed ────────────────────────────────────────
-  // Click ✨ → pull every distinct event_name seen for this project, build a
-  // default iglu URI per event (iglu:vn.fpt.ftel.snowplow/<event>/jsonschema/1-0-0),
-  // and merge into the textarea WITHOUT overwriting entries the operator
-  // already typed. Saves a lot of repetitive typing for a 21-event project.
-  const seedBtn = document.getElementById('cfSpSchemaSeed');
-  if (seedBtn) seedBtn.onclick = async () => {
-    seedBtn.disabled = true; seedBtn.textContent = '⏳ Đang lấy event…';
-    try {
-      const data = await api(`/api/projects/${pid}/event-names`);
-      const names = (data && data.names) || [];
-      // Filter to BUSINESS events: skip the SDK auto-capture names
-      // (tap / network_request / screen_view / session_*) — those don't
-      // need iglu schemas.
-      const SKIP = new Set([
-        'tap','network_request','network_error','screen_view','screen_start','screen_end',
-        'screen_load_completed','session_start','session_end','session_started','session_ended',
-        'app_start','app_foreground','app_background','crash','application_error','json_parse_error',
+  // ── Auto-attached entities — dynamic table (+/×) ─────────────────────
+  // Two built-in rows (user_context, core_action) the SDK fills itself.
+  // Operator can add custom rows; the app supplies their data via the
+  // helper's extraContexts: parameter.
+  const entBody = document.getElementById('cfSpEntBody');
+  document.getElementById('cfSpEntAdd')?.addEventListener('click', () => {
+    if (!entBody) return;
+    const i = entBody.children.length;
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-row', String(i));
+    tr.style.borderTop = '1px solid var(--line)';
+    tr.innerHTML = `
+      <td style="padding:4px 8px">
+        <input class="cf-sp-ent-name" placeholder="vd: campaign"
+               style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
+      </td>
+      <td style="padding:4px 8px">
+        <input class="cf-sp-ent-schema" placeholder="iglu:vn.fpt.ftel.snowplow/&lt;name&gt;/jsonschema/1-0-0"
+               style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
+      </td>
+      <td style="padding:4px 6px;text-align:center">
+        <button class="cf-sp-ent-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
+      </td>`;
+    entBody.appendChild(tr);
+  });
+  // Delegated handler — fires for every current AND future ✕ button.
+  entBody?.addEventListener('click', (e) => {
+    const btn = (e.target instanceof Element) ? e.target.closest('.cf-sp-ent-del') : null;
+    if (btn) btn.closest('tr')?.remove();
+  });
+
+  // Legacy blueprint / schemas / preview handlers removed — those sections
+  // were deleted from the UI. The Convention layer + Auto-attached entities
+  // table above replace them; the SDK now treats every track() call as a
+  // self-describing event under the convention vendor.
+  const __removedSeedBtnPlaceholder__ = (() => null)(); /*
         'memory_warning','identify','reset',
       ]);
       const business = names.filter((n) => n && !SKIP.has(n));
@@ -1378,6 +1369,7 @@ async function renderConfig(pid){
     out.style.display = 'block';
     out.textContent = JSON.stringify(result, null, 2);
   };
+  */
 
   // Firebase file drag-drop → parse json/plist, fill inputs.
   const drop=$('#cfFbDrop');
@@ -1438,18 +1430,22 @@ async function renderConfig(pid){
         .filter(([_, v]) => v)
     );
 
+    // Auto-attached entities: walk every row of the dynamic table. Skip rows
+    // missing either the name or the schema URI; deduplicate by name (last
+    // row wins) so a fat-fingered repeat doesn't break the SDK lookup.
+    const spEntities = {};
+    document.querySelectorAll('#cfSpEntBody tr').forEach((tr) => {
+      const name   = (tr.querySelector('.cf-sp-ent-name')?.value   || '').trim();
+      const schema = (tr.querySelector('.cf-sp-ent-schema')?.value || '').trim();
+      if (name && schema) spEntities[name] = schema;
+    });
+
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
-      userContextSchema:$('#cfSpSchema').value.trim()||undefined, userContext:parseKV('#cfSpCtx'),
-      // schemas map: parsed from the kv textarea ("event_name = iglu:..."). Drop
-      // empty values so the SDK doesn't try to register a self-describing call
-      // with an empty URI.
-      schemas: Object.fromEntries(Object.entries(parseKV('#cfSpSchemas')).filter(([_, v]) => v)),
+      userContext: parseKV('#cfSpCtx'),
       iglu_vendor:     $('#cfSpIgluVendor').value.trim() || undefined,
       default_version: $('#cfSpDefVersion').value.trim() || undefined,
       event_names:     eventNames,
-      blueprints: parseJsonOr('cfSpBlueprints', {}),
-      entities:   parseJsonOr('cfSpEntities', {}),
-      event_blueprint_map: parseJsonOr('cfSpEventBpMap', {}),
+      entities:        spEntities,
       options: spOpts };
     const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 

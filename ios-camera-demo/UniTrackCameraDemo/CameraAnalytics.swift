@@ -52,13 +52,16 @@ enum CameraAnalytics {
         if cfg.snowplow.enabled == true, let spEndpoint = cfg.snowplow.endpoint,
            let appId = cfg.snowplow.appId, !spEndpoint.isEmpty {
             let o = cfg.snowplow.options ?? [:]
+            let info = Bundle.main.infoDictionary ?? [:]
+            var userCtx: [String: Any] = cfg.snowplow.userContext?.unwrapped() ?? [:]
+            userCtx["platform"]    = userCtx["platform"]    ?? "iOS"
+            userCtx["app_version"] = userCtx["app_version"] ?? (info["CFBundleShortVersionString"] as? String ?? "")
+            userCtx["device_name"] = userCtx["device_name"] ?? UIDevice.current.name
             let sp = SnowplowProvider(
                 endpoint: spEndpoint,
                 appId: appId,
                 namespace: cfg.snowplow.namespace ?? "UniTrack",
-                userContext: cfg.snowplow.userContext?.unwrapped(),
-                userContextSchema: cfg.snowplow.userContextSchema,
-                schemas: cfg.snowplow.schemas ?? [:],
+                userContext: userCtx,
                 options: SnowplowOptions(
                     base64Encoding:              o["base64Encoding"] ?? true,
                     platformContext:             o["platformContext"] ?? true,
@@ -74,45 +77,15 @@ enum CameraAnalytics {
                     exceptionAutotracking:       o["exceptionAutotracking"] ?? true,
                     installAutotracking:         o["installAutotracking"] ?? true
                 ),
-                // Convention layer config — the tracking* helpers build
-                //   iglu:<igluVendor>/<event_name>/jsonschema/<defaultVersion>
-                // at each call site. Both come from the portal so a schema
-                // bump (1-0-0 → 1-1-0) doesn't require an app rebuild.
                 igluVendor:     cfg.snowplow.igluVendor,
                 defaultVersion: cfg.snowplow.defaultVersion ?? "1-0-0",
-                // Convention kind → event name (click / result / screen_view
-                // / crash / api). Lets a 3rd-party integrator re-skin the
-                // helpers under their own taxonomy (e.g. "fss_event_click")
-                // from the portal without touching SDK code.
-                eventNames:     cfg.snowplow.eventNames ?? [:]
+                eventNames:     cfg.snowplow.eventNames ?? [:],
+                entities:       cfg.snowplow.entities    ?? [:]
             )
-            // Blueprint engine + device blob + globals — same pattern Flutter
-            // uses so the camera demo can resolve `track("camera_stream_started")`
-            // to a Snowplow self-describing event without any per-event schema
-            // wiring in app code.
-            sp.applyBlueprintConfig(
-                blueprints: cfg.snowplowBlueprints,
-                entities:   cfg.snowplowEntities,
-                eventBlueprintMap: cfg.snowplowEventBlueprintMap,
-            )
-            let info = Bundle.main.infoDictionary ?? [:]
-            sp.setDeviceBlob([
-                "platform":    "ios",
-                "app_bundle":  (info["CFBundleIdentifier"] as? String) ?? "",
-                "app_version": (info["CFBundleShortVersionString"] as? String) ?? "",
-                "device_name": UIDevice.current.name,
-            ])
-            sp.setGlobalContext([
-                "user":       ["user_id": "demo_user_42"],
-                "session_id": UUID().uuidString,
-                "flavor":     "staging",
-            ])
             UniTrack.addProvider(sp)
             snowplow = sp
         }
-
-        // Firebase — only if enabled; configured at RUNTIME from portal values
-        // (no GoogleService-Info.plist in the bundle).
+        
         if cfg.firebase.enabled == true {
             var fbOptions: FirebaseProvider.Options?
             if let opt = cfg.firebase.options, let appID = opt.appId, let sender = opt.gcmSenderId {
@@ -185,21 +158,22 @@ enum CameraAnalytics {
     // ── Camera live streaming B2C (#5, #6, #7) ───────────────────────────────
     static func streamStarted(cameraSerial: String, channel: Int = 0,
                               viewMode: String = "single", gridSize: Int = 1) {
-        UniTrack.track("camera_stream_started", properties: [
-            "camera_serial": cameraSerial,
-            "channel":       channel,
-            "view_mode":     viewMode,
-            "grid_size":     gridSize,
-        ])
-        // Snowplow leg: entering the live stream screen also emits a convention
-        // event_screen_view so Snowplow funnel queries can group by screen name
-        // without parsing the camera_stream_started payload. Two events on the
-        // wire (one UniTrack, one Snowplow self-describing) — portal dedupes
-        // by event_id when displayed.
+        // Snowplow-only: convention helper builds
+        //   iglu:<vendor>/<event_names.screen_view>/jsonschema/<version>
+        // (default `event_screen_view`; portal can override to "isc_screen_view").
+        // The UniTrack.track() leg was dropped — blueprint engine on the
+        // portal config kept reading "camera_stream_started" and double-firing
+        // a SelfDescribing with the legacy `ev_click` schema. Use the helper
+        // only so backend gets exactly ONE event under the convention schema.
         snowplow?.trackingScreenView(
             screenName: "LiveStreamVC",
             fromScreen: "CameraListVC",
-            data: ["camera_serial": cameraSerial, "view_mode": viewMode]
+            data: [
+                "camera_serial": cameraSerial,
+                "view_mode":     viewMode,
+                "channel":       channel,
+                "grid_size":     gridSize,
+            ]
         )
     }
     static func streamEnded(cameraSerial: String, watchSec: Int,
@@ -259,15 +233,9 @@ enum CameraAnalytics {
     // ── Camera settings B2C (#15) ────────────────────────────────────────────
     static func aiFeatureToggled(cameraSerial: String,
                                  aiFeatureCode: String, on: Bool) {
-        UniTrack.track("camera_ai_feature_toggled", properties: [
-            "camera_serial":   cameraSerial,
-            "ai_feature_code": aiFeatureCode,
-            "action":          on ? "on" : "off",
-        ])
-        // Snowplow leg via the escape-hatch helper: this event name isn't
-        // (yet) a first-class tracking* helper, but the convention rule still
-        // applies — schema is iglu:<vendor>/camera_ai_feature_toggled/jsonschema/<version>.
-        // Replace this with a typed helper if it earns one later.
+        // Snowplow-only via the escape-hatch helper. Schema is
+        //   iglu:<vendor>/camera_ai_feature_toggled/jsonschema/<version>.
+        // Replace with a typed helper if it earns one later.
         snowplow?.trackingCustomEvent(
             "camera_ai_feature_toggled",
             data: [
@@ -322,12 +290,10 @@ enum CameraAnalytics {
         UniTrack.track("camera_pairing_started", properties: [:])
     }
     static func pairingCompleted(cameraSerial: String) {
-        UniTrack.track("camera_pairing_completed", properties: [
-            "camera_serial": cameraSerial,
-        ])
-        // Snowplow leg: pairing completion is a successful action outcome,
-        // so go through the convention "event_result" helper. Backend funnel
-        // can then ask "which actions succeed/fail" without name-mapping.
+        // Snowplow-only: pairing completion is a successful action outcome,
+        // routed through the convention "event_result" helper (portal may
+        // remap to "isc_event_result"). Backend funnel can then ask "which
+        // actions succeed/fail" without name-mapping.
         snowplow?.trackingResultEvent(
             action: "camera_pairing",
             status: "success",
@@ -335,10 +301,7 @@ enum CameraAnalytics {
         )
     }
     static func pairingFailed(errorCode: String) {
-        UniTrack.track("camera_pairing_failed", properties: [
-            "error_code": errorCode,
-        ])
-        // Same family as pairingCompleted but the negative outcome side —
+        // Snowplow-only: same family as pairingCompleted, negative outcome.
         // errorCode is what the funnel groups failures by.
         snowplow?.trackingResultEvent(
             action: "camera_pairing",
@@ -356,20 +319,15 @@ enum CameraAnalytics {
     // #26 screen_load_completed is auto-captured by the SDK swizzler.
     static func streamFirstFrame(cameraSerial: String, ttffMs: Int,
                                  featureType: String = "live") {
-        UniTrack.track("camera_stream_first_frame", properties: [
-            "camera_serial": cameraSerial,
-            "ttff_ms":       ttffMs,
-            "feature_type":  featureType,
-        ])
-        // Snowplow leg: TTFF is a network-style timing — model it as an API
+        // Snowplow-only: TTFF is a network-style timing — model as an API
         // observation against the camera media endpoint. Backend can then
-        // co-locate it with real HTTP latency samples in the same dashboard.
+        // co-locate it with real HTTP latency samples on the same dashboard.
         snowplow?.trackingAPI(
             url:        "rtsp://camera/\(cameraSerial)/live",
             method:     "STREAM",
             status:     200,
             durationMs: ttffMs,
-            data:       ["feature_type": featureType]
+            data:       ["feature_type": featureType, "camera_serial": cameraSerial]
         )
     }
     static func streamBuffering(cameraSerial: String, action: String, bufferingDurationMs: Int) {
@@ -382,11 +340,10 @@ enum CameraAnalytics {
 
     // ── Interactions & errors (#29, #30) ─────────────────────────────────────
     static func cameraItemSelected(cameraSerial: String, sourceScreen: String) {
-        UniTrack.track("camera_item_selected", properties: [
-            "camera_serial": cameraSerial, "source_screen": sourceScreen,
-        ])
-        // Snowplow leg: this is the canonical "user tapped something"
-        // payload — element_key is what funnels group by.
+        // Snowplow-only: canonical "user tapped something" payload — convention
+        // helper builds iglu:<vendor>/<event_names.click>/jsonschema/<version>
+        // (default `event_click`; portal can override to "isc_event_click").
+        // element_key is what Snowplow funnels group by.
         snowplow?.trackingClickEvent(
             elementKey: "camera_item",
             label:      cameraSerial,
@@ -394,22 +351,13 @@ enum CameraAnalytics {
             data:       ["camera_serial": cameraSerial]
         )
     }
-    // #30 — real crashes are auto-captured by the SDK as `crash`; a portal
-    // rule rewrites that to `event_crash`. Use this helper for non-fatal
-    // exceptions the app wants to report explicitly under the same schema.
+    // #30 — real crashes are auto-captured by the SDK as `crash` (separate
+    // signal-trap path). This helper is for non-fatal exceptions the app
+    // wants to surface explicitly under the convention crash schema.
     static func applicationError(exceptionName: String, message: String,
                                  isFatal: Bool = false) {
-        // Sheet event "application_error" — non-fatal exceptions the app
-        // reports explicitly. Hard crashes (signal-trapped) flow through
-        // the SDK's own `crash` event on next launch, not this helper.
-        UniTrack.track("application_error", properties: [
-            "exception_name": exceptionName,
-            "message":        message,
-            "is_fatal":       isFatal,
-        ])
-        // Snowplow leg via the convention crash helper — same iglu schema
-        // the SDK's signal-handled crash takes after the portal rewrite,
-        // so backend dashboards group fatal + non-fatal exceptions together.
+        // Snowplow-only via the convention crash helper — backend dashboards
+        // can group fatal + non-fatal exceptions together under one schema.
         snowplow?.trackingCrash(
             message: message,
             fatal:   isFatal,
@@ -420,12 +368,9 @@ enum CameraAnalytics {
 
     static func identify(userId: String, plan: String) {
         UniTrack.identify(userId: userId, traits: ["plan": plan])
-        // Keep Snowplow user_context entity in sync — every event after this
-        // point carries the new user_id resolved from globals.
-        snowplow?.setGlobalContext([
-            "user":       ["user_id": userId, "plan": plan],
-            "session_id": UUID().uuidString,
-            "flavor":     "staging",
-        ])
+        // Keep Snowplow user_context entity in sync — provider mutates its
+        // userContext bag on setUser(...) so every event after this point
+        // carries username + plan inside the auto-attached entity.
+        snowplow?.setUser(userId, ["plan": plan, "username": userId])
     }
 }

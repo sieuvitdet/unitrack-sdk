@@ -68,9 +68,7 @@ public struct UniTrackRemoteConfig: Codable {
         public var appId: String?
         public var namespace: String?
         public var userContext: [String: AnyCodable]?
-        public var userContextSchema: String?
         public var options: [String: Bool]?
-        public var schemas: [String: String]?
         /// Convention vendor + version for the tracking* helpers — the helper
         /// builds `iglu:<igluVendor>/<event_name>/jsonschema/<defaultVersion>`
         /// at call site. App ships only the convention name; bumping a schema
@@ -79,18 +77,17 @@ public struct UniTrackRemoteConfig: Codable {
         /// other fields stay camelCase to match the existing portal payload.
         public var igluVendor: String?
         public var defaultVersion: String?
-        /// Override map for the convention event names (kind → name). Lets a
-        /// third-party app re-use the SDK helpers under their own taxonomy
-        /// (e.g. "fss_event_click"). Recognized kinds: click, result,
-        /// screen_view, crash, api. Missing kind → SDK falls back to its
-        /// built-in default. Wire key: snake_case `event_names`.
+        /// Override map for the convention event names (kind → name).
         public var eventNames: [String: String]?
+        /// Auto-attached context entities: entity name → iglu schema URI.
+        public var entities: [String: String]?
         enum CodingKeys: String, CodingKey {
-            case enabled, endpoint, appId, namespace, options, schemas
-            case userContext, userContextSchema
+            case enabled, endpoint, appId, namespace, options
+            case userContext
             case igluVendor     = "iglu_vendor"
             case defaultVersion = "default_version"
             case eventNames     = "event_names"
+            case entities
         }
     }
 
