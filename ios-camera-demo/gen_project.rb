@@ -7,9 +7,9 @@
 #   DEV_TEAM=XXXX ruby gen_project.rb   # real device
 #   open UniTrackCameraDemo.xcodeproj   # Xcode resolves the package on open
 #
-# Xcode fetches https://github.com/sieuvitdet/unitrack-ios-package (branch main),
-# which exposes the products UniTrack / UniTrackFirebase / UniTrackSnowplow and
-# pulls in Firebase + Snowplow transitively.
+# Xcode fetches https://github.com/sieuvitdet/unitrack-ios-package at the tag
+# pinned in PKG_VERSION below. The package exposes UniTrack / UniTrackFirebase
+# / UniTrackSnowplow and pulls in Firebase + Snowplow transitively.
 
 require 'xcodeproj'
 require 'fileutils'
@@ -20,6 +20,7 @@ app_name  = 'UniTrackCameraDemo'
 src_dir   = File.join(here, app_name)
 
 PKG_URL      = 'https://github.com/sieuvitdet/unitrack-ios-package'
+PKG_VERSION  = '0.2.0'
 PKG_PRODUCTS = %w[UniTrack UniTrackFirebase UniTrackSnowplow]
 
 FileUtils.rm_rf(proj_path)
@@ -41,11 +42,11 @@ if File.exist?(gsi)
   puts "Bundling Firebase config: #{gsi}"
 end
 
-# --- Remote Swift Package dependency (the git repo, branch main) -------------
+# --- Remote Swift Package dependency (pinned to a published tag) -------------
 pkg = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
 pkg.repositoryURL = PKG_URL
-# Track the `main` branch (use :version/:tag instead once the repo is tagged).
-pkg.requirement = { 'kind' => 'branch', 'branch' => 'main' }
+# Pin to a tagged release so device + CI builds are reproducible.
+pkg.requirement = { 'kind' => 'exactVersion', 'version' => PKG_VERSION }
 project.root_object.package_references << pkg
 
 PKG_PRODUCTS.each do |product|
@@ -86,7 +87,7 @@ end
 
 project.save
 puts "Generated #{proj_path}"
-puts "Swift Package: #{PKG_URL} (branch main) → #{PKG_PRODUCTS.join(', ')}"
+puts "Swift Package: #{PKG_URL} (#{PKG_VERSION}) → #{PKG_PRODUCTS.join(', ')}"
 if dev_team && !dev_team.empty?
   puts "Signing: automatic, team #{dev_team} (device + simulator)."
 else

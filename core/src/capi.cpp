@@ -172,4 +172,14 @@ const char* ut_version(void) {
     return UT_VERSION_STRING;
 }
 
+// Returns a pointer the caller must NOT free. The string lives in a thread-local
+// buffer; the second call from the same thread overwrites the previous result.
+// Empty string ("") on no crash to pop or null ctx.
+const char* ut_pop_recovered_crash(ut_context* ctx) {
+    thread_local std::string buf;
+    if (!ctx || !ctx->tracker) { buf.clear(); return ""; }
+    buf = ctx->tracker->pop_recovered_crash();
+    return buf.c_str();
+}
+
 } // extern "C"

@@ -69,12 +69,16 @@ dependencies {
     androidTestImplementation 'androidx.test:rules:1.5.0'
 }
 
+// Published to JitPack as `com.github.sieuvitdet.unitrack-sdk:unitrack:<tag>`.
+// JitPack overrides groupId from the repo coordinates at build time; what
+// matters here is artifactId = module name so the demo's gradle dependency
+// resolves the right submodule.
 publishing {
     publications {
         release(MavenPublication) {
-            groupId    = 'io.unitrack'
-            artifactId = 'sdk'
-            version    = '1.0.0'
+            groupId    = 'com.github.sieuvitdet.unitrack-sdk'
+            artifactId = 'unitrack'
+            version    = project.findProperty('VERSION_NAME') ?: '1.0.0'
             afterEvaluate { from components.release }
         }
     }

@@ -8,5 +8,6 @@ pluginManagement {
 
 rootProject.name = 'UniTrack'
 include ':unitrack'
+include ':unitrack-firebase'
 include ':unitrack-snowplow'
 include ':demo'

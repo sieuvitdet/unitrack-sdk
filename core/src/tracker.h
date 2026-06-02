@@ -67,6 +67,18 @@ public:
         transport_.set_callback(fn, ud);
     }
 
+    // Crash recovered at init() time is enqueued to the offline queue
+    // (→ portal HTTP) but bypasses platform providers (Snowplow, Firebase)
+    // because those live above the C ABI. Binding code pops the same JSON
+    // here after providers init and re-emits it through forEachProvider.
+    // Single-shot — second call returns empty.
+    std::string pop_recovered_crash() {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        std::string out = std::move(recovered_crash_json_);
+        recovered_crash_json_.clear();
+        return out;
+    }
+
 private:
     Config           config_;
     ut_platform      platform_;
@@ -85,6 +97,7 @@ private:
     std::string      device_json_;        // device/app metadata, attached to every event
     long long        init_time_ms_ = 0;   // when the tracker initialized (for crash_on_launch)
     std::string      started_session_;    // last session id we emitted session_start for (dedupe)
+    std::string      recovered_crash_json_; // popped via pop_recovered_crash() by binding
 
     // Window after init within which a crash counts as a "launch crash".
     static constexpr long long kLaunchCrashWindowMs = 5000;

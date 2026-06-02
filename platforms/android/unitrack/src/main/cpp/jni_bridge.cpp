@@ -207,6 +207,18 @@ JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogAppStart(
     JNIEnv*, jobject, jlong p, jlong ms) { ut_log_app_start(ctx_of(p), (long)ms); }
 
+// Pop the JSON the core stashed at init() from crash-pending.json. UniTrack.kt
+// calls this AFTER providers init and fans out the crash via forEachProvider
+// so Snowplow / Firebase see the recovered crash through their own track()
+// paths (the C++ track() inside ut_init only reaches the offline queue).
+// Returns "" when nothing to pop. Single-shot.
+JNIEXPORT jstring JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativePopRecoveredCrash(
+    JNIEnv* env, jobject, jlong p) {
+    const char* s = ut_pop_recovered_crash(ctx_of(p));
+    return env->NewStringUTF(s ? s : "");
+}
+
 // W3C distributed tracing — mint a (trace_id, span_id) pair for the calling
 // HTTP request. Returns a length-2 String[] {traceId, spanId}, both already
 // lowercase hex. The core helper is pure and doesn't touch ut_context — keep

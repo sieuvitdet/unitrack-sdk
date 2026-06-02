@@ -2,6 +2,7 @@ package com.unitrack.sdk
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import com.unitrack.sdk.bridge.NativeBridge
 import com.unitrack.sdk.lifecycle.ActivityTracker
 import com.unitrack.sdk.lifecycle.AppLifecycleObserver
@@ -26,6 +27,24 @@ object UniTrack {
     // forwarded to each one. Empty by default — core has zero such dependencies.
     private val providers = mutableListOf<AnalyticsProvider>()
     private var appRef: Application? = null
+
+    /**
+     * Per-event Log of what flows through UniTrack/Snowplow/Firebase. Default ON
+     * so integrators see traffic immediately while wiring the SDK up; flip to OFF
+     * (UniTrack.verboseLogging = false) before shipping a release build.
+     */
+    @JvmField
+    var verboseLogging: Boolean = true
+
+    /**
+     * Provider/helper code uses this instead of Log.i directly so the integrator
+     * can mute every log line with one flag. Format mirrors NSLog on iOS for
+     * cross-platform parity.
+     */
+    @JvmStatic
+    fun log(tag: String, msg: String) {
+        if (verboseLogging) android.util.Log.i(tag, msg)
+    }
 
     /** Register a provider to also receive every event. Call BEFORE initialize();
      *  if called afterwards, the provider is initialized immediately. */
@@ -79,6 +98,24 @@ object UniTrack {
 
         // Bring up any providers registered before initialize().
         forEachProvider { it.initialize(app) }
+
+        // Pop any crash the core recovered at init() time (from crash-pending.json).
+        // Core already enqueued it to the offline queue (→ portal HTTP); this
+        // re-emits through provider track() so Snowplow + Firebase see the
+        // recovered crash through their own paths (matches iOS behavior).
+        val recoveredJson = NativeBridge.popRecoveredCrash()
+        if (recoveredJson.isNotEmpty()) {
+            try {
+                val obj = JSONObject(recoveredJson)
+                val props = HashMap<String, Any?>(obj.length() + 1)
+                obj.keys().forEach { k -> props[k] = obj.opt(k) }
+                props["recovered_on_launch"] = true
+                Log.i("UniTrack", "fan-out recovered crash to ${providers.size} provider(s)")
+                forEachProvider { it.track("crash", props) }
+            } catch (e: Throwable) {
+                Log.w("UniTrack", "popRecoveredCrash: parse failed: ${e.message}")
+            }
+        }
     }
 
     @JvmStatic
@@ -101,6 +138,9 @@ object UniTrack {
         val matchEvent: String,
         val matchScreen: String?,
         val matchElementKey: String?,
+        /** View class name (target.javaClass.name from ClickTracker) — useful
+         *  when label text is dynamic / localized but class is stable. */
+        val matchClassName: String? = null,
         val toName: String,
         val addProps: Map<String, Any?> = emptyMap(),
     )
@@ -165,10 +205,12 @@ object UniTrack {
     private fun applyRules(event: String, props: Map<String, Any?>): Pair<String, Map<String, Any?>>? {
         val screen = (props["screen"] ?: props["screen_name"]) as? String
         val elem = props["element_key"] as? String
+        val cls  = props["class_name"] as? String
         for (r in eventRules) {
             if (r.matchEvent != event) continue
             if (r.matchScreen != null && r.matchScreen != screen) continue
             if (r.matchElementKey != null && r.matchElementKey != elem) continue
+            if (r.matchClassName != null && r.matchClassName != cls) continue
             return r.toName to (props + r.addProps)
         }
         return null
@@ -179,7 +221,14 @@ object UniTrack {
     fun track(event: String, properties: Map<String, Any?> = emptyMap()) {
         var name = event
         var props = properties
-        applyRules(event, properties)?.let { (n, p) -> name = n; props = p }
+        applyRules(event, properties)?.let { (n, p) ->
+            name = n; props = p
+            log("UniTrack", "rule rewrite: $event → $n")
+        }
+        if (verboseLogging) {
+            val provNames = providers.joinToString(",") { it::class.simpleName ?: "?" }
+            log("UniTrack", "track event=\"$name\" props=${JSONObject(props)} → providers=[${if (provNames.isEmpty()) "(none)" else provNames}]")
+        }
         forEachProvider { it.track(name, props) }
         // Guard the native call: a tracking call can arrive before initialize()
         // finishes (e.g. RN's navigation tracker fires setScreen on first render
@@ -249,6 +298,28 @@ object UniTrack {
 
     @JvmStatic
     fun flush() { if (initialized) NativeBridge.flush() }
+
+    // Hosts/substrings excluded from network auto-capture. Providers add their
+    // own collector/upload URLs here so the SDK never captures-and-re-forwards
+    // its own analytics traffic into an amplifying loop.
+    @Volatile
+    internal var networkExclusions: List<String> = emptyList()
+    private val exclusionLock = Object()
+
+    /**
+     * Exclude a URL (matched by substring, e.g. a host) from network
+     * auto-capture. Providers (FirebaseProvider, SnowplowProvider) call this
+     * for their own collector/upload URLs to break the capture-forward-capture
+     * cycle.
+     */
+    @JvmStatic
+    fun excludeFromNetworkCapture(urlContaining: String) {
+        synchronized(exclusionLock) {
+            if (urlContaining.isEmpty()) return
+            if (networkExclusions.contains(urlContaining)) return
+            networkExclusions = networkExclusions + urlContaining
+        }
+    }
 
     @JvmStatic
     fun setEnabled(enabled: Boolean) { if (initialized) NativeBridge.setEnabled(enabled) }

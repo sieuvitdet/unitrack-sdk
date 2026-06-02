@@ -1,0 +1,10 @@
+jdk:
+  - openjdk17
+
+# The Android SDK lives under platforms/android/, not the repo root. JitPack
+# defaults to `./gradlew install` at the root — we redirect to the right place
+# and publish the :unitrack, :unitrack-firebase, :unitrack-snowplow modules to
+# the local Maven repo that JitPack hosts under the resulting tag.
+install:
+  - cd platforms/android
+  - ./gradlew :unitrack:publishToMavenLocal :unitrack-firebase:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -x test

@@ -103,6 +103,13 @@ object NativeBridge {
     fun logBackground()              = nativeLogBackground(ctxPtr)
     fun logAppStart(coldStartMs: Long) = nativeLogAppStart(ctxPtr, coldStartMs)
 
+    /** Pop the crash JSON the core enqueued at init() time (from
+     *  crash-pending.json). Empty string if nothing to recover. Single-shot —
+     *  the second call returns "". UniTrack.kt fans this out to providers
+     *  AFTER they've initialized so Snowplow / Firebase see the recovered
+     *  crash through their own track() paths. */
+    fun popRecoveredCrash(): String = nativePopRecoveredCrash(ctxPtr)
+
     /**
      * W3C distributed-tracing helper. Returns Pair(traceId, spanId) — both
      * lowercase hex (trace_id 32 chars, span_id 16 chars). Pure native call,
@@ -147,6 +154,7 @@ object NativeBridge {
     private external fun nativeLogForeground(ctx: Long)
     private external fun nativeLogBackground(ctx: Long)
     private external fun nativeLogAppStart(ctx: Long, coldStartMs: Long)
+    private external fun nativePopRecoveredCrash(ctx: Long): String
     // length-2 result: [traceId 32-hex, spanId 16-hex]
     private external fun nativeNewTrace(): Array<String>
 }

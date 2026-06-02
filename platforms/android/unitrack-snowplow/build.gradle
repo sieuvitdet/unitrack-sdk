@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.android'
+    id 'maven-publish'
 }
 
 android {
@@ -16,6 +17,12 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
     kotlinOptions { jvmTarget = '11' }
+
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
@@ -23,4 +30,15 @@ dependencies {
     implementation project(':unitrack')
     // The real Snowplow Android tracker.
     implementation 'com.snowplowanalytics:snowplow-android-tracker:6.0.0'
+}
+
+publishing {
+    publications {
+        release(MavenPublication) {
+            groupId    = 'com.github.sieuvitdet.unitrack-sdk'
+            artifactId = 'unitrack-snowplow'
+            version    = project.findProperty('VERSION_NAME') ?: '1.0.0'
+            afterEvaluate { from components.release }
+        }
+    }
 }

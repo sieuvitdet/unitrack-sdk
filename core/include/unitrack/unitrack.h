@@ -197,6 +197,20 @@ UT_EXPORT size_t ut_format_traceparent(const ut_trace_ids* ids,
 /* SDK version */
 UT_EXPORT const char* ut_version(void);
 
+/* ============================================================
+ * Crash recovery hand-off
+ * ============================================================
+ *
+ * On startup ut_init reads crash-pending.json and enqueues a `crash` event
+ * for the queue (→ portal HTTP). But platform-side providers (Snowplow,
+ * Firebase) live above the C ABI and don't see that enqueue. Binding code
+ * calls ut_pop_recovered_crash() AFTER providers are initialized to grab
+ * the same JSON payload, then forwards it to providers via its own
+ * forEachProvider fan-out. Returns "" if nothing to pop. Single-shot — a
+ * second call returns "" even if the first was non-empty. Buffer owned by
+ * the SDK; caller must NOT free. */
+UT_EXPORT const char* ut_pop_recovered_crash(ut_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif

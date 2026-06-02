@@ -45,7 +45,23 @@ Tracker::Tracker(Config cfg, ut_platform platform)
     // already up long enough last time to capture and persist it).
     std::string pending = CrashHandler::flush_pending_crash(dir);
     if (!pending.empty()) {
-        track("crash", inject_crash_on_launch(pending, false));
+        std::string injected = inject_crash_on_launch(pending, false);
+        track("crash", injected);
+        // Stash for the binding to pop after providers initialize, so
+        // Snowplow / Firebase / etc. see the recovered crash through
+        // their own track() paths (the C++ track() above only reaches
+        // the offline queue / portal HTTP, not platform providers).
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            recovered_crash_json_ = injected;
+        }
+        // Crashes are too important to wait on the batch_size threshold —
+        // a user who immediately kills the recovered app would lose the
+        // event. Ask the worker to flush ASAP on its first tick.
+        {
+            std::lock_guard<std::mutex> lock(worker_mu_);
+            flush_requested_ = true;
+        }
     }
 
     worker_ = std::thread(&Tracker::worker_loop, this);
