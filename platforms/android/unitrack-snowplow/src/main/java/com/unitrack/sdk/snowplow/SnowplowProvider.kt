@@ -118,13 +118,8 @@ class SnowplowProvider(
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$name\" — _skip_snowplow=true")
             return
         }
-        // Per-name override: portal `event_names[<raw>]` rewrites SDK auto-events
-        // (tap / network_request / crash / …) onto a custom name before the
-        // schema is built. Convention helpers (trackingClickEvent etc.) keep
-        // their own kind-based lookup; this is for the catch-all path only.
-        val resolved = eventNames[name]?.takeIf { it.isNotEmpty() } ?: name
-        val schema = schemaFor(resolved) ?: return
-        trackSelfDescribingInternal(schema, resolved, properties, null, false)
+        val schema = schemaFor(name) ?: return
+        trackSelfDescribingInternal(schema, name, properties, null, false)
     }
 
     override fun setScreen(name: String) {

@@ -1020,14 +1020,17 @@ async function renderConfig(pid){
           </div>
         </div>
         ${(() => {
-          // Convention table mixes two row types:
-          //   1) 5 built-in "kinds" (click / result / screen_view / crash / api)
-          //      — drive the typed tracking* helpers on the SDK side.
-          //   2) N custom "raw event" rows — rewrite SDK auto-events
-          //      (tap / network_request / crash / camera_stream_buffering / …)
-          //      onto custom names before the schema URI is built.
-          // SDK lookup: convention helpers read by kind, track(name, …) reads
-          // by raw name. Both share the same eventNames map on the wire.
+          // Convention kinds — each kind has a resolved event name that the
+          // SDK turns into iglu:<vendor>/<event_name>/jsonschema/<version>.
+          //   1) 5 BUILT-IN kinds (click / result / screen_view / crash / api)
+          //      drive the matching typed helpers shipped with the SDK.
+          //   2) N CUSTOM kinds the operator declares here (vd ev_error,
+          //      ev_open). To get a typed helper for them on the app side,
+          //      run `swift run unitrack-gen` after saving — the generator
+          //      reads this list and emits trackingEvError(…) etc.
+          // Both row types live in the same event_names map on the wire;
+          // the SDK's built-in helpers read by kind, generated helpers
+          // call trackSelfDescribing with the pre-built schema URI.
           const ev = sp.event_names || sp.eventNames || {};
           const builtin = [
             ['click',       'event_click',        'trackingClickEvent'],
@@ -1037,18 +1040,21 @@ async function renderConfig(pid){
             ['api',         'event_api',          'trackingAPI'],
           ];
           const builtinKeys = new Set(builtin.map((r) => r[0]));
-          // Anything in event_names that isn't a built-in kind is a custom row.
+          // Anything in event_names that isn't a built-in kind is a custom kind.
           const customRows = Object.entries(ev)
             .filter(([k]) => !builtinKeys.has(k))
             .map(([k, v]) => [k, v || '']);
+          // Translate snake_case kind → CamelCase helper suffix for preview.
+          const helperName = (kind) => 'tracking' +
+            kind.split('_').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
           return `
             <div style="margin-top:12px;border:1px solid var(--line);border-radius:6px;overflow:hidden">
               <table style="width:100%;border-collapse:collapse;font-size:12px">
                 <thead style="background:var(--bg-tab,#1a1a1a)">
                   <tr>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:24%">Source</th>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:24%">Raw event</th>
-                    <th style="text-align:left;padding:6px 10px;font-weight:600">Resolved event name</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:24%">Helper (app API)</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600;width:18%">Kind</th>
+                    <th style="text-align:left;padding:6px 10px;font-weight:600">Event name (→ iglu schema)</th>
                     <th style="width:36px"></th>
                   </tr>
                 </thead>
@@ -1064,21 +1070,21 @@ async function renderConfig(pid){
                       </td>
                       <td style="padding:4px 6px;text-align:center"><span class="muted" title="Built-in kind — cannot remove" style="font-size:13px">—</span></td>
                     </tr>`).join('')}
-                  ${customRows.map(([raw, resolved]) => `
+                  ${customRows.map(([kind, resolved]) => `
                     <tr data-builtin="0" style="border-top:1px solid var(--line)">
-                      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">UniTrack.track(…)</span></td>
+                      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px" title="Generated after running 'swift run unitrack-gen'">${esc(helperName(kind))}</span></td>
                       <td style="padding:4px 8px">
-                        <input class="cf-sp-ev-raw" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                               placeholder="vd: tap"
-                               value="${esc(raw)}"/>
+                        <input class="cf-sp-ev-kind" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                               placeholder="vd: ev_error"
+                               value="${esc(kind)}"/>
                       </td>
                       <td style="padding:4px 8px">
                         <input class="cf-sp-ev-resolved" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                               placeholder="(trống = giữ raw name)"
+                               placeholder="(trống = giữ kind name)"
                                value="${esc(resolved)}"/>
                       </td>
                       <td style="padding:4px 6px;text-align:center">
-                        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
+                        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá kind" style="padding:2px 8px">✕</button>
                       </td>
                     </tr>`).join('')}
                 </tbody>
@@ -1086,10 +1092,13 @@ async function renderConfig(pid){
             </div>
             <div class="row" style="margin-top:8px;justify-content:space-between;align-items:center;gap:8px">
               <div class="muted" style="font-size:10.5px;flex:1">
-                <b>Built-in kinds</b>: convention helper trên app dùng (vd <span class="mono">trackingClickEvent</span> → kind "click").
-                <b>Raw event rows</b>: rewrite auto-event SDK swizzler (<span class="mono">tap</span>, <span class="mono">network_request</span>, …) hoặc manual <span class="mono">UniTrack.track("X", …)</span> sang tên khác trước khi build schema iglu.
+                <b>Built-in kinds</b> đi kèm SDK — app dùng ngay sp.<span class="mono">trackingClickEvent(...)</span>.
+                <b>Custom kinds</b> chỉ tồn tại trên portal cho đến khi dev run
+                <span class="mono">swift run unitrack-gen</span> để generate helper
+                trên app (vd kind <span class="mono">ev_error</span> → <span class="mono">trackingEvError(data:)</span>).
+                Sau khi generate, app build lại + có IDE autocomplete.
               </div>
-              <button class="btn ghost sm" id="cfSpEvAdd" type="button" title="Thêm 1 row map raw event → resolved name">+ Add event</button>
+              <button class="btn ghost sm" id="cfSpEvAdd" type="button" title="Thêm 1 kind custom — sau khi save, run swift run unitrack-gen để có helper">+ Add convention kind</button>
             </div>`;
         })()}
 
@@ -1338,35 +1347,52 @@ async function renderConfig(pid){
     if (btn) btn.closest('tr')?.remove();
   });
 
-  // ── Convention table — Add custom raw-event row (+/×) ─────────────────
+  // ── Convention table — Add custom convention kind (+/×) ───────────────
   // 5 built-in kind rows above are read-only; this lets the operator append
-  // N raw-event mappings (vd "tap" → "isc_event_click", "camera_stream_buffering"
-  // → "isc_event_buffering") so SDK auto-fire events land under a small set
-  // of iglu schemas the backend already registered.
+  // N custom kinds (vd "ev_error", "ev_open"). After save, dev runs
+  // `swift run unitrack-gen` to generate trackingEvError(…) / trackingEvOpen(…)
+  // helpers on the app side. App rebuild required (build-time code-gen).
   const evBody = document.getElementById('cfSpEvBody');
+  // Snake_case → CamelCase preview to mirror the helper name the generator emits.
+  const helperPreview = (kind) => 'tracking' +
+    (kind || '').split('_').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
   document.getElementById('cfSpEvAdd')?.addEventListener('click', () => {
     if (!evBody) return;
     const tr = document.createElement('tr');
     tr.setAttribute('data-builtin', '0');
     tr.style.borderTop = '1px solid var(--line)';
     tr.innerHTML = `
-      <td style="padding:6px 10px"><span class="mono muted" style="font-size:11px">UniTrack.track(…)</span></td>
+      <td style="padding:6px 10px"><span class="mono muted cf-sp-ev-helper-preview" style="font-size:11px" title="Generated after swift run unitrack-gen">tracking…</span></td>
       <td style="padding:4px 8px">
-        <input class="cf-sp-ev-raw" placeholder="vd: tap"
+        <input class="cf-sp-ev-kind" placeholder="vd: ev_error"
                style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
       </td>
       <td style="padding:4px 8px">
-        <input class="cf-sp-ev-resolved" placeholder="(trống = giữ raw name)"
+        <input class="cf-sp-ev-resolved" placeholder="(trống = giữ kind name)"
                style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"/>
       </td>
       <td style="padding:4px 6px;text-align:center">
-        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá row" style="padding:2px 8px">✕</button>
+        <button class="cf-sp-ev-del btn ghost sm" type="button" title="Xoá kind" style="padding:2px 8px">✕</button>
       </td>`;
     evBody.appendChild(tr);
+    // Live preview helper name as operator types the kind — visual confirm
+    // they're picking a name that'll generate cleanly.
+    const kindInput = tr.querySelector('.cf-sp-ev-kind');
+    const preview = tr.querySelector('.cf-sp-ev-helper-preview');
+    kindInput?.addEventListener('input', () => {
+      preview.textContent = helperPreview(kindInput.value.trim()) || 'tracking…';
+    });
   });
+  // Delete + live preview for already-rendered rows (server-side rendered ones).
   evBody?.addEventListener('click', (e) => {
     const btn = (e.target instanceof Element) ? e.target.closest('.cf-sp-ev-del') : null;
     if (btn) btn.closest('tr')?.remove();
+  });
+  evBody?.addEventListener('input', (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target || !target.classList.contains('cf-sp-ev-kind')) return;
+    const preview = target.closest('tr')?.querySelector('.cf-sp-ev-helper-preview');
+    if (preview) preview.textContent = helperPreview(target.value.trim()) || 'tracking…';
   });
 
   // Legacy blueprint / schemas / preview handlers removed — those sections
@@ -1589,14 +1615,17 @@ async function renderConfig(pid){
         .filter(([_, v]) => v)
     );
 
-    // Custom raw-event rows — append below the 5 built-in kinds. Each row
-    // becomes another key in event_names so SDK SnowplowProvider.track(raw)
-    // rewrites to the resolved value. Skip rows missing the raw input;
-    // empty resolved = no rewrite (last row wins on duplicate raw).
+    // Custom convention kind rows — append below the 5 built-in kinds. Each
+    // row registers another kind in event_names; the code-gen CLI reads this
+    // list to emit a `tracking<Kind>(…)` helper. Empty resolved = the SDK
+    // uses the kind name itself as the event name. Skip rows missing the
+    // kind input; deduplicate on kind (last row wins).
     document.querySelectorAll('#cfSpEvBody tr[data-builtin="0"]').forEach((tr) => {
-      const raw      = (tr.querySelector('.cf-sp-ev-raw')?.value      || '').trim();
+      const kind     = (tr.querySelector('.cf-sp-ev-kind')?.value     || '').trim();
       const resolved = (tr.querySelector('.cf-sp-ev-resolved')?.value || '').trim();
-      if (raw && resolved) eventNames[raw] = resolved;
+      // Persist the kind even when resolved is empty — the SDK falls back
+      // to the kind itself; the operator-supplied resolved is only an override.
+      if (kind) eventNames[kind] = resolved || kind;
     });
 
     // Auto-attached entities: walk every row of the dynamic table. Skip rows

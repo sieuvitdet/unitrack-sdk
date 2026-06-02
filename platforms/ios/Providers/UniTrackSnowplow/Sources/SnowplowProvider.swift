@@ -171,19 +171,10 @@ public final class SnowplowProvider: AnalyticsProvider {
     /// Generic catch-all that the UniTrack core fans events out to. Routed
     /// through the convention path: `name` becomes the event name, schema URI
     /// is built from vendor + name + version. App code should prefer the
-    /// typed tracking* helpers — this exists so AnalyticsProvider's protocol
-    /// requirement is met and so manual `UniTrack.track("foo", ...)` calls
-    /// still reach Snowplow under a deterministic schema.
-    ///
-    /// Per-name override: portal `event_names[<raw>]` rewrites the raw event
-    /// name to a custom one before the schema is built. Lets a project map
-    /// SDK auto-events (`tap`, `network_request`, `crash`, …) onto a small
-    /// iglu schema set on the backend without re-coding the SDK swizzlers.
+    /// typed tracking* helpers (built-in + generated per-kind) for type safety.
     public func track(_ name: String, _ properties: [String: Any]) {
-        let override = eventNames[name]
-        let resolved = (override?.isEmpty == false) ? override! : name
-        guard let schema = schemaFor(eventName: resolved) else { return }
-        trackSelfDescribing(schema: schema, eventName: resolved,
+        guard let schema = schemaFor(eventName: name) else { return }
+        trackSelfDescribing(schema: schema, eventName: name,
                             data: properties, extraContexts: nil,
                             skipGlobalContexts: false)
     }
