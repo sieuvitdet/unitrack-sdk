@@ -112,12 +112,31 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     // libraries (e.g. `_InkResponseStateMixin`) start with underscore + a
     // material-flavour name. Everything else → "app".
     final pkg = _classifyFlutterWidget(resolved.type);
+    // Debug breadcrumb so app authors can see exactly what the auto-tap
+     // captured (element_key, screen, widget type). Without this they have to
+     // guess what to put into portal rule fields. Off in release.
+    // `class_name` prefers the enclosing app widget (CustomButton) over the
+    // raw interactive type (GestureDetector). That makes the field useful as
+    // a portal rule match_class_name: it points at an app component the dev
+    // already named, instead of the framework primitive every tap collapses to.
+    final className = resolved.wrapperClass ?? resolved.type;
+    assert(() {
+      // ignore: avoid_print
+      debugPrint('[unitrack] tap element_key="${resolved.key}" '
+          'screen="${known ? flutterScreen : "(none)"}" '
+          'class_name=$className (interactive=${resolved.type}) '
+          'package=$pkg');
+      return true;
+    }());
     UniTrack.instance.track('tap', properties: {
+      // `element_key` is the canonical cross-platform name (matches iOS/Android
+      // bindings + portal rule field `match_element_key`). Keep `element` as
+      // a backwards-compat alias for any portal query still on the old key.
+      'element_key': resolved.key,
       'element': resolved.key,
-      'element_type': resolved.type,
-      'class_name': resolved.type,        // Same as element_type — kept under
-                                          // its cross-platform key so portal
-                                          // queries don't need to know which.
+      'element_type': resolved.type,            // raw interactive widget type
+      'class_name': className,                  // wrapper class if any, else type
+      if (resolved.wrapperClass != null) 'wrapper_class': resolved.wrapperClass,
       'framework': 'flutter',
       'package': pkg,
       if (known) 'screen': flutterScreen,
@@ -183,9 +202,23 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     String? iconName;       // IconData semantic label (icon-only buttons)
     String? interactiveType;
     Element? interactiveEl;
+    // First app-defined widget class walked outward from the hit point.
+    // E.g. tapping inside `CustomButton(child: GestureDetector(child: Text))`,
+    // interactiveType resolves to GestureDetector but wrapperClass picks
+    // CustomButton — a stable handle for portal rules to target.
+    String? wrapperClass;
 
     for (final el in chain.reversed) {
       final w = el.widget;
+      if (wrapperClass == null) {
+        final t = w.runtimeType.toString();
+        // Skip generated `_*State` and obvious Material/Cupertino/widgets
+        // names — those aren't useful app component handles. Public app
+        // classes (CustomButton, CheckoutTile) get picked up here.
+        if (!t.startsWith('_') && _classifyFlutterWidget(t) == 'app') {
+          wrapperClass = t;
+        }
+      }
       if (semantic == null && w is Semantics) {
         final id = w.properties.identifier;
         final lbl = w.properties.label;
@@ -254,7 +287,12 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
       final wordish = RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(t);
       if (t.isEmpty || t.length > 40 || !wordish) return null;
     }
-    return _ResolvedTap(key: key, type: interactiveType ?? 'unknown', text: text ?? tooltip);
+    return _ResolvedTap(
+      key: key,
+      type: interactiveType ?? 'unknown',
+      wrapperClass: wrapperClass,
+      text: text ?? tooltip,
+    );
   }
 
   // Resolve a readable name from an IconData. Flutter's IconData has a
@@ -316,8 +354,13 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
 class _ResolvedTap {
   final String key;
   final String type;
+  /// Nearest enclosing app-defined widget class (e.g. `CustomButton`) walked
+  /// upward from the interactive widget. `null` if the chain is all
+  /// Material/Cupertino/widgets builtins. Lets portal rules target a stable
+  /// app component instead of text labels that change per-locale.
+  final String? wrapperClass;
   final String? text;
-  _ResolvedTap({required this.key, required this.type, this.text});
+  _ResolvedTap({required this.key, required this.type, this.wrapperClass, this.text});
 }
 
 /// Tracks the current screen and forwards screen_view to the SDK.
@@ -334,13 +377,36 @@ class UniTrackRouteObserver extends NavigatorObserver {
     final name = _screenName(r);
     currentScreen = name;
     UniTrack.instance.setScreen(name);
+
+    // Measure load_ms = didPush → first endOfFrame. Mirrors the iOS swizzler's
+    // viewDidLoad → viewDidAppear and the Android FragmentLifecycleCallbacks'
+    // onFragmentCreated → onFragmentResumed window. Skipped for didPop since
+    // popping returns to an already-laid-out screen (load_ms would be ~0 and
+    // misleading; we just re-setScreen for the destination above).
+    if (!_measureLoad) return;
+    _measureLoad = false;
+    final startedAt = DateTime.now();
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      final loadMs = DateTime.now().difference(startedAt).inMilliseconds;
+      UniTrack.instance.track(UniTrack.screenLoadEventName, properties: {
+        'screen': name,
+        'load_ms': loadMs,
+      });
+    });
   }
 
+  // Single-shot guard: didPush and didReplace measure; didPop does not.
+  bool _measureLoad = false;
+
   /// Resolve the most meaningful name for a route:
+  ///   0. auto_route AutoRoutePage → settings.routeData.name (duck-typed
+  ///      because auto_route is an optional dep — we can't import it here);
   ///   1. the class of the widget it builds (ProductListScreen), if obtainable;
   ///   2. else the route's settings.name (/products);
   ///   3. else the route's own runtimeType.
   String _screenName(PageRoute<dynamic> r) {
+    final autoRouteName = _autoRouteName(r);
+    if (autoRouteName != null && autoRouteName.isNotEmpty) return autoRouteName;
     final widgetType = _builtWidgetType(r);
     if (widgetType != null && widgetType.isNotEmpty) return widgetType;
     // settings.name is often '/' or empty for unnamed routes — those aren't
@@ -348,6 +414,29 @@ class UniTrackRouteObserver extends NavigatorObserver {
     final n = r.settings.name;
     if (n != null && n.isNotEmpty && n != '/') return n;
     return r.runtimeType.toString();
+  }
+
+  /// auto_route puts every route's logical name on `AutoRoutePage.routeData.name`
+  /// (e.g. `DetailDeploymentRemainingShiftRoute`). The page object is `r.settings`
+  /// (auto_route uses the Flutter Pages API), so we can read it through dynamic
+  /// duck-typing — keeps auto_route an OPTIONAL dependency that the SDK never
+  /// imports. Apps not using auto_route just see this return null and the next
+  /// resolution step picks up.
+  String? _autoRouteName(PageRoute<dynamic> r) {
+    try {
+      final s = r.settings;
+      // settings is the Page object on auto_route routes; its runtime type
+      // typically starts with "AutoRoutePage" (with a generic suffix).
+      if (!s.runtimeType.toString().contains('AutoRoutePage')) return null;
+      final routeData = (s as dynamic).routeData;
+      if (routeData == null) return null;
+      final name = routeData.name;
+      if (name is String && name.isNotEmpty) return name;
+    } catch (_) {
+      // settings isn't an AutoRoutePage, or auto_route shape changed — fine,
+      // the caller will fall through to widget-type / settings.name.
+    }
+    return null;
   }
 
   /// Build the route's widget once (in the navigator's context) and read its
@@ -370,11 +459,20 @@ class UniTrackRouteObserver extends NavigatorObserver {
   }
 
   @override
-  void didPush(Route route, Route? previousRoute) => _set(route);
+  void didPush(Route route, Route? previousRoute) {
+    _measureLoad = true;
+    _set(route);
+  }
   @override
-  void didReplace({Route? newRoute, Route? oldRoute}) => _set(newRoute);
+  void didReplace({Route? newRoute, Route? oldRoute}) {
+    _measureLoad = true;
+    _set(newRoute);
+  }
   @override
-  void didPop(Route route, Route? previousRoute) => _set(previousRoute);
+  void didPop(Route route, Route? previousRoute) {
+    // didPop: returning to a previously-built route — no load measurement.
+    _set(previousRoute);
+  }
 }
 
 // ---------------------------------------------------------------------------

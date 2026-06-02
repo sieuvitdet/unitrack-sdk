@@ -326,7 +326,7 @@ public final class UniTrack {
         // enqueued it to the offline queue (→ portal HTTP); this re-emits
         // through provider track() so Snowplow's convention helpers +
         // Firebase's sanitizer process it like a live crash.
-        if let ctx = context, !providers.isEmpty {
+        if let ctx = context {
             let cstr = ut_pop_recovered_crash(ctx)
             let json = cstr.map { String(cString: $0) } ?? ""
             if !json.isEmpty,
@@ -334,11 +334,29 @@ public final class UniTrack {
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 var props = dict
                 props["recovered_on_launch"] = true
-                UniTrack.log("[UniTrack] fan-out recovered crash to %d provider(s)",
-                             providers.count)
-                for p in providers { p.track("crash", props) }
+                if !providers.isEmpty {
+                    UniTrack.log("[UniTrack] fan-out recovered crash to %d provider(s)",
+                                 providers.count)
+                    for p in providers { p.track("crash", props) }
+                }
+                // Stash for the Flutter plugin to forward up to Dart (the
+                // Flutter app may host its own Dart-side providers that the
+                // native provider fan-out above doesn't reach). Single-shot.
+                Self.pendingRecoveredCrashForFlutter = props
             }
         }
+    }
+
+    /// Single-shot drain for the Flutter MethodChannel bridge. Returns the
+    /// JSON-encoded recovered crash props (with `recovered_on_launch=true`)
+    /// captured during initialize(), or nil if nothing to forward. Native
+    /// iOS apps (UIKit / SwiftUI) don't need this; it exists so the Flutter
+    /// plugin can push the same payload up the channel to Dart-side providers.
+    private static var pendingRecoveredCrashForFlutter: [String: Any]?
+    public static func takeRecoveredCrashJsonForFlutter() -> String? {
+        guard let props = pendingRecoveredCrashForFlutter else { return nil }
+        pendingRecoveredCrashForFlutter = nil
+        return UniTrack.jsonString(from: props)
     }
 
     // MARK: - Helpers

@@ -160,12 +160,31 @@ object UniTrack {
                 val props = HashMap<String, Any?>(obj.length() + 1)
                 obj.keys().forEach { k -> props[k] = obj.opt(k) }
                 props["recovered_on_launch"] = true
-                Log.i("UniTrack", "fan-out recovered crash to ${providers.size} provider(s)")
-                forEachProvider { it.track("crash", props) }
+                if (providers.isNotEmpty()) {
+                    Log.i("UniTrack", "fan-out recovered crash to ${providers.size} provider(s)")
+                    forEachProvider { it.track("crash", props) }
+                }
+                // Stash the JSON for the Flutter plugin to forward up to Dart
+                // (Flutter apps may host Dart-side providers that the native
+                // forEachProvider loop above doesn't reach). Single-shot.
+                pendingRecoveredCrashJsonForFlutter = JSONObject(props as Map<*, *>).toString()
             } catch (e: Throwable) {
                 Log.w("UniTrack", "popRecoveredCrash: parse failed: ${e.message}")
             }
         }
+    }
+
+    /// Single-shot drain for the Flutter MethodChannel bridge. Returns the
+    /// JSON-encoded recovered crash props (with `recovered_on_launch=true`)
+    /// captured during initialize(), or "" if nothing to forward. Native apps
+    /// (pure Android Kotlin/Java) don't need this; it exists so the Flutter
+    /// plugin can forward the same payload up the channel to Dart providers.
+    @Volatile private var pendingRecoveredCrashJsonForFlutter: String? = null
+    @JvmStatic
+    fun takeRecoveredCrashJsonForFlutter(): String {
+        val out = pendingRecoveredCrashJsonForFlutter ?: return ""
+        pendingRecoveredCrashJsonForFlutter = null
+        return out
     }
 
     @JvmStatic

@@ -50,6 +50,12 @@ class UniTrackConfig {
   /// Inactivity/background window (ms) after which a session is closed.
   final int sessionTimeoutMs;
 
+  /// Event name fired by UniTrackRouteObserver on each pushed/replaced route
+  /// with the load_ms timing. Mirrors iOS Config.screenLoadEvent and Android
+  /// UniTrackConfig.screenLoadEvent. Renameable via portal
+  /// `sdk_config.screen_load_event`.
+  final String screenLoadEvent;
+
   const UniTrackConfig({
     this.endpoint,
     this.batchSize = 50,
@@ -61,6 +67,7 @@ class UniTrackConfig {
     this.trackNetwork = true,
     this.journeyCapture = true,
     this.sessionTimeoutMs = 1800000,
+    this.screenLoadEvent = 'screen_load_completed',
   });
 
   Map<String, dynamic> toMap() => {
@@ -74,6 +81,7 @@ class UniTrackConfig {
         'trackNetwork': trackNetwork,
         'journeyCapture': journeyCapture,
         'sessionTimeoutMs': sessionTimeoutMs,
+        'screenLoadEvent': screenLoadEvent,
       };
 }
 
@@ -83,12 +91,17 @@ class UniTrackEventRule {
   final String matchEvent;
   final String? matchScreen;
   final String? matchElementKey;
+  /// Widget runtime-type name from auto-tap (e.g. "ElevatedButton",
+  /// "CustomButton"). Useful when label text is dynamic / multi-language
+  /// but the widget class is stable.
+  final String? matchClassName;
   final String toName;
   final Map<String, Object?> addProps;
   const UniTrackEventRule({
     required this.matchEvent,
     this.matchScreen,
     this.matchElementKey,
+    this.matchClassName,
     required this.toName,
     this.addProps = const {},
   });
@@ -101,6 +114,30 @@ class UniTrack {
   static const MethodChannel _channel = MethodChannel('unitrack');
   bool _initialized = false;
   DateTime? _initAt;
+
+  /// Event name fired by UniTrackRouteObserver on didPush / didReplace with
+  /// the screen + load_ms it took to reach first endOfFrame. Mirrors the iOS
+  /// swizzler / Android FragmentLifecycleCallbacks behavior. Renameable via
+  /// UniTrackConfig.screenLoadEvent (or portal sdk_config.screen_load_event).
+  static String screenLoadEventName = 'screen_load_completed';
+
+  /// App lifecycle listeners — apps register via [addLifecycleListener] to be
+  /// called when the SDK observes a foreground / background transition. The
+  /// SDK already emits app_foreground / app_background to the core's offline
+  /// queue (→ portal HTTP); this hook is for additional app-side tracking
+  /// (e.g. layering a `session_ended` business event through providers).
+  final List<void Function(bool toForeground)> _lifecycleListeners = [];
+
+  void addLifecycleListener(void Function(bool toForeground) listener) {
+    _lifecycleListeners.add(listener);
+  }
+
+  void _dispatchLifecycle(bool toForeground) {
+    for (final l in _lifecycleListeners) {
+      try { l(toForeground); }
+      catch (e) { debugPrint('[UniTrack] lifecycle listener: $e'); }
+    }
+  }
 
   // Registered third-party providers (Snowplow, Firebase, …). Every event is
   // forwarded to each one. Empty by default — core has zero such dependencies.
@@ -138,6 +175,11 @@ class UniTrack {
       {UniTrackConfig? config, bool captureErrors = true}) async {
     if (_initialized) return;
     final cfg = config ?? const UniTrackConfig();
+    // Resolve the swizzler-side static so RouteObserver's load_ms fire emits
+    // the right event name (portal sdk_config can rename it without rebuild).
+    if (cfg.screenLoadEvent.isNotEmpty) {
+      screenLoadEventName = cfg.screenLoadEvent;
+    }
     await _channel.invokeMethod('initialize', {
       'apiKey': apiKey,
       'config': jsonEncode(cfg.toMap()),
@@ -145,6 +187,8 @@ class UniTrack {
     _initialized = true;
     _initAt = DateTime.now();
     if (captureErrors) _installErrorHandlers();
+    _installLifecycleObserver();
+    _installNativeCallbackHandler();
     // Bring up any providers registered before initialize().
     for (final p in _providers) {
       try {
@@ -153,6 +197,45 @@ class UniTrack {
         debugPrint('[UniTrack] provider init failed: $e\n$s');
       }
     }
+  }
+
+  _UniTrackLifecycleObserver? _lifecycleObserver;
+  void _installLifecycleObserver() {
+    if (_lifecycleObserver != null) return;
+    final o = _UniTrackLifecycleObserver((toForeground) => _dispatchLifecycle(toForeground));
+    WidgetsBinding.instance.addObserver(o);
+    _lifecycleObserver = o;
+  }
+
+  // The native plugin invokes `onRecoveredCrash` on this channel after init
+  // when the core had stashed a crash from the previous launch. We forward
+  // the JSON props through provider track() so Dart-side providers (Snowplow
+  // / Firebase Flutter packages) see the recovered crash, matching what the
+  // native fan-out already did for native providers.
+  bool _nativeCallbackHandlerInstalled = false;
+  void _installNativeCallbackHandler() {
+    if (_nativeCallbackHandlerInstalled) return;
+    _nativeCallbackHandlerInstalled = true;
+    _channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onRecoveredCrash':
+          final args = call.arguments;
+          final raw = (args is Map) ? args['props'] : null;
+          if (raw is String && raw.isNotEmpty) {
+            try {
+              final dynamic decoded = jsonDecode(raw);
+              if (decoded is Map<String, dynamic>) {
+                debugPrint('[UniTrack] fan-out recovered crash to ${_providers.length} Dart provider(s)');
+                _forEachProvider((p) => p.track('crash', decoded));
+              }
+            } catch (e) {
+              debugPrint('[UniTrack] onRecoveredCrash: parse failed: $e');
+            }
+          }
+          return null;
+      }
+      return null;
+    });
   }
 
   bool _errorHandlersInstalled = false;
@@ -220,6 +303,13 @@ class UniTrack {
   List<UniTrackEventRule> _eventRules = const [];
   void setEventRules(List<UniTrackEventRule> rules) { _eventRules = rules; }
 
+  // Last screen the app explicitly identified via setScreen() — used as a
+  // fallback so a `tap` event whose own props lack `screen` can still match a
+  // rule that filters on screen. Apps using auto_route / nested navigators
+  // where the route observer can't resolve the page class set this manually
+  // from the screen widget's initState.
+  String? _lastScreen;
+
   /// Apply W3C distributed-tracing settings (from remote config or app code).
   /// Cheap — the HTTP interceptor reads this snapshot per request.
   ///
@@ -246,12 +336,31 @@ class UniTrack {
   // host apps pinning an older Dart language version.)
   MapEntry<String, Map<String, Object?>>? _applyRules(
       String event, Map<String, Object?> props) {
-    final screen = (props['screen'] ?? props['screen_name']) as String?;
+    // Screen resolution order: event props (auto-tap fills it when the route
+    // observer knows the page) → SDK-side last setScreen() → null. The
+    // fallback matters for auto_route / nested navigators where the observer
+    // can't see the page class but the app calls setScreen() in initState.
+    final screen = (props['screen'] ?? props['screen_name'] ?? _lastScreen) as String?;
     final elem = props['element_key'] as String?;
+    final cls  = props['class_name'] as String?;
+    if (event == 'tap') {
+      assert(() {
+        debugPrint('[unitrack] rule check tap '
+            'screen="$screen" (lastScreen=$_lastScreen, propScreen=${props['screen']}) '
+            'element_key="$elem" class_name="$cls" rules=${_eventRules.length}');
+        return true;
+      }());
+    }
     for (final r in _eventRules) {
       if (r.matchEvent != event) continue;
       if (r.matchScreen != null && r.matchScreen != screen) continue;
       if (r.matchElementKey != null && r.matchElementKey != elem) continue;
+      if (r.matchClassName != null && r.matchClassName != cls) continue;
+      assert(() {
+        debugPrint('[unitrack] rule match: $event → ${r.toName} '
+            '(screen="$screen" element_key="$elem" class_name="$cls")');
+        return true;
+      }());
       return MapEntry(r.toName, {...props, ...r.addProps});
     }
     return null;
@@ -272,6 +381,7 @@ class UniTrack {
   }
 
   Future<void> setScreen(String name) {
+    _lastScreen = name.isEmpty ? null : name;
     _forEachProvider((p) => p.setScreen(name));
     return _channel.invokeMethod('setScreen', {'name': name});
   }
@@ -493,6 +603,10 @@ class UniTrackNavigatorObserver extends NavigatorObserver {
     _pending = null;
     if (name == null || name == _lastEmitted) return;
     _lastEmitted = name;
+    assert(() {
+      debugPrint('[unitrack] nav observer → setScreen("$name")');
+      return true;
+    }());
     UniTrack.instance.setScreen(name);
   }
 
@@ -517,5 +631,24 @@ T? safeJsonParse<T>(String targetType, String raw) {
     });
     if (kDebugMode) rethrow;
     return null;
+  }
+}
+
+/// Bridges Flutter's WidgetsBindingObserver into UniTrack's lifecycle listener
+/// list. `resumed` → toForeground=true, anything else (paused / inactive /
+/// detached / hidden) → toForeground=false. The Dart-side observer is the only
+/// universal source of foreground/background on Flutter (Android FragmentActivity
+/// and iOS UIApplication both bridge into this same signal).
+class _UniTrackLifecycleObserver with WidgetsBindingObserver {
+  _UniTrackLifecycleObserver(this._notify);
+  final void Function(bool toForeground) _notify;
+  bool _inForeground = true;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final next = state == AppLifecycleState.resumed;
+    if (next == _inForeground) return;
+    _inForeground = next;
+    _notify(next);
   }
 }

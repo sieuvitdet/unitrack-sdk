@@ -55,8 +55,18 @@ class UniTrackPlugin : FlutterPlugin, MethodCallHandler {
                     trackNetwork    = c.optBoolean("trackNetwork", true),
                     journeyCapture  = c.optBoolean("journeyCapture", true),
                     sessionTimeoutMs = c.optInt("sessionTimeoutMs", 1_800_000),
+                    screenLoadEvent = c.optString("screenLoadEvent", "screen_load_completed"),
                 )
                 UniTrack.initialize(a, cfg)
+
+                // After initialize(), the native SDK has already popped the
+                // recovered crash and fanned it out to native providers (if
+                // any). Forward the same JSON up to Dart so Dart-side
+                // providers also see it. Single-shot drain.
+                val recoveredJson = UniTrack.takeRecoveredCrashJsonForFlutter()
+                if (recoveredJson.isNotEmpty()) {
+                    channel.invokeMethod("onRecoveredCrash", mapOf("props" to recoveredJson))
+                }
                 result.success(null)
             }
             "identify" -> {

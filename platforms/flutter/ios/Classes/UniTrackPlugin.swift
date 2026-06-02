@@ -12,10 +12,15 @@ import UIKit
 
 public class UniTrackPlugin: NSObject, FlutterPlugin {
 
+    // Held so we can push native-originating events (e.g. recovered crash from
+    // a previous launch) back to Dart on the same channel the app uses.
+    private var channel: FlutterMethodChannel?
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "unitrack",
                                            binaryMessenger: registrar.messenger())
         let instance = UniTrackPlugin()
+        instance.channel = channel
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
@@ -45,7 +50,16 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
             if let v = c["trackNetwork"] as? Bool { cfg.trackNetwork = v }
             if let v = c["journeyCapture"] as? Bool { cfg.journeyCapture = v }
             if let v = c["sessionTimeoutMs"] as? Int { cfg.sessionTimeoutMs = v }
+            if let v = c["screenLoadEvent"] as? String, !v.isEmpty { cfg.screenLoadEvent = v }
             UniTrack.initialize(apiKey: apiKey, config: cfg)
+
+            // After initialize(), the native UniTrack has already popped the
+            // recovered crash from core and fanned it out to native providers.
+            // Forward the same JSON up to Dart so Dart-side providers
+            // (e.g. unitrack_snowplow Dart package) also see it. Single-shot.
+            if let json = UniTrack.takeRecoveredCrashJsonForFlutter() {
+                self.channel?.invokeMethod("onRecoveredCrash", arguments: ["props": json])
+            }
             result(nil)
 
         case "identify":
