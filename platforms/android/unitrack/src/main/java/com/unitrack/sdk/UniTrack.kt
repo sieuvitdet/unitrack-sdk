@@ -37,6 +37,50 @@ object UniTrack {
     var verboseLogging: Boolean = true
 
     /**
+     * Resolved event name fired by ActivityTracker's fragment lifecycle hook
+     * when a screen is created + first becomes interactive (= "load_ms" window
+     * between onFragmentCreated and onFragmentResumed). Mirrors the iOS
+     * swizzler's `screen_load_completed` event. Initialised from
+     * `config.screenLoadEvent` on initialize(); the portal `sdk_config.screen_load_event`
+     * key can rename it without an app rebuild.
+     */
+    @JvmField
+    var screenLoadEventName: String = "screen_load_completed"
+
+    // ─── App lifecycle callbacks (app-facing) ────────────────────────────
+    // Apps register a listener to know when the SDK observes a foreground or
+    // background transition — typically used to fire app-level events that
+    // the core itself doesn't model (e.g. `session_ended` semantics that
+    // depend on app product logic). The SDK already emits app_foreground /
+    // app_background to the core's offline queue; these callbacks are for
+    // additional app-side tracking on top of that.
+    fun interface LifecycleListener {
+        fun onTransition(toForeground: Boolean)
+    }
+    private val lifecycleListeners = mutableListOf<LifecycleListener>()
+
+    @JvmStatic
+    fun addLifecycleListener(listener: LifecycleListener) {
+        lifecycleListeners.add(listener)
+    }
+
+    @JvmStatic
+    internal fun dispatchForegroundCallback() {
+        for (l in lifecycleListeners) {
+            try { l.onTransition(true) }
+            catch (e: Throwable) { android.util.Log.w("UniTrack", "lifecycle listener: ${e.message}") }
+        }
+    }
+
+    @JvmStatic
+    internal fun dispatchBackgroundCallback() {
+        for (l in lifecycleListeners) {
+            try { l.onTransition(false) }
+            catch (e: Throwable) { android.util.Log.w("UniTrack", "lifecycle listener: ${e.message}") }
+        }
+    }
+
+    /**
      * Provider/helper code uses this instead of Log.i directly so the integrator
      * can mute every log line with one flag. Format mirrors NSLog on iOS for
      * cross-platform parity.
@@ -69,6 +113,12 @@ object UniTrack {
         if (initialized) {
             android.util.Log.w("UniTrack", "already initialized")
             return
+        }
+
+        // Wire taxonomy override into the swizzler bridge before installing the
+        // trackers below — they read this static at fire time.
+        if (config.screenLoadEvent.isNotEmpty()) {
+            screenLoadEventName = config.screenLoadEvent
         }
 
         // Load native lib + open core context.

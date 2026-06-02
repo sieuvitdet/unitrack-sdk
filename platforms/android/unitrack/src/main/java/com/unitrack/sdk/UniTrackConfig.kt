@@ -23,4 +23,9 @@ data class UniTrackConfig(
     val screenLifecycle: Boolean = true,
     val screenStartEvent: String = "screen_start",
     val screenEndEvent: String = "screen_end",
+    /** Event name fired by ActivityTracker's fragment lifecycle hook with
+     *  load_ms (the onFragmentCreated → onFragmentResumed window). Mirrors
+     *  the iOS swizzler's `screen_load_completed`. Renameable via portal
+     *  `sdk_config.screen_load_event`. */
+    val screenLoadEvent: String = "screen_load_completed",
 )

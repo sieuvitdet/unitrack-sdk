@@ -25,12 +25,40 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     fun install(app: Application) {
         app.registerActivityLifecycleCallbacks(this)
         app.registerComponentCallbacks(this)
+        // The SDK is often initialized AFTER the first activity has already
+        // started (Application.onCreate → SDK init → MainActivity.onCreate is
+        // typical, but async config fetch flips it). Without seeding `started`
+        // from the current activity stack, the next onActivityStopped would
+        // wrap to -1, foreground/background transitions wouldn't fire, and
+        // app-side listeners would never see the background event.
+        seedStartedFromAlreadyResumedActivities()
+    }
+
+    @Suppress("PrivateApi", "DiscouragedPrivateApi")
+    private fun seedStartedFromAlreadyResumedActivities() {
+        try {
+            val tCls = Class.forName("android.app.ActivityThread")
+            val tInstance = tCls.getMethod("currentActivityThread").invoke(null)
+            val map = tCls.getDeclaredField("mActivities").apply { isAccessible = true }.get(tInstance) as Map<*, *>
+            var n = 0
+            for (record in map.values) {
+                val rec = record ?: continue
+                val paused = rec.javaClass.getDeclaredField("paused").apply { isAccessible = true }.getBoolean(rec)
+                val stopped = try { rec.javaClass.getDeclaredField("stopped").apply { isAccessible = true }.getBoolean(rec) } catch (_: Throwable) { false }
+                if (!paused && !stopped) n++
+            }
+            if (n > 0) {
+                started = n
+                inForeground = true
+            }
+        } catch (_: Throwable) { /* reflection blocked → live with the lifecycle as observed */ }
     }
 
     override fun onActivityStarted(a: Activity) {
         if (started == 0 && !inForeground) {
             inForeground = true
             NativeBridge.logForeground()
+            UniTrack.dispatchForegroundCallback()
         }
         started++
     }
@@ -40,6 +68,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         if (started == 0 && inForeground) {
             inForeground = false
             NativeBridge.logBackground()
+            UniTrack.dispatchBackgroundCallback()
         }
     }
 

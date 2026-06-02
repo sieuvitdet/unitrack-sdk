@@ -86,17 +86,38 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     }
 
     // ─── Fragment tracking ────────────────────────────────────────────────
+    // We stash the wall-clock at onFragmentCreated and measure load_ms at
+    // onFragmentResumed (= "screen visible & interactive"). This mirrors iOS
+    // ViewControllerSwizzler's viewDidLoad → viewDidAppear timing.
+    private val createdAtMs = java.util.WeakHashMap<Fragment, Long>()
+
+    private fun isNoiseFragmentName(name: String): Boolean =
+        name.startsWith("Nav") || name == "ReportFragment" ||
+        name == "ScreenStackFragment" || name == "ScreenFragment" ||
+        name == "ScreenContainer" || name.startsWith("Supportable")
+
     private val fragmentCb = object : FragmentManager.FragmentLifecycleCallbacks() {
+        override fun onFragmentCreated(fm: FragmentManager, f: Fragment, savedInstanceState: Bundle?) {
+            if (isNoiseFragmentName(f.javaClass.simpleName)) return
+            createdAtMs[f] = android.os.SystemClock.elapsedRealtime()
+        }
+
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             val name = f.javaClass.simpleName
-            // Skip framework / nav-host / container fragments that aren't real
-            // app screens. On React Native the JS navigation tracker names the
-            // screens (route names), so the react-native-screens container
-            // fragments here are just noise.
-            if (name.startsWith("Nav") || name == "ReportFragment" ||
-                name == "ScreenStackFragment" || name == "ScreenFragment" ||
-                name == "ScreenContainer" || name.startsWith("Supportable")) return
+            if (isNoiseFragmentName(name)) return
             UniTrack.setScreen(name)
+
+            // Fire screen_load_completed with the create → resume delta. The
+            // event name + auto-fire mirror the iOS swizzler so the wire shape
+            // is the same on both platforms. Cleared after fire so a re-entry
+            // (back-stack pop) gets a fresh load_ms next time onFragmentCreated
+            // runs.
+            val createdAt = createdAtMs.remove(f) ?: return
+            val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
+            UniTrack.track(UniTrack.screenLoadEventName, mapOf(
+                "screen"  to name,
+                "load_ms" to loadMs,
+            ))
         }
     }
 }
