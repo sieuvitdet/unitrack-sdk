@@ -42,9 +42,12 @@ class UniTrackClass {
         // Registered third-party providers (Snowplow, Firebase, …). Every event is
         // forwarded to each one. Empty by default — core has zero such dependencies.
         this.providers = [];
-        // Event rewrite rules (Phase 2 — config-driven). A matching rule renames an
-        // auto-captured event into a business event + merges props at this chokepoint.
-        this.eventRules = [];
+        // Convention layer — portal `snowplow.event_names` maps a 6-kind taxonomy
+        // (click / result / screen_view / crash / api / session) onto the wire
+        // event names. setEventNames() is typically called from
+        // UniTrackRemoteConfig.applyConventions(cfg) so the SDK is in sync with
+        // the portal without an app rebuild.
+        this.eventNames = {};
     }
     /** Register a provider to also receive every event. Call BEFORE initialize();
      *  if called afterwards, the provider is initialized immediately. */
@@ -89,7 +92,6 @@ class UniTrackClass {
         this.forEachProvider((p) => p.setUser(null, {}));
         return native.reset();
     }
-    setEventRules(rules) { this.eventRules = rules; }
     /**
      * Apply W3C distributed-tracing settings. The fetch interceptor reads this
      * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
@@ -112,27 +114,46 @@ class UniTrackClass {
     /** Mint a fresh (trace_id, span_id) — exposed so app code can correlate
      *  push payloads or deep-links with backend logs by trace_id. */
     newTrace() { return (0, traceContext_1.newTrace)(); }
-    applyRules(event, props) {
-        var _a;
-        const screen = ((_a = props['screen']) !== null && _a !== void 0 ? _a : props['screen_name']);
-        const elem = props['element_key'];
-        for (const r of this.eventRules) {
-            if (r.matchEvent !== event)
-                continue;
-            if (r.matchScreen && r.matchScreen !== screen)
-                continue;
-            if (r.matchElementKey && r.matchElementKey !== elem)
-                continue;
-            return [r.toName, { ...props, ...r.addProps }];
+    setEventNames(map) {
+        this.eventNames = { ...map };
+    }
+    resolveKind(name) {
+        const v = this.eventNames[name];
+        return (v && v.length > 0) ? v : name;
+    }
+    // Map a raw auto-capture event ("click", "screen_load_completed", …) to its
+    // convention kind. Returns null when the event isn't recognised — those go
+    // out under their own name (legacy behaviour). Matches the Flutter Snowplow
+    // provider's _kindForRawEvent so cross-platform shapes stay aligned.
+    kindForRawEvent(raw) {
+        switch (raw) {
+            case 'click': return 'click';
+            case 'screen_load_completed':
+            case 'screen_viewed':
+            case 'screen_exited':
+            case 'screen_view': return 'screen_view';
+            case 'crash':
+            case 'application_error': return 'crash';
+            case 'network_request': return 'api';
+            case 'session_started':
+            case 'session_ended': return 'session';
         }
         return null;
     }
     track(event, properties = {}) {
+        var _a;
         let name = event;
         let props = properties;
-        const rewritten = this.applyRules(event, properties);
-        if (rewritten) {
-            [name, props] = rewritten;
+        // If the caller passed a convention kind directly (or an auto-capture
+        // event maps to one), resolve to the portal-configured wire name AND
+        // stamp the business signal as `event_name` in the payload so a single
+        // iglu schema carries both the generic shape and the specific business.
+        const kind = this.eventNames[event] ? event : this.kindForRawEvent(event);
+        if (kind && this.eventNames[kind]) {
+            name = this.eventNames[kind];
+            // Caller may already have populated event_name — don't clobber it.
+            const business = (_a = properties.event_name) !== null && _a !== void 0 ? _a : event;
+            props = { event_name: business, ...properties };
         }
         this.forEachProvider((p) => p.track(name, props));
         return native.track(name, JSON.stringify(props));

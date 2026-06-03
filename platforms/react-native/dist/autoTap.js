@@ -126,7 +126,10 @@ class UniTrackTapBoundary extends react_1.default.Component {
                         // shape as Android/Flutter — RN has no module-of-origin reflection
                         // either, so we infer from the displayName/name.
                         const pkg = classifyRNComponent(resolved.type);
-                        index_1.default.track('tap', {
+                        // Use the convention name "click" — matches iOS / Android / Flutter
+                        // swizzlers. Snowplow maps via portal `event_names.click` (default
+                        // → `event_click`) so the schema URI is uniform across platforms.
+                        index_1.default.track('click', {
                             // `element_key` is the field the portal (session tree + heatmap) and
                             // the iOS/Android native tap capture use — send it so RN taps line up
                             // with the other platforms. `element` kept for backwards-compat.

@@ -15,15 +15,6 @@ export interface UniTrackConfig {
     sessionTimeoutMs?: number;
 }
 export type EventProperties = Record<string, unknown>;
-/** A config-driven rewrite rule: when an auto-captured event matches, the SDK
- *  renames it to `toName` and merges `addProps`. Built from the remote config. */
-export interface EventRule {
-    matchEvent: string;
-    matchScreen?: string;
-    matchElementKey?: string;
-    toName: string;
-    addProps?: EventProperties;
-}
 import type { AnalyticsProvider } from './analyticsProvider';
 export { UniTrackRemoteConfig } from './remoteConfig';
 export type { AnalyticsProvider } from './analyticsProvider';
@@ -38,8 +29,6 @@ declare class UniTrackClass {
     initialize(apiKey: string, config?: UniTrackConfig): Promise<void>;
     identify(userId: string, traits?: EventProperties): Promise<void>;
     reset(): Promise<void>;
-    private eventRules;
-    setEventRules(rules: EventRule[]): void;
     /**
      * Apply W3C distributed-tracing settings. The fetch interceptor reads this
      * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
@@ -56,7 +45,10 @@ declare class UniTrackClass {
     /** Mint a fresh (trace_id, span_id) — exposed so app code can correlate
      *  push payloads or deep-links with backend logs by trace_id. */
     newTrace(): UniTrackTraceIds;
-    private applyRules;
+    private eventNames;
+    setEventNames(map: Record<string, string>): void;
+    private resolveKind;
+    private kindForRawEvent;
     track(event: string, properties?: EventProperties): Promise<void>;
     setScreen(name: string): Promise<void>;
     flush(): Promise<void>;

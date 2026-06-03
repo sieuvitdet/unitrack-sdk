@@ -52,6 +52,17 @@ export const UniTrackRemoteConfig = {
     });
   },
 
+  /** Push the Snowplow convention map (kind → wire event name) from portal
+   *  config into the SDK. After this call, track('click', …) is renamed to
+   *  whatever the operator set on the portal (e.g. event_click) and the
+   *  original kind goes into `event_name` in the payload. No-op when the
+   *  portal hasn't configured a Snowplow block. */
+  applyConventions(cfg: RemoteConfigData): void {
+    const sp = (cfg.snowplow ?? {}) as Record<string, unknown>;
+    const ev = (sp.event_names ?? {}) as Record<string, string>;
+    if (ev && typeof ev === 'object') UniTrack.setEventNames(ev);
+  },
+
   /** Fetch config from the portal. Always resolves with a usable config
    *  (fresh, cached, or fallback/default). Never throws.
    *

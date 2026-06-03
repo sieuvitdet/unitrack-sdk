@@ -146,9 +146,55 @@ class UniTrackClass {
    *  push payloads or deep-links with backend logs by trace_id. */
   newTrace(): UniTrackTraceIds { return newTrace(); }
 
+  // Convention layer — portal `snowplow.event_names` maps a 6-kind taxonomy
+  // (click / result / screen_view / crash / api / session) onto the wire
+  // event names. setEventNames() is typically called from
+  // UniTrackRemoteConfig.applyConventions(cfg) so the SDK is in sync with
+  // the portal without an app rebuild.
+  private eventNames: Record<string, string> = {};
+  setEventNames(map: Record<string, string>) {
+    this.eventNames = { ...map };
+  }
+
+  private resolveKind(name: string): string {
+    const v = this.eventNames[name];
+    return (v && v.length > 0) ? v : name;
+  }
+
+  // Map a raw auto-capture event ("click", "screen_load_completed", …) to its
+  // convention kind. Returns null when the event isn't recognised — those go
+  // out under their own name (legacy behaviour). Matches the Flutter Snowplow
+  // provider's _kindForRawEvent so cross-platform shapes stay aligned.
+  private kindForRawEvent(raw: string): string | null {
+    switch (raw) {
+      case 'click': return 'click';
+      case 'screen_load_completed':
+      case 'screen_viewed':
+      case 'screen_exited':
+      case 'screen_view': return 'screen_view';
+      case 'crash':
+      case 'application_error': return 'crash';
+      case 'network_request': return 'api';
+      case 'session_started':
+      case 'session_ended': return 'session';
+    }
+    return null;
+  }
+
   track(event: string, properties: EventProperties = {}) {
-    const name = event;
-    const props = properties;
+    let name = event;
+    let props: EventProperties = properties;
+    // If the caller passed a convention kind directly (or an auto-capture
+    // event maps to one), resolve to the portal-configured wire name AND
+    // stamp the business signal as `event_name` in the payload so a single
+    // iglu schema carries both the generic shape and the specific business.
+    const kind = this.eventNames[event] ? event : this.kindForRawEvent(event);
+    if (kind && this.eventNames[kind]) {
+      name = this.eventNames[kind];
+      // Caller may already have populated event_name — don't clobber it.
+      const business = (properties as any).event_name ?? event;
+      props = { event_name: business, ...properties };
+    }
     this.forEachProvider((p) => p.track(name, props));
     return native.track(name, JSON.stringify(props));
   }
