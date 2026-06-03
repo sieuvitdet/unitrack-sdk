@@ -1,23 +1,34 @@
 // unitrack_snowplow — forwards every UniTrack event to a Snowplow collector.
 //
-// Usage:
-//   UniTrack.instance.addProvider(SnowplowProvider(
-//     endpoint: 'https://collector.example.com',
-//     appId: '701',
-//     userContext: {'username': 'duc', 'epcode': 'FTEL123'},
-//     userContextSchema: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
-//     schemas: {
-//       // UniTrack event name -> iglu schema for a self-describing event.
-//       'add_to_cart': 'iglu:com.acme/add_to_cart/jsonschema/1-0-0',
-//     },
-//   ));
-//   await UniTrack.instance.initialize(apiKey);
+// Convention layer (parity with iOS + Android Snowplow providers):
 //
-// Events with a matching entry in [schemas] are sent as self-describing events;
-// everything else is sent as a Snowplow Structured event (category 'unitrack',
-// action = event name). The optional user context entity is attached to every
-// event, mirroring MobiX's snowplow_service.dart.
+//   UniTrack.instance.addProvider(SnowplowProvider(
+//     endpoint:       'https://ftracking.fpt.vn',
+//     appId:          'fli',
+//     igluVendor:     'vn.fpt.ftel.snowplow',
+//     defaultVersion: '1-0-0',
+//     // Convention kind → wire event name. Portal overrides these so the
+//     // taxonomy moves without rebuilding the app.
+//     eventNames: { 'click': 'event_click', 'result': 'event_result', ... },
+//     // Auto-attached context entities — entity short name → iglu URI.
+//     entities:   { 'user_context': 'iglu:.../user_context/.../1-0-0',
+//                   'core_action':  'iglu:.../core_action/.../1-0-0' },
+//     // Per-user bag stamped on every event's user_context entity.
+//     userContext: { 'user_id': 'demo_user_42', 'plan': 'b2c_premium' },
+//   ));
+//
+// Each track() resolves the event name through `eventNames` and the schema
+// through `igluVendor + defaultVersion`, then attaches `user_context` and
+// `core_action` entities by default. Events without an iglu vendor fall back
+// to Snowplow Structured (category 'unitrack', action = event name) so the
+// collector still sees something even with a half-configured project.
+//
+// Use the convention helpers (trackingClickEvent / trackingResultEvent /
+// trackingAPI / trackingScreenView / trackingCrash) for the 5 sheet kinds —
+// they build the right payload + schema URI + entity contexts in one call,
+// same shape as iOS/Android.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -29,13 +40,19 @@ class SnowplowProvider extends AnalyticsProvider {
     required this.endpoint,
     required this.appId,
     this.namespace = 'UniTrack',
-    this.userContext,
-    this.userContextSchema,
-    this.schemas = const {},
+    Map<String, Object?>? userContext,
     this.options = const SnowplowOptions(),
+    this.igluVendor,
+    this.defaultVersion = '1-0-0',
+    Map<String, String> eventNames = const {},
+    Map<String, String> entities = const {},
     this.portalEndpoint,
     this.portalApiKey,
-  });
+  })  : userContext = userContext == null
+            ? <String, Object?>{}
+            : Map<String, Object?>.from(userContext),
+        _eventNames = Map<String, String>.from(eventNames),
+        _entities = Map<String, String>.from(entities);
 
   /// When set, every event tracked through Snowplow is ALSO mirrored to the
   /// UniTrack portal (tagged provider=snowplow) — so the session IDE shows
@@ -44,12 +61,8 @@ class SnowplowProvider extends AnalyticsProvider {
   final String? portalEndpoint;
   final String? portalApiKey;
 
-  /// Snowplow tracker flags the developer controls. Mutable because the
-  /// typical wiring is: provider created at app init (sync) → remote config
-  /// fetched a beat later → applyOptions() rebuilds the tracker with the
-  /// portal-supplied flags. The previous SnowplowTracker reference is dropped;
-  /// Snowplow's plugin doesn't expose an explicit close, but a new tracker
-  /// fully replaces the old one on the native side.
+  /// Snowplow TrackerConfiguration flags. Mutable because remote config can
+  /// arrive after construction — applyOptions() rebuilds the tracker.
   SnowplowOptions options;
 
   /// Snowplow collector URL.
@@ -61,193 +74,55 @@ class SnowplowProvider extends AnalyticsProvider {
   /// Tracker namespace (default 'UniTrack').
   final String namespace;
 
-  /// Optional custom user-context entity attached to every event. Combined
-  /// with [userContextSchema] into a SelfDescribing entity.
-  Map<String, Object?>? userContext;
+  /// Convention vendor — schema URI is `iglu:<igluVendor>/<name>/jsonschema/<defaultVersion>`.
+  String? igluVendor;
 
-  /// Iglu schema URI for [userContext]. Required if [userContext] is set.
-  final String? userContextSchema;
+  /// Iglu schema version segment, e.g. `1-0-0`.
+  String defaultVersion;
 
-  /// Map of UniTrack event name -> iglu schema URI. Matching events become
-  /// self-describing events; others fall back to Structured events. Mutable
-  /// because the typical wiring is: provider is created at app init (sync)
-  /// but the remote config is fetched a beat later — applyFromRemoteConfig()
-  /// rewrites this map without forcing a re-init of the underlying tracker.
-  Map<String, String> schemas;
+  /// Convention kind → wire event name (portal `event_names.<kind>`). Built-in
+  /// kinds: click / result / screen_view / crash / api. Custom kinds register
+  /// here too so the SDK can emit them without an app rebuild.
+  Map<String, String> _eventNames;
+  Map<String, String> get eventNames => _eventNames;
 
-  // ── Blueprint config ────────────────────────────────────────────────────
-  //
-  // `schemas` only covers "event_name → one schema URI". FPT's analytics
-  // taxonomy (and Snowplow's own model) needs more: each event ships with
-  // context entities (user_context, core_action, attendance, …) whose own
-  // schemas + field maps come from the backend team's spec, NOT from app
-  // code. Blueprints encode that.
-  //
-  // _blueprints[id] = { schema, attach_entities[] }
-  //   one blueprint per event "kind" (click_event, result_event, …) so 21
-  //   events sharing the same ev_click schema reuse one blueprint entry.
-  //
-  // _entities[id]   = { schema, fields{name → {from, key, default?}} }
-  //   one definition per context entity. `from` is the value source —
-  //   "globals" (app-supplied via setGlobalContext), "device" (UniTrack
-  //   device blob), "props" (per-event properties), or "literal".
-  //
-  // _eventBlueprintMap[name_or_pattern] = blueprint_id
-  //   exact match wins; wildcard `prefix_*` matches by startsWith.
-  Map<String, Map<String, Object?>> _blueprints = {};
-  Map<String, Map<String, Object?>> _entities = {};
-  Map<String, String>               _eventBlueprintMap = {};
+  /// Auto-attached context entity short-name → iglu URI. Two well-known ids
+  /// are used by the convention helpers:
+  ///   user_context — built from the [userContext] bag.
+  ///   core_action  — built from event meta (action_name + timestamp + screen
+  ///                  + element_key).
+  /// Any other id is reserved for app code passing `extraContexts`.
+  Map<String, String> _entities;
+  Map<String, String> get entities => _entities;
 
-  /// Globals are values that don't live on a single event but get attached
-  /// to its context entities (user info, build flavor, …). One write per
-  /// app session is normal — call from your "user logged in" code path.
-  Map<String, Object?> _globals = {};
-  void setGlobalContext(Map<String, Object?> ctx) {
-    _globals = Map<String, Object?>.from(ctx);
-    debugPrint('[unitrack_snowplow] globals updated (${_globals.length} keys)');
-  }
-  void mergeGlobalContext(Map<String, Object?> ctx) {
-    _globals = { ..._globals, ...ctx };
+  /// Per-user properties attached to every event under the user_context entity
+  /// (if `entities['user_context']` is set). Mutate via [updateUserContext] or
+  /// the SDK's identify() — both round-trip through here.
+  Map<String, Object?> userContext;
+
+  // ── Hot reloads from remote config ─────────────────────────────────────
+
+  /// Replace the convention kind → event name map (e.g. after remote config
+  /// fetch). Existing entries are dropped.
+  void setEventNames(Map<String, String> next) {
+    _eventNames = Map<String, String>.from(next);
+    debugPrint('[unitrack_snowplow] event_names updated: ${_eventNames.length} entries');
   }
 
-  /// Device blob from the SDK init (DeviceInfo.json). Apps push it via
-  /// setDeviceBlob so the provider can pull device.* fields when an entity
-  /// field's source is "device". We DON'T import the C bridge here just for
-  /// this — pull-on-write keeps the provider unitrack-package-agnostic.
-  Map<String, Object?> _deviceBlob = {};
-  void setDeviceBlob(Map<String, Object?> blob) {
-    _deviceBlob = Map<String, Object?>.from(blob);
+  /// Replace the auto-attach entity map (entity short name → iglu URI).
+  void setEntities(Map<String, String> next) {
+    _entities = Map<String, String>.from(next);
+    debugPrint('[unitrack_snowplow] entities updated: ${_entities.length} entries');
   }
 
-  /// Replace the blueprint config wholesale (typically from remote config).
-  /// Pass empty maps to fall back to the legacy schemas[] behaviour.
-  void applyBlueprintConfig({
-    Map<String, Map<String, Object?>>? blueprints,
-    Map<String, Map<String, Object?>>? entities,
-    Map<String, String>? eventBlueprintMap,
-  }) {
-    if (blueprints != null) _blueprints = Map<String, Map<String, Object?>>.from(blueprints);
-    if (entities != null)   _entities   = Map<String, Map<String, Object?>>.from(entities);
-    if (eventBlueprintMap != null) _eventBlueprintMap = Map<String, String>.from(eventBlueprintMap);
-    debugPrint('[unitrack_snowplow] blueprints=${_blueprints.length} entities=${_entities.length} mapped=${_eventBlueprintMap.length}');
+  /// Update the user-context entity values at runtime (e.g. after login).
+  void updateUserContext(Map<String, Object?> ctx) {
+    userContext = Map<String, Object?>.from(ctx);
   }
 
-  // Resolve an event name to a blueprint id. Exact match wins; otherwise
-  // walk patterns with a trailing `_*` and return the first prefix match.
-  // null = no blueprint, fall back to schemas[name] or Structured.
-  String? _resolveBlueprintId(String eventName) {
-    final exact = _eventBlueprintMap[eventName];
-    if (exact != null) return exact;
-    for (final entry in _eventBlueprintMap.entries) {
-      final pat = entry.key;
-      if (pat.endsWith('*')) {
-        final prefix = pat.substring(0, pat.length - 1);
-        if (eventName.startsWith(prefix)) return entry.value;
-      }
-    }
-    return null;
-  }
-
-  // Pull a value from the configured source. Returns null if missing —
-  // the caller decides what to do (some entities require all fields).
-  Object? _pullField(Map<String, Object?> field, Map<String, Object?> props, String eventName) {
-    final from = (field['from'] ?? 'literal') as String;
-    final key  = (field['key']  ?? '')        as String;
-    Object? raw;
-    switch (from) {
-      case 'globals':
-        raw = _readDottedKey(_globals, key);
-        break;
-      case 'device':
-        raw = _readDottedKey(_deviceBlob, key);
-        break;
-      case 'props':
-        raw = _readDottedKey(props, key);
-        break;
-      case 'event_name':
-        raw = eventName;
-        break;
-      case 'literal':
-        raw = field['value'];
-        break;
-    }
-    if (raw != null && raw.toString().isNotEmpty) return raw;
-    // default token — "now" → ISO timestamp; anything else → literal default.
-    final def = field['default'];
-    if (def == 'now') return DateTime.now().toIso8601String();
-    return def;
-  }
-
-  /// `user.userName` → walk `globals['user']['userName']`. Plain strings
-  /// without a `.` read one level.
-  Object? _readDottedKey(Map<String, Object?> bag, String key) {
-    if (key.isEmpty) return null;
-    final parts = key.split('.');
-    Object? cur = bag;
-    for (final p in parts) {
-      if (cur is Map) {
-        cur = cur[p];
-      } else {
-        return null;
-      }
-      if (cur == null) return null;
-    }
-    return cur;
-  }
-
-  /// Build one entity into a Snowplow SelfDescribing context. Returns null
-  /// if the entity isn't configured OR every field came back null (no point
-  /// shipping an entity full of empty strings; backend schema validation
-  /// would likely reject anyway).
-  SelfDescribing? _buildEntity(String entityId, Map<String, Object?> props, String eventName) {
-    final ent = _entities[entityId];
-    if (ent == null) return null;
-    final schema = ent['schema'] as String?;
-    if (schema == null || schema.isEmpty) return null;
-    final fieldMap = (ent['fields'] as Map?)?.cast<String, Object?>() ?? const {};
-    final data = <String, Object?>{};
-    var anyValue = false;
-    for (final f in fieldMap.entries) {
-      final spec = (f.value as Map?)?.cast<String, Object?>() ?? const {};
-      final v = _pullField(spec, props, eventName);
-      if (v != null && v.toString().isNotEmpty) anyValue = true;
-      // Snowplow doesn't like null values inside a SelfDescribing — coerce
-      // to empty string. The backend schema can reject empties if needed.
-      data[f.key] = v ?? '';
-    }
-    if (!anyValue) return null;
-    return SelfDescribing(schema: schema, data: data);
-  }
-
-  /// Strip internal-only keys (anything starting with `_`) before they
-  /// reach the SelfDescribing data field — those are inputs for context
-  /// entities (vd `_start_time` → core_action.start_time), not part of the
-  /// event's own schema.
-  Map<String, Object?> _cleanedEventData(Map<String, Object?> props) {
-    final out = <String, Object?>{};
-    for (final e in props.entries) {
-      if (e.key.startsWith('_')) continue;
-      out[e.key] = e.value ?? '';
-    }
-    return out;
-  }
-
-  /// Replace the schemas map at runtime (e.g. from remote config). Existing
-  /// entries are dropped; pass an empty map to disable self-describing
-  /// fan-out and fall back to Structured for everything.
-  void setSchemas(Map<String, String> next) {
-    schemas = Map<String, String>.from(next);
-    debugPrint('[unitrack_snowplow] schemas updated: ${schemas.length} entries');
-  }
-
-  /// Apply the Snowplow TrackerConfiguration flags from remote config. Any
-  /// key NOT in [overrides] keeps its current value, so the operator only
-  /// needs to send the flags they actually changed.
-  ///
-  /// The native tracker is rebuilt — Snowplow's TrackerConfiguration is
-  /// immutable after createTracker, so applying lifecycleAutotracking=true
-  /// (or any other field) requires a fresh tracker. The first event sent
-  /// AFTER applyOptions reflects the new config.
+  /// Apply Snowplow TrackerConfiguration flags from remote config. Any key
+  /// NOT in [overrides] keeps its current value. Rebuilds the tracker because
+  /// Snowplow's TrackerConfiguration is immutable after createTracker.
   Future<void> applyOptions(Map<String, bool> overrides) async {
     if (overrides.isEmpty) return;
     final cur = options;
@@ -264,9 +139,20 @@ class SnowplowProvider extends AnalyticsProvider {
     await _rebuildTracker();
   }
 
-  // Re-create the underlying SnowplowTracker with the current [options] +
-  // endpoint/appId/namespace. Used by applyOptions(); kept private so the
-  // tracker lifecycle stays inside the provider.
+  SnowplowTracker? _tracker;
+
+  @override
+  Future<void> init() async {
+    if (endpoint.isEmpty) {
+      debugPrint('[unitrack_snowplow] empty endpoint — provider disabled');
+      return;
+    }
+    await _rebuildTracker();
+    debugPrint('[unitrack_snowplow] tracker ready ($endpoint, appId=$appId, '
+        'vendor=${igluVendor ?? "—"}, version=$defaultVersion, '
+        'entities=${_entities.keys.toList()..sort()})');
+  }
+
   Future<void> _rebuildTracker() async {
     if (endpoint.isEmpty) return;
     _tracker = await Snowplow.createTracker(
@@ -287,155 +173,382 @@ class SnowplowProvider extends AnalyticsProvider {
     );
   }
 
-  SnowplowTracker? _tracker;
+  // ── Convention schema/entity plumbing ──────────────────────────────────
 
-  @override
-  Future<void> init() async {
-    if (endpoint.isEmpty) {
-      debugPrint('[unitrack_snowplow] empty endpoint — provider disabled');
-      return;
+  String? _schemaFor(String eventName) {
+    final vendor = igluVendor;
+    if (vendor == null || vendor.isEmpty) {
+      debugPrint('[unitrack_snowplow] no iglu_vendor in portal config — "$eventName" dropped');
+      return null;
     }
-    _tracker = await Snowplow.createTracker(
-      namespace: namespace,
-      endpoint: endpoint,
-      method: Method.post,
-      trackerConfig: TrackerConfiguration(
-        appId: appId,
-        devicePlatform: DevicePlatform.mob,
-        base64Encoding: options.base64Encoding,
-        platformContext: options.platformContext,
-        applicationContext: options.applicationContext,
-        sessionContext: options.sessionContext,
-        screenContext: options.screenContext,
-        lifecycleAutotracking: options.lifecycleAutotracking,
-        screenEngagementAutotracking: options.screenEngagementAutotracking,
-      ),
-    );
-    debugPrint('[unitrack_snowplow] tracker ready ($endpoint, appId=$appId)');
+    return 'iglu:$vendor/$eventName/jsonschema/$defaultVersion';
   }
 
-  /// Update the user-context entity values at runtime (e.g. after login).
-  void updateUserContext(Map<String, Object?> ctx) => userContext = ctx;
+  /// Accept any of these inputs from portal entity config and return a
+  /// well-formed iglu URI. Defensive — UI guides operator to type a short
+  /// name, but legacy configs may carry a full URI.
+  ///
+  ///   "user_context"
+  ///     → iglu:<vendor>/user_context/jsonschema/<defaultVersion>
+  ///   "vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0"
+  ///     → iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0
+  ///   "iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0"
+  ///     → unchanged
+  String? _normalizeEntityURI(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    if (s.startsWith('iglu:')) return s;
+    if (s.contains('/')) return 'iglu:$s';
+    final vendor = igluVendor;
+    if (vendor == null || vendor.isEmpty) return null;
+    return 'iglu:$vendor/$s/jsonschema/$defaultVersion';
+  }
 
-  List<SelfDescribing> _contexts() {
-    if (userContext == null || userContextSchema == null) return const [];
-    return [
-      SelfDescribing(
-        schema: userContextSchema!,
-        data: userContext!.map((k, v) => MapEntry(k, v ?? '')),
-      ),
-    ];
+  /// Convention kind → event name override, falling back to the SDK-built-in
+  /// default the helper passes in.
+  String _eventName(String kind, String fallback) {
+    final v = _eventNames[kind];
+    return (v == null || v.isEmpty) ? fallback : v;
+  }
+
+  /// Build the entity list for one event:
+  ///   1. user_context — built from [userContext] (if entities map has it)
+  ///   2. core_action  — built from event meta  (if entities map has it)
+  ///   3. extra        — anything the caller passed via extraContexts
+  /// Any other entity short-name registered in `_entities` is reserved for
+  /// the caller to pass via extraContexts.
+  List<SelfDescribing> _buildContexts({
+    required String eventName,
+    String? screen,
+    String? elementKey,
+    List<SelfDescribing>? extra,
+    bool skipGlobalContexts = false,
+  }) {
+    final out = <SelfDescribing>[];
+    if (!skipGlobalContexts) {
+      final userRaw = _entities['user_context'];
+      if (userRaw != null && userContext.isNotEmpty) {
+        final uri = _normalizeEntityURI(userRaw);
+        if (uri != null) {
+          out.add(SelfDescribing(
+            schema: uri,
+            data: userContext.map((k, v) => MapEntry(k, v ?? '')),
+          ));
+        }
+      }
+      final coreRaw = _entities['core_action'];
+      if (coreRaw != null) {
+        final uri = _normalizeEntityURI(coreRaw);
+        if (uri != null) {
+          final data = <String, Object?>{
+            'action_name': eventName,
+            'timestamp':   DateTime.now().toUtc().toIso8601String(),
+          };
+          if (screen != null && screen.isNotEmpty)         data['screen'] = screen;
+          if (elementKey != null && elementKey.isNotEmpty) data['element_key'] = elementKey;
+          out.add(SelfDescribing(
+            schema: uri,
+            data: data.map((k, v) => MapEntry(k, v ?? '')),
+          ));
+        }
+      }
+    }
+    if (extra != null) out.addAll(extra);
+    return out;
+  }
+
+  /// Strip internal-only keys (anything starting with `_`) before they reach
+  /// the SelfDescribing data field.
+  Map<String, Object?> _cleanedData(Map<String, Object?> props) {
+    final out = <String, Object?>{};
+    for (final e in props.entries) {
+      if (e.key.startsWith('_')) continue;
+      out[e.key] = e.value;
+    }
+    return out;
+  }
+
+  // ── Logging (parity with iOS NSLog + Android Log.i) ────────────────────
+
+  bool logEvents = true;
+
+  void _logSnowplow({
+    required String name,
+    required String schema,
+    required Map<String, Object?> data,
+    required List<SelfDescribing> contexts,
+  }) {
+    if (!logEvents) return;
+    final payload = {
+      'endpoint': endpoint,
+      'method': 'trackSelfDescribingEvent',
+      'event':   {'schema': schema, 'data': data},
+      'contexts': contexts.map((c) => {
+        'schema': c.schema,
+        'data':   c.data,
+      }).toList(),
+    };
+    final s = const JsonEncoder.withIndent('  ').convert(payload);
+    debugPrint('─── Snowplow Tracking ───  (convention event="$name")');
+    for (final line in s.split('\n')) debugPrint(line);
+  }
+
+  // ── Convention helpers (app-facing) ────────────────────────────────────
+
+  /// Self-describing event with the caller-built schema. Skips the convention
+  /// name resolution; used by [trackingScreenView] / [trackingCrash] / app
+  /// code that already knows its iglu URI.
+  void trackSelfDescribing({
+    required String schema,
+    required String nameHint,
+    required Map<String, Object?> data,
+    String? screen,
+    String? elementKey,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final t = _tracker;
+    if (t == null) return;
+    final contexts = _buildContexts(
+      eventName: nameHint, screen: screen, elementKey: elementKey,
+      extra: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+    t.track(SelfDescribing(schema: schema, data: data), contexts: contexts);
+    _logSnowplow(name: nameHint, schema: schema, data: data, contexts: contexts);
+    _mirrorToPortal(nameHint, {
+      '_sp_type': 'self_describing',
+      '_sp_schema': schema,
+      ...data,
+    });
+  }
+
+  /// Click convention — kind=`click`, default name `event_click`.
+  void trackingClickEvent({
+    required String elementKey,
+    String? label,
+    String? screen,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('click', 'event_click');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{'element_key': elementKey};
+    if (label != null)  payload['label']  = label;
+    if (screen != null) payload['screen'] = screen;
+    if (data != null)   payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload,
+      screen: screen, elementKey: elementKey,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
+  /// Result convention — kind=`result`, default name `event_result`.
+  void trackingResultEvent({
+    required String action,
+    required String status,
+    String? errorCode,
+    String? errorMessage,
+    int? durationMs,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('result', 'event_result');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{'action': action, 'status': status};
+    if (errorCode    != null) payload['error_code']    = errorCode;
+    if (errorMessage != null) payload['error_message'] = errorMessage;
+    if (durationMs   != null) payload['duration_ms']   = durationMs;
+    if (data != null) payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
+  /// Screen-view convention — kind=`screen_view`, default name
+  /// `event_screen_view`. Also fires Snowplow's native ScreenView so the
+  /// session is correctly sliced by screen.
+  void trackingScreenView({
+    required String screenName,
+    String? fromScreen,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('screen_view', 'event_screen_view');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{'screen': screenName};
+    if (fromScreen != null) payload['from_screen'] = fromScreen;
+    if (data != null) payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload, screen: screenName,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+    _tracker?.track(ScreenView(name: screenName));
+  }
+
+  /// API convention — kind=`api`, default name `event_api`. Models any
+  /// network-style timing (HTTP, RTSP, gRPC).
+  void trackingAPI({
+    required String url,
+    required String method,
+    required int status,
+    required int durationMs,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('api', 'event_api');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{
+      'url': url, 'method': method, 'status': status, 'duration_ms': durationMs,
+    };
+    if (data != null) payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
+  /// Crash convention — kind=`crash`, default name `event_crash`. Use for
+  /// non-fatal exceptions the app wants to surface explicitly. Hard crashes
+  /// caught by the SDK's signal handler flow through `track('crash', …)`.
+  void trackingCrash({
+    required String message,
+    String? stack,
+    String? screen,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('crash', 'event_crash');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{'message': message};
+    if (stack  != null) payload['stack']  = stack;
+    if (screen != null) payload['screen'] = screen;
+    if (data != null) payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload, screen: screen,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
+  /// Custom convention kind — looks up `eventNames[kind]` (falls back to
+  /// [kind] itself) then builds the schema URI from the configured vendor.
+  /// Used by code-generated `trackingXxx()` helpers and by app code that
+  /// wants to register a project-specific kind without editing the SDK.
+  void trackingCustomEvent({
+    required String kind,
+    Map<String, Object?>? data,
+    String? screen,
+    String? elementKey,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName(kind, kind);
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    trackSelfDescribing(
+      schema: schema, nameHint: name,
+      data: data ?? const {}, screen: screen, elementKey: elementKey,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
+  // ── AnalyticsProvider protocol ─────────────────────────────────────────
+
+  @override
+  Future<void> setUser(String? userId, Map<String, Object?> traits) async {
+    _tracker?.setUserId(userId);
+    if (userId != null) userContext['user_id'] = userId;
+    for (final e in traits.entries) {
+      userContext[e.key] = e.value;
+    }
   }
 
   @override
   void track(String name, Map<String, Object?> properties) {
     final t = _tracker;
     if (t == null) return;
-    // Caller already fired the event into Snowplow directly (legacy
-    // SnowplowService still alive) and only wants the portal mirror —
-    // drop the Snowplow leg here and ONLY forward to the portal.
+    // Caller already fired the event into Snowplow directly and only wants
+    // the portal mirror — drop the Snowplow leg here.
     if (properties['_skip_snowplow'] == true) {
       _mirrorToPortal(name, {
-        '_sp_type': 'self_describing',
-        '_sp_skipped': true,
-        ..._cleanedEventData(properties),
+        '_sp_type': 'self_describing', '_sp_skipped': true,
+        ..._cleanedData(properties),
       });
       return;
     }
-    Map<String, Object?> mirror;
-
-    // Resolution order (richest first → simplest):
-    //   1. Blueprint match → SelfDescribing with attach_entities
-    //   2. Plain schemas[name] map → SelfDescribing with the global user_context only
-    //   3. Structured event (category/action/label/property)
-    //
-    // (1) is the path FPT taxonomy needs: one click_event blueprint serves
-    // every ev_click_* event, with core_action + user_context entities
-    // assembled from globals + per-event props. App code stays free of
-    // schema URIs and entity field shapes.
-    final blueprintId = _resolveBlueprintId(name);
-    final blueprint = blueprintId != null ? _blueprints[blueprintId] : null;
-
-    if (blueprint != null && (blueprint['schema'] as String?)?.isNotEmpty == true) {
-      final schema = blueprint['schema'] as String;
-      final attach = (blueprint['attach_entities'] as List?)?.cast<String>() ?? const [];
-      final contexts = <SelfDescribing>[];
-      for (final entId in attach) {
-        final entity = _buildEntity(entId, properties, name);
-        if (entity != null) contexts.add(entity);
-      }
-      // Also keep the legacy global user_context entity if it wasn't already
-      // built by the blueprint — apps with both old + new wiring don't lose it.
-      if (!attach.contains('user_context')) {
-        contexts.addAll(_contexts());
-      }
-      final data = _cleanedEventData(properties);
-      t.track(
-        SelfDescribing(schema: schema, data: data),
-        contexts: contexts,
+    final schema = _schemaFor(name);
+    if (schema != null) {
+      // Convention path: vendor + version + name → iglu URI + auto entities.
+      final screen     = properties['screen']?.toString() ??
+                         properties['screen_name']?.toString();
+      final elementKey = properties['element_key']?.toString();
+      final data       = _cleanedData(properties);
+      final contexts = _buildContexts(
+        eventName: name, screen: screen, elementKey: elementKey,
+        extra: null, skipGlobalContexts: false,
       );
-      mirror = {
-        '_sp_type': 'self_describing',
-        '_sp_schema': schema,
-        '_sp_blueprint': blueprintId,
-        '_sp_contexts': attach,        // entity ids that were resolved
-        ...data,
-      };
-    } else if (schemas[name] != null) {
-      // Legacy path — single-schema map, no blueprint context list.
-      final schema = schemas[name]!;
-      t.track(
-        SelfDescribing(
-          schema: schema,
-          data: _cleanedEventData(properties),
-        ),
-        contexts: _contexts(),
-      );
-      mirror = {
-        '_sp_type': 'self_describing',
-        '_sp_schema': schema,
-        ..._cleanedEventData(properties),
-      };
-    } else {
-      // No schema at all → Structured event fallback. Snowplow Structured
-      // only has category/action/label/property/value — fold the two common
-      // props into label/property for visibility on the collector.
-      final label = properties['screen']?.toString() ??
-          properties['screen_name']?.toString();
-      final property = properties['element_key']?.toString() ??
-          properties['state']?.toString();
-      t.track(
-        Structured(
-          category: 'unitrack',
-          action: name,
-          label: label,
-          property: property,
-        ),
-        contexts: _contexts(),
-      );
-      mirror = {
-        '_sp_type': 'structured',
-        '_sp_category': 'unitrack',
-        '_sp_action': name,
-        if (label != null) '_sp_label': label,
-        if (property != null) '_sp_property': property,
-        ..._cleanedEventData(properties),
-      };
+      t.track(SelfDescribing(schema: schema, data: data), contexts: contexts);
+      _logSnowplow(name: name, schema: schema, data: data, contexts: contexts);
+      _mirrorToPortal(name, {
+        '_sp_type': 'self_describing', '_sp_schema': schema, ...data,
+      });
+      return;
     }
-    _mirrorToPortal(name, mirror);
+    // No iglu vendor configured → fall back to a Structured event so the
+    // collector still receives the event. category=unitrack so the operator
+    // can grep for "we forgot to set iglu_vendor" rows on the collector.
+    final label    = properties['screen']?.toString() ??
+                     properties['screen_name']?.toString();
+    final property = properties['element_key']?.toString() ??
+                     properties['state']?.toString();
+    t.track(
+      Structured(
+        category: 'unitrack', action: name,
+        label: label, property: property,
+      ),
+    );
+    _mirrorToPortal(name, {
+      '_sp_type': 'structured',
+      '_sp_category': 'unitrack', '_sp_action': name,
+      if (label    != null) '_sp_label':    label,
+      if (property != null) '_sp_property': property,
+      ..._cleanedData(properties),
+    });
   }
 
+  @override
+  void setScreen(String name) {
+    final t = _tracker;
+    if (t == null) return;
+    final contexts = _buildContexts(
+      eventName: name, screen: name, elementKey: null,
+      extra: null, skipGlobalContexts: false,
+    );
+    t.track(ScreenView(name: name), contexts: contexts);
+  }
+
+  // ── Portal mirror ──────────────────────────────────────────────────────
   // Same fire-and-forget pattern as FirebaseProvider so the portal sees the
-  // event as `provider=snowplow`. session_id is pulled off the event's own
-  // properties when present (the SDK injects it on every event before fan-out).
+  // event as `provider=snowplow` and the session IDE can show side-by-side.
   void _mirrorToPortal(String name, Map<String, Object?> properties) {
     final ep = portalEndpoint, key = portalApiKey;
     if (ep == null || key == null || ep.isEmpty || key.isEmpty) return;
     final uri = Uri.parse('$ep${ep.contains('?') ? '&' : '?'}provider=snowplow');
     final body = jsonEncode({
-      'event_id': '${DateTime.now().microsecondsSinceEpoch}_$name',
+      'event_id':   '${DateTime.now().microsecondsSinceEpoch}_$name',
       'event_name': name,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'timestamp':  DateTime.now().millisecondsSinceEpoch,
       'properties': properties,
     });
     HttpClient().postUrl(uri).then((req) {
@@ -445,23 +558,11 @@ class SnowplowProvider extends AnalyticsProvider {
       return req.close();
     }).then((resp) => resp.drain<void>()).catchError((_) {/* best effort */});
   }
-
-  @override
-  void setUser(String? userId, Map<String, Object?> traits) {
-    _tracker?.setUserId(userId);
-    if (traits.isNotEmpty && userContext != null) {
-      userContext = {...userContext!, ...traits};
-    }
-  }
-
-  @override
-  void setScreen(String name) {
-    _tracker?.track(ScreenView(name: name), contexts: _contexts());
-  }
 }
 
-/// Snowplow TrackerConfiguration flags the developer can toggle. Defaults match
-/// Snowplow's recommended mobile setup; override any flag as needed.
+/// Snowplow TrackerConfiguration flags the developer can toggle. Defaults
+/// match Snowplow's recommended mobile setup. Mirrors SnowplowOptions on
+/// iOS and Android.
 class SnowplowOptions {
   final bool base64Encoding;
   final bool platformContext;
