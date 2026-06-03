@@ -134,6 +134,100 @@ router.put('/projects/:id/config', ownProject, (req, res) => {
   res.json({ ...configForProject(req.project), version });
 });
 
+// Export the entire project config (plus Snowplow event maps) as a portable
+// JSON bundle. The intent is to mirror config across projects — copy a known-
+// good camera setup over to a brand-new Flutter/RN/whatever project without
+// re-clicking through every screen on the portal. Bundle deliberately drops
+// project-scoped bits (id, name, version, updated_at, flavor) so import is
+// just "apply these settings to the target project".
+router.get('/projects/:id/config/export', ownProject, (req, res) => {
+  const cfg = configForProject(req.project);
+  const spMaps = db.prepare(`
+    SELECT event_name, mode, schema, forward
+      FROM sp_event_maps WHERE project_id = ? ORDER BY event_name
+  `).all(req.project.id);
+  const bundle = {
+    bundle_kind: 'unitrack_project_config',
+    bundle_version: 1,
+    exported_at: Date.now(),
+    exported_from: { project_id: req.project.id, name: req.project.name },
+    config: {
+      endpoint:       cfg.endpoint || null,
+      sdk_config:     cfg.sdk_config || {},
+      snowplow:       cfg.snowplow || {},
+      firebase:       cfg.firebase || {},
+      tracing:        cfg.tracing || {},
+      event_registry: cfg.event_registry || {},
+      rules:          cfg.rules || [],
+    },
+    sp_event_maps: spMaps,
+  };
+  const filename = `unitrack-config-${req.project.name || req.project.id}-v${cfg.version}.json`
+    .replace(/[^a-z0-9._\-]+/gi, '_');
+  res.set('Content-Type', 'application/json; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(JSON.stringify(bundle, null, 2));
+});
+
+// Import a previously-exported bundle into THIS project. Accepts the same
+// shape /export emits. Body must be the parsed JSON; the SPA can either send
+// it directly (FileReader → JSON.parse → POST) or paste it into a textarea.
+// Refuses obviously-wrong shapes so a wrong file doesn't quietly clobber a
+// project. The import REPLACES the matching sections (subset semantics —
+// keys NOT present in the bundle are left untouched, same as PUT /config).
+router.post('/projects/:id/config/import', ownProject, (req, res) => {
+  const body = req.body || {};
+  if (body.bundle_kind !== 'unitrack_project_config') {
+    return res.status(400).json({ error: 'wrong_bundle_kind',
+      hint: 'expected bundle_kind="unitrack_project_config"' });
+  }
+  if (body.bundle_version !== 1) {
+    return res.status(400).json({ error: 'unsupported_bundle_version',
+      bundle_version: body.bundle_version, supported: [1] });
+  }
+  const c = body.config || {};
+  // Pass each section through saveConfig only if the bundle actually has it
+  // — otherwise the existing value stays. JSON-stringify happens inside.
+  const patch = {};
+  if (c.endpoint       !== undefined) patch.endpoint       = c.endpoint;
+  if (c.sdk_config     !== undefined) patch.sdk_config     = c.sdk_config;
+  if (c.snowplow       !== undefined) patch.snowplow       = c.snowplow;
+  if (c.firebase       !== undefined) patch.firebase       = c.firebase;
+  if (c.tracing        !== undefined) patch.tracing        = c.tracing;
+  if (c.event_registry !== undefined) patch.event_registry = c.event_registry;
+  if (c.rules          !== undefined) patch.rules          = c.rules;
+  const version = saveConfig(Number(req.params.id), patch);
+
+  // sp_event_maps: clear + repopulate. These are small and the natural mental
+  // model is "the bundle's maps replace this project's maps", same as a paste
+  // would on the UI. Keep partial bundles working — only touch if present.
+  let spMapsImported = 0;
+  if (Array.isArray(body.sp_event_maps)) {
+    db.prepare('DELETE FROM sp_event_maps WHERE project_id = ?').run(req.project.id);
+    const ins = db.prepare(`
+      INSERT INTO sp_event_maps (project_id, event_name, mode, schema, forward, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const now = Date.now();
+    for (const m of body.sp_event_maps) {
+      if (!m || !m.event_name) continue;
+      const mode = (m.mode === 'structured') ? 'structured' : 'self_describing';
+      ins.run(req.project.id, m.event_name, mode, m.schema || null,
+              m.forward ? 1 : 0, now);
+      spMapsImported++;
+    }
+  }
+  res.json({
+    ok: true,
+    version,
+    imported: {
+      sections: Object.keys(patch),
+      sp_event_maps: spMapsImported,
+    },
+    config: configForProject(req.project),
+  });
+});
+
 // Snowplow event mappings: raw event name → Snowplow schema/mode + forward flag.
 // Lets you onboard a NEW Snowplow event by adding a row here (no app rebuild).
 router.get('/projects/:id/sp-maps', ownProject, (req, res) => {

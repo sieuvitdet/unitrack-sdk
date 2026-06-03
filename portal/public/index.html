@@ -1251,7 +1251,13 @@ async function renderConfig(pid){
       <div class="muted" style="font-size:12px;margin-bottom:6px">SDK đổi event auto-capture → tên nghiệp vụ ngay tại app. Tạo/sửa ở tab "Cây class → event".</div>
       <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.rules||[],null,2))}</pre>
 
-      <div class="row" style="margin-top:16px"><button class="btn" id="cfSave">Lưu config</button></div>
+      <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="cfSave">Lưu config</button>
+        <button class="btn" id="cfExport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬇︎ Export JSON</button>
+        <button class="btn" id="cfImport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬆︎ Import JSON…</button>
+        <input type="file" id="cfImportFile" accept="application/json,.json" style="display:none">
+        <span class="muted" style="font-size:12px;align-self:center">Export tải về 1 file .json đầy đủ (sdk_config + Snowplow + Firebase + tracing + rules + sp_event_maps). Import vào project khác để mirror cấu hình.</span>
+      </div>
     </div>`;
 
   const parseKV=(id)=>{const o={};$(id).value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();});return o;};
@@ -1689,6 +1695,69 @@ async function renderConfig(pid){
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
+  };
+
+  // ── Export: download the whole config + sp_event_maps as a portable .json.
+  // The bundle is what /export emits; same payload an import on another
+  // project will accept. Triggers a real download via <a download> rather than
+  // a server attachment because the SPA already holds the session cookie and
+  // we want the user-friendly filename derived from project name.
+  $('#cfExport').onclick = async () => {
+    try {
+      // Hit the server endpoint so the filename + Content-Disposition come
+      // from the same source of truth as the JSON payload — keeps a future
+      // schema-version bump in one place.
+      const r = await fetch(`/api/projects/${pid}/config/export`, { credentials: 'same-origin' });
+      if (!r.ok) { toast('Export thất bại: HTTP ' + r.status, 'err'); return; }
+      const blob = await r.blob();
+      // Honour the Content-Disposition filename if present, fall back to a
+      // pid-based one for older browsers that lop it off.
+      let filename = `unitrack-config-pid${pid}.json`;
+      const cd = r.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/);
+      if (m) filename = m[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast('Đã export: ' + filename);
+    } catch (e) {
+      toast('Export lỗi: ' + (e && e.message || e), 'err');
+    }
+  };
+
+  // ── Import: open the hidden file picker, read the file, POST to /import.
+  $('#cfImport').onclick = () => $('#cfImportFile').click();
+  $('#cfImportFile').onchange = async (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    ev.target.value = ''; // reset so picking the same file twice re-fires
+    let bundle;
+    try { bundle = JSON.parse(await f.text()); }
+    catch (e) { toast('File không phải JSON hợp lệ', 'err'); return; }
+    if (!bundle || bundle.bundle_kind !== 'unitrack_project_config') {
+      toast('File không phải UniTrack config bundle', 'err'); return;
+    }
+    const fromName = bundle.exported_from && bundle.exported_from.name;
+    if (!confirm(
+      `Import config từ "${fromName || 'unknown'}" vào project hiện tại?\n\n` +
+      `• Replace: sdk_config, snowplow, firebase, tracing, rules, event_registry, sp_event_maps\n` +
+      `• Bump config version (app sẽ tự pull lại lần fetch tới)`
+    )) return;
+    try {
+      const r = await api(`/api/projects/${pid}/config/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bundle),
+      });
+      const sections = (r.imported && r.imported.sections) || [];
+      const spCount = (r.imported && r.imported.sp_event_maps) || 0;
+      toast(`Đã import (v${r.version}): ${sections.length} mục + ${spCount} sp_event_map`);
+      renderConfig(pid);
+    } catch (e) {
+      toast('Import lỗi: ' + (e && e.message || e), 'err');
+    }
   };
 }
 
