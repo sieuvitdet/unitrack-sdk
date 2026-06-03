@@ -203,6 +203,10 @@ function toast(msg,kind){
   clearTimeout(t._h); t._h=setTimeout(()=>{t.style.opacity='0';},1800);
 }
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Cross-event helper: SDK ≤0.2.x sent UI-button events as "tap"; ≥0.2.4 sends
+// them as "click" (the Snowplow convention kind). The portal accepts both so
+// old + new apps render the same in the session IDE, heatmap, and scoring.
+const isTapName = (n) => n === 'tap' || n === 'click';
 const fmtAgo=(ms)=>{if(!ms)return'—';const s=(Date.now()-ms)/1000;if(s<60)return Math.floor(s)+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';};
 const fmtTime=(ms)=>new Date(ms).toLocaleString('vi-VN',{hour12:false});
 // Short, readable session id for tracing one session across tabs.
@@ -2762,7 +2766,7 @@ function openSessionDetailDrawer(screen, replaySegs){
   const screenNets=[]; const realActs=[];
   for(const a of seg.actions){ if(a.standaloneNet) screenNets.push(...a.networks); else realActs.push(a); }
   const actHtml = realActs.map(a=>{
-    const isTap=a.event_name==='tap';
+    const isTap=isTapName(a.event_name);
     const danger=a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
     let icon,label,color;
     if(isTap){icon='👆';label=a.element_key||'(button)';color='#5b8cff';}
@@ -3112,7 +3116,7 @@ function buildSessionTree(journey){
         }
       } else {
         const action = { event_name:st.event_name, element_key:st.element_key, ts:st.ts, networks:[], props:st.props||null };
-        if(st.event_name==='tap') lastTap = st;
+        if(isTapName(st.event_name)) lastTap = st;
         // Attribute an error/crash to the button tapped just before it (same screen).
         if(isError && lastTap && (st.ts - lastTap.ts) <= NET_WINDOW_MS) action.triggeredBy = lastTap.element_key || '(button)';
         lastAction = action;
@@ -3221,7 +3225,7 @@ async function openSessionDrawer(pid,sid){
       shown++;
 
       const actHtml = acts.map(a=>{
-        const isTap = a.event_name==='tap';
+        const isTap = isTapName(a.event_name);
         const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
         let label, icon, color;
         if(isTap){ icon='👆'; label=a.element_key||'(button)'; color='#5b8cff'; }
@@ -3714,7 +3718,7 @@ function showIDEDetailScreen(seg){
   const screenNets=[]; const realActs=[];
   for(const a of seg.actions){ if(a.standaloneNet) screenNets.push(...a.networks); else realActs.push(a); }
   const actHtml = realActs.map(a=>{
-    const isTap=a.event_name==='tap';
+    const isTap=isTapName(a.event_name);
     const danger=a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
     let icon,label,color;
     if(isTap){icon='👆';label=a.element_key||'(button)';color='#5b8cff';}
@@ -3762,7 +3766,7 @@ function showActionDetail(a){
   const isParse = a.event_name==='json_parse_error';
   const isErr   = a.event_name==='application_error' || isCrash || isParse;
 
-  const isTap = a.event_name === 'tap';
+  const isTap = isTapName(a.event_name);
   // Common context: when did this fire + on what screen + what triggered any
   // followups (network attribution). Shown above the specifics block so the
   // operator can grok "when/where" before the deeper details.
@@ -4743,7 +4747,7 @@ function openSessionWireframe(segs, sid){
     seg.actions.forEach(a=>{
       if(a.standaloneNet) return;   // already in the top net block
       const aid = _swfActions.length; _swfActions.push({ ...a, sid });
-      const isTap = a.event_name==='tap';
+      const isTap = isTapName(a.event_name);
       const danger = a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error';
       const c = danger?'#dc2626':(isTap?'#27d796':'#8b94a7');
       // A button-style block (rounded, looks like a UI control).

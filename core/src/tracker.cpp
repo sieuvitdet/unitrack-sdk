@@ -185,7 +185,10 @@ void Tracker::log_tap(const std::string& element_key,
         o << "," << extra_json.substr(1, extra_json.size() - 2);
     }
     o << "}";
-    track("tap", o.str());
+    // Convention name "click" so the Snowplow provider maps via portal
+    // `event_names.click` (default → `event_click`). Matches the swizzlers
+    // on iOS / Android / Flutter / RN — keeps the wire shape uniform.
+    track("click", o.str());
 }
 
 void Tracker::log_network(const std::string& url, const std::string& method,

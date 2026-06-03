@@ -128,7 +128,11 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
           'package=$pkg');
       return true;
     }());
-    UniTrack.instance.track('tap', properties: {
+    // Use the convention name "click" so the Snowplow provider maps via portal
+    // `event_names.click` (default → `event_click`) and the schema URI lands at
+    // iglu:<vendor>/event_click/jsonschema/<v>. Matches the iOS swizzler and
+    // Android ClickTracker — keeps the wire shape uniform across platforms.
+    UniTrack.instance.track('click', properties: {
       // `element_key` is the canonical cross-platform name (matches iOS/Android
       // bindings + portal rule field `match_element_key`). Keep `element` as
       // a backwards-compat alias for any portal query still on the old key.

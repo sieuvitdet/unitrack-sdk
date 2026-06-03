@@ -56,7 +56,12 @@ private extension UIApplication {
         let pkg         = Bundle(for: cls).bundleIdentifier ?? ""
         var extra: [String: Any] = ["type": String(describing: cls)]
         if let btn = control as? UIButton, let t = btn.title(for: .normal) { extra["title"] = t }
-        UniTrack.track("tap", properties: [
+        // Use the convention name "click" (not "tap") so the Snowplow provider
+        // maps via portal `event_names.click` (default → `event_click`) and the
+        // schema URI lands at iglu:<vendor>/event_click/jsonschema/<v>. App
+        // code that needs a different business event for a specific button
+        // still uses a Phase-2 rewrite rule (match_event=click + element_key).
+        UniTrack.track("click", properties: [
             "element_key": key,
             "screen":      screen,
             "class_name":  className,

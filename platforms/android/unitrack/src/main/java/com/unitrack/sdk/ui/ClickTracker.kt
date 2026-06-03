@@ -84,7 +84,10 @@ internal object ClickTracker : Application.ActivityLifecycleCallbacks {
             val pkg       = cls.`package`?.name ?: className.substringBeforeLast('.', "")
             val framework = classifyFramework(pkg)
 
-            UniTrack.track("tap", mapOf(
+            // Use the convention name "click" so the Snowplow provider maps
+            // via portal `event_names.click` (default → `event_click`). iOS and
+            // Flutter swizzlers do the same — keeps the wire shape uniform.
+            UniTrack.track("click", mapOf(
                 "element_key" to key,
                 "screen"      to screen,
                 "type"        to cls.simpleName,

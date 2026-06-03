@@ -27,7 +27,10 @@ function isValidName(name) {
 }
 
 // The event types a healthy mobile app generally produces. Used for diversity.
-const CORE_TYPES = ['screen_view', 'tap', 'network_request', 'app_start',
+// `click` is the convention name SDKs ≥0.2.4 emit for UI button events; `tap`
+// is the legacy name (≤0.2.3) — both count so the diversity score doesn't
+// drop when an app upgrades the SDK.
+const CORE_TYPES = ['screen_view', 'click', 'tap', 'network_request', 'app_start',
   'app_foreground', 'app_background', 'crash'];
 
 /**

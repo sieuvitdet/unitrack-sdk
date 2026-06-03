@@ -355,9 +355,9 @@ class UniTrack {
     final screen = (props['screen'] ?? props['screen_name'] ?? _lastScreen) as String?;
     final elem = props['element_key'] as String?;
     final cls  = props['class_name'] as String?;
-    if (event == 'tap') {
+    if (event == 'click') {
       assert(() {
-        debugPrint('[unitrack] rule check tap '
+        debugPrint('[unitrack] rule check click '
             'screen="$screen" (lastScreen=$_lastScreen, propScreen=${props['screen']}) '
             'element_key="$elem" class_name="$cls" rules=${_eventRules.length}');
         return true;
