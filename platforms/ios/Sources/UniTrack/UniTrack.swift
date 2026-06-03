@@ -110,13 +110,18 @@ public final class UniTrack {
         public var matchEvent: String          // raw event to match (e.g. "tap")
         public var matchScreen: String?         // optional screen filter
         public var matchElementKey: String?     // optional element_key filter
+        /// View class name filter (useful when the label is dynamic/localised
+        /// but the class is stable). Matches Android EventRule.matchClassName.
+        public var matchClassName: String?
         public var toName: String               // business event name to emit
         public var addProps: [String: Any]      // static props merged in
         public init(matchEvent: String, matchScreen: String? = nil,
-                    matchElementKey: String? = nil, toName: String,
-                    addProps: [String: Any] = [:]) {
+                    matchElementKey: String? = nil, matchClassName: String? = nil,
+                    toName: String, addProps: [String: Any] = [:]) {
             self.matchEvent = matchEvent; self.matchScreen = matchScreen
-            self.matchElementKey = matchElementKey; self.toName = toName
+            self.matchElementKey = matchElementKey
+            self.matchClassName = matchClassName
+            self.toName = toName
             self.addProps = addProps
         }
     }
@@ -127,14 +132,54 @@ public final class UniTrack {
         shared.eventRules = rules
     }
 
+    // ── W3C distributed tracing ────────────────────────────────────────────
+    //
+    // Apps install the tracing config from remote_config.tracing — same shape
+    // as Android UniTrack.setTracing(). Tracing on iOS is wired through
+    // UniTrackURLProtocol; this setter just stores the snapshot the protocol
+    // reads. allowlistHosts is fail-closed: empty list ⇒ never inject (so
+    // `traceparent` never leaks to Firebase / Maps / CDNs).
+    private var tracingEnabledFlag: Bool      = false
+    private var tracingHeaderName:  String    = "traceparent"
+    private var tracingAllowlist:   [String]  = []
+    private var tracingSampledFlag: Bool      = true
+
+    public static func setTracing(enabled: Bool,
+                                  headerName: String = "traceparent",
+                                  allowlistHosts: [String] = [],
+                                  sampled: Bool = true) {
+        shared.tracingEnabledFlag = enabled
+        shared.tracingHeaderName  = headerName.isEmpty ? "traceparent" : headerName
+        shared.tracingAllowlist   = allowlistHosts
+        shared.tracingSampledFlag = sampled
+    }
+
+    /// Snapshot the URLProtocol reads on each outbound request. Internal so
+    /// the protocol can fetch the latest config without locking.
+    internal struct TracingSnapshot {
+        let enabled: Bool
+        let headerName: String
+        let allowlist: [String]
+        let sampled: Bool
+    }
+    internal static func tracingSnapshot() -> TracingSnapshot {
+        TracingSnapshot(
+            enabled:    shared.tracingEnabledFlag,
+            headerName: shared.tracingHeaderName,
+            allowlist:  shared.tracingAllowlist,
+            sampled:    shared.tracingSampledFlag)
+    }
+
     // Returns the rewritten (name, properties) for an event, or nil if no rule
     // matches. First matching rule wins.
     private func applyRules(_ event: String, _ properties: [String: Any]) -> (String, [String: Any])? {
         let screen = (properties["screen"] as? String) ?? (properties["screen_name"] as? String)
         let elem   = properties["element_key"] as? String
+        let cls    = properties["class_name"] as? String
         for r in eventRules where r.matchEvent == event {
-            if let s = r.matchScreen, s != screen { continue }
-            if let e = r.matchElementKey, e != elem { continue }
+            if let s = r.matchScreen,     s != screen { continue }
+            if let e = r.matchElementKey, e != elem   { continue }
+            if let c = r.matchClassName,  c != cls    { continue }
             var props = properties
             for (k, v) in r.addProps { props[k] = v }
             return (r.toName, props)
@@ -212,12 +257,19 @@ public final class UniTrack {
 
     // MARK: - Semantic events (Phase 3)
 
-    /// Notification received/opened. state: foreground|background|silent.
+    /// Notification received/opened/dismissed. state: foreground|background|silent.
+    /// `notificationId` is the platform id (FCM messageId / iOS UNNotification
+    /// id) so the portal can join the same push across deliver/open. `data` is
+    /// the raw payload bag (FCM data dictionary, APNs userInfo).
     public static func trackNotification(state: String, action: String = "received",
-                                         title: String? = nil, body: String? = nil) {
+                                         title: String? = nil, body: String? = nil,
+                                         notificationId: String? = nil,
+                                         data: [String: Any]? = nil) {
         var p: [String: Any] = ["state": state, "action": action]
         if let title = title { p["title"] = title }
         if let body = body { p["body"] = body }
+        if let nid = notificationId, !nid.isEmpty { p["notification_id"] = nid }
+        if let data = data, !data.isEmpty { p["data"] = data }
         track("notification", properties: p)
     }
 
