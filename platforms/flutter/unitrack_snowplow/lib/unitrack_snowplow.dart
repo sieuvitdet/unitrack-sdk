@@ -211,6 +211,48 @@ class SnowplowProvider extends AnalyticsProvider {
     return (v == null || v.isEmpty) ? fallback : v;
   }
 
+  /// Map a raw event name from the SDK auto-capture path to a convention
+  /// kind. Returns null when the event isn't recognised — those go out under
+  /// their own name (legacy behavior).
+  ///
+  /// `click`           → kind `click` (auto-tap swizzler)
+  /// `screen_load_completed` / `screen_viewed` / `screen_exited` → `screen_view`
+  /// `crash`           → kind `crash` (recovered + dart-side errors)
+  /// `network_request` → kind `api` (URLProtocol auto-capture)
+  /// `session_started` / `session_ended` → kind `session`
+  String? _kindForRawEvent(String raw) {
+    switch (raw) {
+      case 'click':
+        return 'click';
+      case 'screen_load_completed':
+      case 'screen_viewed':
+      case 'screen_exited':
+      case 'screen_view':
+        return 'screen_view';
+      case 'crash':
+      case 'application_error':
+        return 'crash';
+      case 'network_request':
+        return 'api';
+      case 'session_started':
+      case 'session_ended':
+        return 'session';
+    }
+    return null;
+  }
+
+  String _defaultEventNameForKind(String kind) {
+    switch (kind) {
+      case 'click':       return 'event_click';
+      case 'result':      return 'event_result';
+      case 'screen_view': return 'event_screen_view';
+      case 'crash':       return 'event_crash';
+      case 'api':         return 'event_api';
+      case 'session':     return 'event_session';
+    }
+    return kind;
+  }
+
   /// Build the entity list for one event:
   ///   1. user_context — built from [userContext] (if entities map has it)
   ///   2. core_action  — built from event meta  (if entities map has it)
@@ -240,9 +282,10 @@ class SnowplowProvider extends AnalyticsProvider {
       if (coreRaw != null) {
         final uri = _normalizeEntityURI(coreRaw);
         if (uri != null) {
+          // core_action carries event meta only — the business name lives in
+          // `event.data.event_name`, not duplicated here.
           final data = <String, Object?>{
-            'action_name': eventName,
-            'timestamp':   DateTime.now().toUtc().toIso8601String(),
+            'timestamp': DateTime.now().toUtc().toIso8601String(),
           };
           if (screen != null && screen.isNotEmpty)         data['screen'] = screen;
           if (elementKey != null && elementKey.isNotEmpty) data['element_key'] = elementKey;
@@ -323,6 +366,10 @@ class SnowplowProvider extends AnalyticsProvider {
   }
 
   /// Click convention — kind=`click`, default name `event_click`.
+  /// `elementKey` doubles as the business name for the click (e.g.
+  /// `camera_item_selected`, `notif_request_permission`). It's emitted in
+  /// the event payload as `event_name` so the same iglu schema carries the
+  /// specific business signal in addition to the generic shape.
   void trackingClickEvent({
     required String elementKey,
     String? label,
@@ -334,7 +381,7 @@ class SnowplowProvider extends AnalyticsProvider {
     final name = _eventName('click', 'event_click');
     final schema = _schemaFor(name);
     if (schema == null) return;
-    final payload = <String, Object?>{'element_key': elementKey};
+    final payload = <String, Object?>{'event_name': elementKey};
     if (label != null)  payload['label']  = label;
     if (screen != null) payload['screen'] = screen;
     if (data != null)   payload.addAll(data);
@@ -346,6 +393,9 @@ class SnowplowProvider extends AnalyticsProvider {
   }
 
   /// Result convention — kind=`result`, default name `event_result`.
+  /// `action` is the business event (e.g. `camera_pairing_completed`); it's
+  /// emitted as `event_name` in the payload so the iglu schema sees both
+  /// the generic shape and the specific business signal.
   void trackingResultEvent({
     required String action,
     required String status,
@@ -359,7 +409,10 @@ class SnowplowProvider extends AnalyticsProvider {
     final name = _eventName('result', 'event_result');
     final schema = _schemaFor(name);
     if (schema == null) return;
-    final payload = <String, Object?>{'action': action, 'status': status};
+    final payload = <String, Object?>{
+      'event_name': action,
+      'status':     status,
+    };
     if (errorCode    != null) payload['error_code']    = errorCode;
     if (errorMessage != null) payload['error_message'] = errorMessage;
     if (durationMs   != null) payload['duration_ms']   = durationMs;
@@ -373,8 +426,16 @@ class SnowplowProvider extends AnalyticsProvider {
   /// Screen-view convention — kind=`screen_view`, default name
   /// `event_screen_view`. Also fires Snowplow's native ScreenView so the
   /// session is correctly sliced by screen.
+  ///
+  /// `businessName` lets the caller stamp a specific business event into
+  /// the payload (e.g. `screen_load_completed`, `screen_viewed`,
+  /// `screen_exited`) without changing the iglu schema URI — the schema
+  /// stays the generic screen_view shape; the business signal lives in
+  /// `event.data.event_name`. Defaults to the resolved convention name
+  /// when omitted.
   void trackingScreenView({
     required String screenName,
+    String? businessName,
     String? fromScreen,
     Map<String, Object?>? data,
     List<SelfDescribing>? extraContexts,
@@ -383,7 +444,10 @@ class SnowplowProvider extends AnalyticsProvider {
     final name = _eventName('screen_view', 'event_screen_view');
     final schema = _schemaFor(name);
     if (schema == null) return;
-    final payload = <String, Object?>{'screen': screenName};
+    final payload = <String, Object?>{
+      'event_name': businessName ?? name,
+      'screen':     screenName,
+    };
     if (fromScreen != null) payload['from_screen'] = fromScreen;
     if (data != null) payload.addAll(data);
     trackSelfDescribing(
@@ -394,12 +458,15 @@ class SnowplowProvider extends AnalyticsProvider {
   }
 
   /// API convention — kind=`api`, default name `event_api`. Models any
-  /// network-style timing (HTTP, RTSP, gRPC).
+  /// network-style timing (HTTP, RTSP, gRPC). `businessName` lets the
+  /// caller stamp a business signal (e.g. `camera_stream_first_frame`,
+  /// `camera_notification_delivered`) into `event.data.event_name`.
   void trackingAPI({
     required String url,
     required String method,
     required int status,
     required int durationMs,
+    String? businessName,
     Map<String, Object?>? data,
     List<SelfDescribing>? extraContexts,
     bool skipGlobalContexts = false,
@@ -408,6 +475,7 @@ class SnowplowProvider extends AnalyticsProvider {
     final schema = _schemaFor(name);
     if (schema == null) return;
     final payload = <String, Object?>{
+      'event_name':  businessName ?? name,
       'url': url, 'method': method, 'status': status, 'duration_ms': durationMs,
     };
     if (data != null) payload.addAll(data);
@@ -420,10 +488,13 @@ class SnowplowProvider extends AnalyticsProvider {
   /// Crash convention — kind=`crash`, default name `event_crash`. Use for
   /// non-fatal exceptions the app wants to surface explicitly. Hard crashes
   /// caught by the SDK's signal handler flow through `track('crash', …)`.
+  /// `businessName` stamps a business signal (e.g. `application_error`,
+  /// `stream_decoder_error`) into `event.data.event_name`.
   void trackingCrash({
     required String message,
     String? stack,
     String? screen,
+    String? businessName,
     Map<String, Object?>? data,
     List<SelfDescribing>? extraContexts,
     bool skipGlobalContexts = false,
@@ -431,7 +502,10 @@ class SnowplowProvider extends AnalyticsProvider {
     final name = _eventName('crash', 'event_crash');
     final schema = _schemaFor(name);
     if (schema == null) return;
-    final payload = <String, Object?>{'message': message};
+    final payload = <String, Object?>{
+      'event_name': businessName ?? name,
+      'message':    message,
+    };
     if (stack  != null) payload['stack']  = stack;
     if (screen != null) payload['screen'] = screen;
     if (data != null) payload.addAll(data);
@@ -442,10 +516,9 @@ class SnowplowProvider extends AnalyticsProvider {
   }
 
   /// Session-lifecycle convention — kind=`session`, default name
-  /// `event_session`. Use for session_started / session_ended / any
-  /// state-of-session event. `action` is the lifecycle verb (started /
-  /// ended / resumed); `reason` is what triggered the transition
-  /// (cold_start / backgrounded / timeout / explicit_logout).
+  /// `event_session`. `action` doubles as the business event signal
+  /// (e.g. `session_started`, `session_ended`) — emitted as `event_name`
+  /// in the payload.
   void trackingSession({
     required String action,
     String? reason,
@@ -458,7 +531,7 @@ class SnowplowProvider extends AnalyticsProvider {
     final name = _eventName('session', 'event_session');
     final schema = _schemaFor(name);
     if (schema == null) return;
-    final payload = <String, Object?>{'action': action};
+    final payload = <String, Object?>{'event_name': action};
     if (reason     != null) payload['reason']      = reason;
     if (durationMs != null) payload['duration_ms'] = durationMs;
     if (source     != null) payload['source']      = source;
@@ -515,20 +588,37 @@ class SnowplowProvider extends AnalyticsProvider {
       });
       return;
     }
-    final schema = _schemaFor(name);
+    // Convention-kind routing. The 6 built-in kinds (click / result /
+    // screen_view / crash / api / session) resolve via portal `event_names`
+    // so the iglu schema becomes the wire name (e.g. click → event_click).
+    // The original raw name is preserved as `event_name` in the payload so a
+    // single iglu schema carries both the generic shape and the specific
+    // business signal. Non-kind names (e.g. `screen_load_completed`) still
+    // dispatch through the matching kind — see _kindForRawEvent.
+    final kind = _kindForRawEvent(name);
+    final resolvedName = (kind != null)
+        ? _eventName(kind, _defaultEventNameForKind(kind))
+        : name;
+    final schema = _schemaFor(resolvedName);
     if (schema != null) {
-      // Convention path: vendor + version + name → iglu URI + auto entities.
       final screen     = properties['screen']?.toString() ??
                          properties['screen_name']?.toString();
       final elementKey = properties['element_key']?.toString();
-      final data       = _cleanedData(properties);
+      // Drop the SDK-internal `element_key` from the event payload when it
+      // duplicates the business signal we're stamping in event_name; keeps
+      // the payload clean while core_action still carries it.
+      final cleaned = _cleanedData(properties);
+      final data = <String, Object?>{
+        if (kind != null) 'event_name': name,
+        ...cleaned,
+      };
       final contexts = _buildContexts(
-        eventName: name, screen: screen, elementKey: elementKey,
+        eventName: resolvedName, screen: screen, elementKey: elementKey,
         extra: null, skipGlobalContexts: false,
       );
       t.track(SelfDescribing(schema: schema, data: data), contexts: contexts);
-      _logSnowplow(name: name, schema: schema, data: data, contexts: contexts);
-      _mirrorToPortal(name, {
+      _logSnowplow(name: resolvedName, schema: schema, data: data, contexts: contexts);
+      _mirrorToPortal(resolvedName, {
         '_sp_type': 'self_describing', '_sp_schema': schema, ...data,
       });
       return;
