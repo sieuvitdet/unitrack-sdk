@@ -1707,7 +1707,7 @@ async function renderConfig(pid){
       // Hit the server endpoint so the filename + Content-Disposition come
       // from the same source of truth as the JSON payload — keeps a future
       // schema-version bump in one place.
-      const r = await fetch(`/api/projects/${pid}/config/export`, { credentials: 'same-origin' });
+      const r = await fetch(`${BASE}/api/projects/${pid}/config/export`, { credentials: 'same-origin' });
       if (!r.ok) { toast('Export thất bại: HTTP ' + r.status, 'err'); return; }
       const blob = await r.blob();
       // Honour the Content-Disposition filename if present, fall back to a
