@@ -134,7 +134,6 @@ function defaults(project) {
       },
     },
     firebase: { enabled: false },
-    rules: [],
     // W3C distributed tracing. Default OFF + empty allowlist — the SDK is
     // fail-closed on the host side too, so a fresh project never injects
     // `traceparent` until an operator opts in (and types the internal hosts).
@@ -178,7 +177,6 @@ function configForProject(project, flavor = null) {
     endpoint:       row.endpoint || def.endpoint,
     flavor:         resolved,
     ...out,
-    rules:          parse(row.rules, def.rules),
     updated_at:     row.updated_at || 0,
   };
 }
@@ -191,20 +189,19 @@ function saveConfig(projectId, body) {
     sdk_config: body.sdk_config !== undefined ? JSON.stringify(body.sdk_config) : (cur && cur.sdk_config),
     snowplow:   body.snowplow   !== undefined ? JSON.stringify(body.snowplow)   : (cur && cur.snowplow),
     firebase:   body.firebase   !== undefined ? JSON.stringify(body.firebase)   : (cur && cur.firebase),
-    rules:      body.rules      !== undefined ? JSON.stringify(body.rules)      : (cur && cur.rules),
     tracing:    body.tracing    !== undefined ? JSON.stringify(body.tracing)    : (cur && cur.tracing),
   };
   const version = (cur ? cur.version : 0) + 1;
   db.prepare(`
-    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, rules, tracing, version, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, tracing, version, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id) DO UPDATE SET
       endpoint = excluded.endpoint, sdk_config = excluded.sdk_config,
       snowplow = excluded.snowplow, firebase = excluded.firebase,
-      rules = excluded.rules, tracing = excluded.tracing,
+      tracing = excluded.tracing,
       version = excluded.version, updated_at = excluded.updated_at
   `).run(projectId, next.endpoint ?? null, next.sdk_config ?? null, next.snowplow ?? null,
-         next.firebase ?? null, next.rules ?? null,
+         next.firebase ?? null,
          next.tracing ?? null, version, Date.now());
   return version;
 }

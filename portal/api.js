@@ -157,7 +157,6 @@ router.get('/projects/:id/config/export', ownProject, (req, res) => {
       snowplow:   cfg.snowplow || {},
       firebase:   cfg.firebase || {},
       tracing:    cfg.tracing || {},
-      rules:      cfg.rules || [],
     },
     sp_event_maps: spMaps,
   };
@@ -193,7 +192,6 @@ router.post('/projects/:id/config/import', ownProject, (req, res) => {
   if (c.snowplow   !== undefined) patch.snowplow   = c.snowplow;
   if (c.firebase   !== undefined) patch.firebase   = c.firebase;
   if (c.tracing    !== undefined) patch.tracing    = c.tracing;
-  if (c.rules      !== undefined) patch.rules      = c.rules;
   const version = saveConfig(Number(req.params.id), patch);
 
   // sp_event_maps: clear + repopulate. These are small and the natural mental

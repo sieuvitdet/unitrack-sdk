@@ -6,16 +6,7 @@
 // on failure/timeout returns the last value or a built-in default. Uses RN's
 // global fetch — no extra dependency.
 
-import UniTrack, { type EventProperties, type EventRule } from './index';
-
-export interface RemoteConfigRule {
-  match_event: string;
-  match_screen?: string;
-  match_element_key?: string;
-  match_class_name?: string;
-  to_name: string;
-  add_props?: EventProperties;
-}
+import UniTrack from './index';
 
 export interface RemoteConfigTracing {
   enabled?: boolean;
@@ -30,7 +21,6 @@ export interface RemoteConfigData {
   sdk_config?: Record<string, unknown>;
   snowplow?: Record<string, unknown>;
   firebase?: Record<string, unknown>;
-  rules?: RemoteConfigRule[];
   /** W3C distributed-tracing block — apply via applyTracing(). */
   tracing?: RemoteConfigTracing;
 }
@@ -45,7 +35,6 @@ function builtinDefault(): RemoteConfigData {
                   trackScreens: true, trackTaps: true, trackNetwork: true },
     snowplow: { enabled: false },
     firebase: { enabled: false },
-    rules: [],
   };
 }
 
@@ -61,18 +50,6 @@ export const UniTrackRemoteConfig = {
       allowlistHosts: t.allowlist_hosts ?? [],
       sampled: t.sampled !== false,
     });
-  },
-
-  /** Map config rules → SDK EventRule[]. */
-  toEventRules(cfg: RemoteConfigData): EventRule[] {
-    return (cfg.rules ?? []).map((r) => ({
-      matchEvent: r.match_event,
-      matchScreen: r.match_screen,
-      matchElementKey: r.match_element_key,
-      matchClassName: r.match_class_name,
-      toName: r.to_name,
-      addProps: r.add_props ?? {},
-    }));
   },
 
   /** Fetch config from the portal. Always resolves with a usable config

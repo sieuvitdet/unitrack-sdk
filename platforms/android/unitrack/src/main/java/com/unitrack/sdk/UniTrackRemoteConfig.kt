@@ -23,29 +23,6 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
     val sdkConfig: JSONObject get() = raw.optJSONObject("sdk_config") ?: JSONObject()
     val snowplow: JSONObject get() = raw.optJSONObject("snowplow") ?: JSONObject()
     val firebase: JSONObject get() = raw.optJSONObject("firebase") ?: JSONObject()
-    val rulesJson: org.json.JSONArray get() = raw.optJSONArray("rules") ?: org.json.JSONArray()
-
-    /** Map config rules → SDK EventRule list. */
-    fun toEventRules(): List<UniTrack.EventRule> {
-        val out = mutableListOf<UniTrack.EventRule>()
-        val arr = rulesJson
-        for (i in 0 until arr.length()) {
-            val r = arr.optJSONObject(i) ?: continue
-            val add = mutableMapOf<String, Any?>()
-            r.optJSONObject("add_props")?.let { ap ->
-                for (k in ap.keys()) add[k] = ap.get(k)
-            }
-            out.add(UniTrack.EventRule(
-                matchEvent = r.optString("match_event"),
-                matchScreen = r.optString("match_screen", null),
-                matchElementKey = r.optString("match_element_key", null),
-                matchClassName = r.optString("match_class_name", null),
-                toName = r.optString("to_name"),
-                addProps = add,
-            ))
-        }
-        return out
-    }
 
     companion object {
         private const val PREFS = "unitrack"
@@ -120,7 +97,6 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
             })
             put("snowplow", JSONObject().put("enabled", false))
             put("firebase", JSONObject().put("enabled", false))
-            put("rules", org.json.JSONArray())
         })
     }
 }

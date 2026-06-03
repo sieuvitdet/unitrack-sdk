@@ -26,27 +26,8 @@ public struct UniTrackRemoteConfig: Codable {
     public var sdkConfig: SDKConfig
     public var snowplow: SnowplowConfig
     public var firebase: FirebaseConfig
-    public var rules: [Rule]?
     /// W3C distributed-tracing settings (optional — absent = disabled).
     public var tracing: TracingConfig?
-
-    // Phase 2 rewrite rule: match an auto-captured event → a business event.
-    public struct Rule: Codable {
-        public var matchEvent: String
-        public var matchScreen: String?
-        public var matchElementKey: String?
-        public var matchClassName: String?
-        public var toName: String
-        public var addProps: [String: AnyCodable]?
-        enum CodingKeys: String, CodingKey {
-            case matchEvent = "match_event"
-            case matchScreen = "match_screen"
-            case matchElementKey = "match_element_key"
-            case matchClassName = "match_class_name"
-            case toName = "to_name"
-            case addProps = "add_props"
-        }
-    }
 
     public struct SDKConfig: Codable {
         public var batchSize: Int?
@@ -165,27 +146,14 @@ public struct UniTrackRemoteConfig: Codable {
 
     // JSON keys are snake_case on the wire.
     enum CodingKeys: String, CodingKey {
-        case version, endpoint, rules, tracing
+        case version, endpoint, tracing
         case sdkConfig = "sdk_config"
         case snowplow, firebase
     }
 
-    /// Map decoded config rules → UniTrack.EventRule for the SDK.
-    public func toEventRules() -> [UniTrack.EventRule] {
-        (rules ?? []).map { r in
-            UniTrack.EventRule(
-                matchEvent: r.matchEvent,
-                matchScreen: r.matchScreen,
-                matchElementKey: r.matchElementKey,
-                matchClassName: r.matchClassName,
-                toName: r.toName,
-                addProps: r.addProps?.unwrapped() ?? [:])
-        }
-    }
-
     /// Hand off the tracing block to UniTrack. No-op if the portal didn't send
     /// a `tracing` section. Apps usually just call this from the fetch
-    /// callback alongside `setEventRules(toEventRules())`.
+    /// callback right after init.
     public func applyTracing() {
         guard let t = tracing else { return }
         UniTrack.setTracing(
@@ -268,8 +236,7 @@ public struct UniTrackRemoteConfig: Codable {
                                  autoCapture: true, trackScreens: true, trackTaps: true,
                                  trackNetwork: true, logLevel: "warn"),
             snowplow: SnowplowConfig(enabled: false),
-            firebase: FirebaseConfig(enabled: false),
-            rules: nil
+            firebase: FirebaseConfig(enabled: false)
         )
     }
 }

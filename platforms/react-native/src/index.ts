@@ -59,16 +59,6 @@ export interface UniTrackConfig {
 
 export type EventProperties = Record<string, unknown>;
 
-/** A config-driven rewrite rule: when an auto-captured event matches, the SDK
- *  renames it to `toName` and merges `addProps`. Built from the remote config. */
-export interface EventRule {
-  matchEvent: string;
-  matchScreen?: string;
-  matchElementKey?: string;
-  toName: string;
-  addProps?: EventProperties;
-}
-
 import type { AnalyticsProvider } from './analyticsProvider';
 export { UniTrackRemoteConfig } from './remoteConfig';
 export type { AnalyticsProvider } from './analyticsProvider';
@@ -133,11 +123,6 @@ class UniTrackClass {
     return native.reset();
   }
 
-  // Event rewrite rules (Phase 2 — config-driven). A matching rule renames an
-  // auto-captured event into a business event + merges props at this chokepoint.
-  private eventRules: EventRule[] = [];
-  setEventRules(rules: EventRule[]) { this.eventRules = rules; }
-
   /**
    * Apply W3C distributed-tracing settings. The fetch interceptor reads this
    * snapshot per request; cheap to call repeatedly (e.g. from a remote-config
@@ -161,23 +146,9 @@ class UniTrackClass {
    *  push payloads or deep-links with backend logs by trace_id. */
   newTrace(): UniTrackTraceIds { return newTrace(); }
 
-  private applyRules(event: string, props: EventProperties): [string, EventProperties] | null {
-    const screen = (props['screen'] ?? props['screen_name']) as string | undefined;
-    const elem = props['element_key'] as string | undefined;
-    for (const r of this.eventRules) {
-      if (r.matchEvent !== event) continue;
-      if (r.matchScreen && r.matchScreen !== screen) continue;
-      if (r.matchElementKey && r.matchElementKey !== elem) continue;
-      return [r.toName, { ...props, ...r.addProps }];
-    }
-    return null;
-  }
-
   track(event: string, properties: EventProperties = {}) {
-    let name = event;
-    let props = properties;
-    const rewritten = this.applyRules(event, properties);
-    if (rewritten) { [name, props] = rewritten; }
+    const name = event;
+    const props = properties;
     this.forEachProvider((p) => p.track(name, props));
     return native.track(name, JSON.stringify(props));
   }

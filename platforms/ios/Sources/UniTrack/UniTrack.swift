@@ -99,39 +99,6 @@ public final class UniTrack {
         for p in shared.providers { action(p) }
     }
 
-    // MARK: - Event rewrite rules (Phase 2 — config-driven)
-    //
-    // A rule rewrites an auto-captured event (tap / screen_view / network_request)
-    // into a business event name + extra props, based on the portal config. This
-    // lets the app emit a meaningful business event WITHOUT a hand-written helper:
-    // e.g. a tap with element_key "stream_start" on screen "LiveStreamViewController"
-    // becomes "camera_stream_started". Rules come from the remote config.
-    public struct EventRule {
-        public var matchEvent: String          // raw event to match (e.g. "tap")
-        public var matchScreen: String?         // optional screen filter
-        public var matchElementKey: String?     // optional element_key filter
-        /// View class name filter (useful when the label is dynamic/localised
-        /// but the class is stable). Matches Android EventRule.matchClassName.
-        public var matchClassName: String?
-        public var toName: String               // business event name to emit
-        public var addProps: [String: Any]      // static props merged in
-        public init(matchEvent: String, matchScreen: String? = nil,
-                    matchElementKey: String? = nil, matchClassName: String? = nil,
-                    toName: String, addProps: [String: Any] = [:]) {
-            self.matchEvent = matchEvent; self.matchScreen = matchScreen
-            self.matchElementKey = matchElementKey
-            self.matchClassName = matchClassName
-            self.toName = toName
-            self.addProps = addProps
-        }
-    }
-    private var eventRules: [EventRule] = []
-
-    /// Install rewrite rules (from remote config). Call before/after init.
-    public static func setEventRules(_ rules: [EventRule]) {
-        shared.eventRules = rules
-    }
-
     // ── W3C distributed tracing ────────────────────────────────────────────
     //
     // Apps install the tracing config from remote_config.tracing — same shape
@@ -170,23 +137,6 @@ public final class UniTrack {
             sampled:    shared.tracingSampledFlag)
     }
 
-    // Returns the rewritten (name, properties) for an event, or nil if no rule
-    // matches. First matching rule wins.
-    private func applyRules(_ event: String, _ properties: [String: Any]) -> (String, [String: Any])? {
-        let screen = (properties["screen"] as? String) ?? (properties["screen_name"] as? String)
-        let elem   = properties["element_key"] as? String
-        let cls    = properties["class_name"] as? String
-        for r in eventRules where r.matchEvent == event {
-            if let s = r.matchScreen,     s != screen { continue }
-            if let e = r.matchElementKey, e != elem   { continue }
-            if let c = r.matchClassName,  c != cls    { continue }
-            var props = properties
-            for (k, v) in r.addProps { props[k] = v }
-            return (r.toName, props)
-        }
-        return nil
-    }
-
     /// Initialize the SDK. Call once at app startup (typically in
     /// `application(_:didFinishLaunchingWithOptions:)`).
     public static func initialize(apiKey: String, config: Config = Config()) {
@@ -207,15 +157,8 @@ public final class UniTrack {
     }
 
     public static func track(_ event: String, properties: [String: Any] = [:]) {
-        // Phase 2: a config rule may rewrite an auto-captured event into a
-        // business event (name + extra props) before it goes anywhere.
-        var name = event
-        var props = properties
-        if let (rewritten, rewrittenProps) = shared.applyRules(event, properties) {
-            name = rewritten
-            props = rewrittenProps
-            UniTrack.log("[UniTrack] rule rewrite: %@ → %@", event, rewritten)
-        }
+        let name = event
+        let props = properties
         // Visibility — one line per event so the developer can see what's
         // about to be forwarded and to which provider list. Gated by
         // UniTrack.verboseLogging so a release build can mute it.

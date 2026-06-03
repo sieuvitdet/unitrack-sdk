@@ -85,28 +85,6 @@ class UniTrackConfig {
       };
 }
 
-/// A config-driven rewrite rule: when an auto-captured event matches, the SDK
-/// renames it to [toName] and merges [addProps]. Built from the remote config.
-class UniTrackEventRule {
-  final String matchEvent;
-  final String? matchScreen;
-  final String? matchElementKey;
-  /// Widget runtime-type name from auto-tap (e.g. "ElevatedButton",
-  /// "CustomButton"). Useful when label text is dynamic / multi-language
-  /// but the widget class is stable.
-  final String? matchClassName;
-  final String toName;
-  final Map<String, Object?> addProps;
-  const UniTrackEventRule({
-    required this.matchEvent,
-    this.matchScreen,
-    this.matchElementKey,
-    this.matchClassName,
-    required this.toName,
-    this.addProps = const {},
-  });
-}
-
 class UniTrack {
   UniTrack._();
   static final UniTrack instance = UniTrack._();
@@ -309,17 +287,10 @@ class UniTrack {
     return _channel.invokeMethod('reset');
   }
 
-  // Event rewrite rules (Phase 2 — config-driven). Install from remote config
-  // via setEventRules(); a matching rule renames an auto-captured event into a
-  // business event + merges props, at this single chokepoint.
-  List<UniTrackEventRule> _eventRules = const [];
-  void setEventRules(List<UniTrackEventRule> rules) { _eventRules = rules; }
-
   // Last screen the app explicitly identified via setScreen() — used as a
-  // fallback so a `tap` event whose own props lack `screen` can still match a
-  // rule that filters on screen. Apps using auto_route / nested navigators
-  // where the route observer can't resolve the page class set this manually
-  // from the screen widget's initState.
+  // fallback so a click event whose own props lack `screen` can still carry
+  // it. Apps using auto_route / nested navigators where the route observer
+  // can't resolve the page class set this manually from initState.
   String? _lastScreen;
 
   /// Apply W3C distributed-tracing settings (from remote config or app code).
@@ -343,51 +314,9 @@ class UniTrack {
     );
   }
 
-  // Returns the rewritten (name, props) as a MapEntry, or null if no rule
-  // matched. (MapEntry instead of a record tuple, to keep this compatible with
-  // host apps pinning an older Dart language version.)
-  MapEntry<String, Map<String, Object?>>? _applyRules(
-      String event, Map<String, Object?> props) {
-    // Screen resolution order: event props (auto-tap fills it when the route
-    // observer knows the page) → SDK-side last setScreen() → null. The
-    // fallback matters for auto_route / nested navigators where the observer
-    // can't see the page class but the app calls setScreen() in initState.
-    final screen = (props['screen'] ?? props['screen_name'] ?? _lastScreen) as String?;
-    final elem = props['element_key'] as String?;
-    final cls  = props['class_name'] as String?;
-    if (event == 'click') {
-      assert(() {
-        debugPrint('[unitrack] rule check click '
-            'screen="$screen" (lastScreen=$_lastScreen, propScreen=${props['screen']}) '
-            'element_key="$elem" class_name="$cls" rules=${_eventRules.length}');
-        return true;
-      }());
-    }
-    for (final r in _eventRules) {
-      if (r.matchEvent != event) continue;
-      if (r.matchScreen != null && r.matchScreen != screen) continue;
-      if (r.matchElementKey != null && r.matchElementKey != elem) continue;
-      if (r.matchClassName != null && r.matchClassName != cls) continue;
-      assert(() {
-        debugPrint('[unitrack] rule match: $event → ${r.toName} '
-            '(screen="$screen" element_key="$elem" class_name="$cls")');
-        return true;
-      }());
-      return MapEntry(r.toName, {...props, ...r.addProps});
-    }
-    return null;
-  }
-
   Future<void> track(String event, {Map<String, Object?>? properties}) {
-    var props = properties ?? const <String, Object?>{};
-    var name = event;
-    // Phase 2: a config rule may rewrite an auto-captured event before sending.
-    final rewritten = _applyRules(event, props);
-    if (rewritten != null) {
-      name = rewritten.key;
-      props = rewritten.value;
-      log('[UniTrack] rule rewrite: $event → $name');
-    }
+    final props = properties ?? const <String, Object?>{};
+    final name = event;
     // Visibility — one line per event so the developer can see what's about
     // to be forwarded and to which provider list. Gated by verboseLogging
     // so a release build can mute it. Mirrors iOS UniTrack.track.

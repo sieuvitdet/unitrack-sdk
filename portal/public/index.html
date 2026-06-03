@@ -486,7 +486,6 @@ async function renderProject(){
         <div class="tab ${(!route.tab||route.tab==='sessions')?'active':''}" data-tab="sessions">Sessions</div>
         <div class="tab ${route.tab==='wireframe'?'active':''}" data-tab="wireframe">Hành trình & Heatmap</div>
         <div class="tab ${route.tab==='agent'?'active':''}" data-tab="agent">Agent</div>
-        <div class="tab ${route.tab==='tree'?'active':''}" data-tab="tree">Cây class → event</div>
         <div class="tab ${route.tab==='config'?'active':''}" data-tab="config">Config (remote)</div>
       </div>
       <div id="tabBody"></div>
@@ -536,7 +535,6 @@ async function renderProject(){
   if(route.tab==='logs') renderLogs(pid);
   else if(route.tab==='wireframe') renderWireframe(pid);
   else if(route.tab==='agent') renderAgent(pid);
-  else if(route.tab==='tree') renderTree(pid);
   else if(route.tab==='config') renderConfig(pid);
   else renderSessions(pid);   // default tab = Sessions
 }
@@ -1247,17 +1245,12 @@ async function renderConfig(pid){
       <textarea id="cfTrHosts" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
       ${flavorOverrideHtml('Tr', tr)}
 
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 4px;font-size:14px">Rewrite rules (Phase 2)</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">SDK đổi event auto-capture → tên nghiệp vụ ngay tại app. Tạo/sửa ở tab "Cây class → event".</div>
-      <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.rules||[],null,2))}</pre>
-
       <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="cfSave">Lưu config</button>
         <button class="btn" id="cfExport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬇︎ Export JSON</button>
         <button class="btn" id="cfImport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬆︎ Import JSON…</button>
         <input type="file" id="cfImportFile" accept="application/json,.json" style="display:none">
-        <span class="muted" style="font-size:12px;align-self:center">Export tải về 1 file .json đầy đủ (sdk_config + Snowplow + Firebase + tracing + rules + sp_event_maps). Import vào project khác để mirror cấu hình.</span>
+        <span class="muted" style="font-size:12px;align-self:center">Export tải về 1 file .json đầy đủ (sdk_config + Snowplow + Firebase + tracing + sp_event_maps). Import vào project khác để mirror cấu hình.</span>
       </div>
     </div>`;
 
@@ -1743,7 +1736,7 @@ async function renderConfig(pid){
     const fromName = bundle.exported_from && bundle.exported_from.name;
     if (!confirm(
       `Import config từ "${fromName || 'unknown'}" vào project hiện tại?\n\n` +
-      `• Replace: sdk_config, snowplow, firebase, tracing, rules, sp_event_maps\n` +
+      `• Replace: sdk_config, snowplow, firebase, tracing, sp_event_maps\n` +
       `• Bump config version (app sẽ tự pull lại lần fetch tới)`
     )) return;
     try {
@@ -3906,19 +3899,14 @@ function showActionDetail(a){
          }</div>`
       : (ctxRows.length ? '' : '<div class="muted">Sự kiện này không truyền properties.</div>');
 
-    // Tap-only: a quick affordance to map this element_key → a business event
-    // name (the existing rewrite-rules feature). Resolved via openEventMapDialog
-    // wired below. The Snowplow forwarder button below is the server-side twin:
-    // same outcome, but no app rebuild — portal renames + forwards the event.
+    // Tap-only: server-side Snowplow forwarder. Maps this element_key →
+    // an iglu schema + new event name, then the portal renames + forwards the
+    // event to the Snowplow collector at ingest. App keeps shipping "click"
+    // events as before — no rebuild needed.
     const ruleBtn = (isTap && a.element_key)
       ? `<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
           <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="btn ghost sm" id="actMapBtn">🏷️ Gán element key (rebuild app)…</button>
-            <button class="btn ghost sm" id="actSpFwdBtn">📤 Map sang Snowplow (server-side, no rebuild)…</button>
-          </div>
-          <div class="muted" style="font-size:10.5px;margin-top:4px">
-            <b>Rebuild</b>: rule remote-config — app pull về và đổi tên event chính nó. <br>
-            <b>Server-side</b>: portal đặt 1 event_def + forward sang Snowplow collector với schema iglu đã chọn. App không cần build lại.
+            <button class="btn ghost sm" id="actSpFwdBtn">📤 Map sang Snowplow (server-side)…</button>
           </div>
         </div>`
       : '';
@@ -3941,27 +3929,7 @@ function showActionDetail(a){
   dlg.querySelector('.act-close').onclick = kill;
   dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };
 
-  // Tap-only: wire the "Gán element key này…" button to the quick-rule dialog.
-  // That dialog issues PUT /config with the merged rules list — same shape as
-  // the Tree tab uses, just bound to (tap, element_key, screen) directly.
-  const mapBtn = dlg.querySelector('#actMapBtn');
-  if (mapBtn) mapBtn.onclick = () => {
-    const screen = (a.props && (a.props.screen || a.props.screen_name)) || _ideState?.segs?.find(s => s.screen)?.screen || '';
-    // Pre-fill class name from the tap props so the operator can keep the
-    // narrower match without retyping. wrapper_class (CustomButton-style) wins
-    // over the raw interactive type — that's the stable handle apps care about.
-    const cls = (a.props && (a.props.wrapper_class || a.props.class_name)) || '';
-    openQuickRuleDialog({
-      pid: route?.pid,
-      matchEvent: 'tap',
-      matchScreen: screen,
-      matchElementKey: a.element_key,
-      matchClassName: cls,
-      onSaved: () => { kill(); toast('Đã gán event nghiệp vụ — rebuild app sẽ áp dụng'); },
-    });
-  };
-
-  // Tap-only: the server-side twin. Configures an event_def + element_key
+  // Tap-only: server-side Snowplow forwarder. Configures an event_def + element_key
   // mapping so the portal will forward this tap to the Snowplow collector
   // under a new event name + iglu schema. The app keeps shipping "tap"
   // events as before — the rename happens in maybeForwardToSnowplow.
@@ -3979,88 +3947,13 @@ function showActionDetail(a){
   };
 }
 
-// Quick mapping dialog: build ONE rewrite rule (tap@screen/element → toName)
-// and PUT it into project_config.rules. Reuses the same merge behaviour as
-// the tree tab — remove any existing rule with the same match keys, then
-// append the new one.
-function openQuickRuleDialog({ pid, matchEvent, matchScreen, matchElementKey, matchClassName, onSaved }) {
-  if (!pid) return;
-  closeAllUtilDialogs();
-  const dlg = document.createElement('dialog'); dlg.id = 'quickRuleDlg'; dlg.className = 'ut-util-dlg';
-  dlg.style.cssText = 'width:480px;max-width:92vw;z-index:110';
-  dlg.innerHTML = `
-    <div class="dlg-h">🏷️ Gán event nghiệp vụ
-      <button class="qr-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-    <div class="dlg-b">
-      <div class="muted" style="font-size:11px;margin-bottom:10px">
-        Khi app rebuild + pull lại config, mọi <b>${esc(matchEvent)}</b> trên
-        màn <span class="mono">${esc(matchScreen || '(bất kỳ)')}</span>
-        ${matchElementKey ? `vào <span class="mono">${esc(matchElementKey)}</span>` : ''}
-        sẽ được đổi tên thành event dưới đây. Class widget thu hẹp phạm vi theo
-        component (vd chỉ <span class="mono">CustomButton</span>), bỏ trống = match mọi class.
-      </div>
-      <label style="font-size:12px">Tên event nghiệp vụ</label>
-      <input id="qrToName" placeholder="vd: cart_open" style="width:100%" autocomplete="off"/>
-      <label style="font-size:12px;margin-top:8px">
-        Class widget (tuỳ chọn — chặn nhầm khi nhiều nơi cùng label)
-        <span class="muted" style="font-weight:400">— vd <span class="mono">CustomButton</span>, <span class="mono">ElevatedButton</span></span>
-      </label>
-      <input id="qrClassName" placeholder="vd: CustomButton" value="${esc(matchClassName || '')}" style="width:100%" autocomplete="off"/>
-      <label style="font-size:12px;margin-top:8px">Schema iglu (tuỳ chọn — Snowplow self-describing)</label>
-      <input id="qrSchema" placeholder="iglu:com.acme/cart_open/jsonschema/1-0-0" style="width:100%" autocomplete="off"/>
-      <div class="row" style="margin-top:14px;justify-content:flex-end;gap:8px">
-        <button class="btn ghost sm qr-cancel">Huỷ</button>
-        <button class="btn sm" id="qrSave">Lưu rule</button>
-      </div>
-    </div>`;
-  document.body.appendChild(dlg);
-  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
-  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
-  dlg.querySelector('.qr-close').onclick = kill;
-  dlg.querySelector('.qr-cancel').onclick = kill;
-  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
-  dlg.querySelector('#qrToName').focus();
 
-  dlg.querySelector('#qrSave').onclick = async () => {
-    const toName = dlg.querySelector('#qrToName').value.trim();
-    if (!toName) { toast('Nhập tên event nghiệp vụ', 'err'); return; }
-    const schema = dlg.querySelector('#qrSchema').value.trim();
-    const className = dlg.querySelector('#qrClassName').value.trim();
-    // Pull current rules so we don't wipe siblings.
-    let rules = [];
-    try {
-      const c = await api(`/api/projects/${pid}/config`);
-      rules = c.rules || [];
-    } catch (_) {}
-    // Replace any existing rule with the same match keys (incl. class_name)
-    // — apps that re-open the dialog with the same triple should overwrite
-    // their previous entry instead of accumulating duplicates.
-    rules = rules.filter((r) => !(
-      r.match_event === matchEvent
-      && (r.match_screen || '') === (matchScreen || '')
-      && (r.match_element_key || '') === (matchElementKey || '')
-      && (r.match_class_name || '') === (className || '')
-    ));
-    const rule = { match_event: matchEvent, to_name: toName };
-    if (matchScreen) rule.match_screen = matchScreen;
-    if (matchElementKey) rule.match_element_key = matchElementKey;
-    if (className) rule.match_class_name = className;
-    if (schema) rule.add_props = { _schema: schema };
-    rules.push(rule);
-    await api(`/api/projects/${pid}/config`,
-      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }) });
-    kill();
-    if (onSaved) onSaved();
-  };
-}
-
-// Server-side Snowplow mapping dialog. Different from openQuickRuleDialog —
-// that one writes a remote-config rule and requires the app to pull + apply.
-// This writes an event_def + element_key mapping so the portal renames + relays
-// the event to the Snowplow collector at ingest time, without the app even
-// knowing. When the app later wires UniTrack.track(<new_name>, ...) directly
-// at the call site, the by-event_name resolver path takes over and this
-// mapping becomes a no-op (handled by maybeForwardToSnowplow).
+// Server-side Snowplow mapping dialog. Writes an event_def + element_key
+// mapping so the portal renames + relays the event to the Snowplow collector
+// at ingest time, without the app even knowing. When the app later wires
+// UniTrack.track(<new_name>, ...) directly at the call site, the by-event_name
+// resolver path takes over and this mapping becomes a no-op (handled by
+// maybeForwardToSnowplow).
 async function openSnowplowMapDialog({ pid, elementKey, screen, suggestedName, onSaved }) {
   if (!pid || !elementKey) return;
   closeAllUtilDialogs();
@@ -5039,123 +4932,6 @@ async function renderLogs(pid){
   $('#filterScreen').onchange=()=>{ _logScreenFilter=$('#filterScreen').value; renderLogs(pid); };
   $('#filterEvent').onchange=()=>{ _logEventFilter=$('#filterEvent').value; renderLogs(pid); };
   $('#filterSearch').oninput=()=>{ _logSearchQuery=$('#filterSearch').value; renderLogs(pid); };
-}
-
-async function renderTree(pid){
-  const [rows, cfg] = await Promise.all([
-    api(`/api/projects/${pid}/events?limit=2000`),
-    api(`/api/projects/${pid}/config`),
-  ]);
-  const rules = cfg.rules || [];
-  const ruleFor = (ev, screen, elem) => rules.find(r =>
-    r.match_event===ev &&
-    (!r.match_screen || r.match_screen===screen) &&
-    (!r.match_element_key || r.match_element_key===elem));
-
-  const LIFECYCLE = '(App lifecycle / pre-UI)';
-  const cleanScreen = (s) => s ? String(s).split('.').pop() : '';
-
-  const tree = {};
-  for(const r of rows){
-    const screen = cleanScreen(r.screen_name || r.screen) || LIFECYCLE;
-    let p=r.properties; if(typeof p==='string'){try{p=JSON.parse(p)}catch(_){p={}}}
-    const elem = r.element_key || (p&&(p.url))|| '';
-    const type = (p&&p.extra&&p.extra.type) || r.class_name || '';
-    const leafKey = r.event_name + (elem?('|'+elem):'');
-    tree[screen] = tree[screen] || {};
-    const leaf = tree[screen][leafKey] || {event_name:r.event_name, screen, element:elem, type, hits:0, last:0};
-    leaf.hits++; if(r.timestamp>leaf.last) leaf.last=r.timestamp;
-    tree[screen][leafKey]=leaf;
-  }
-
-  const screens = Object.keys(tree).sort((a,b)=>
-    a===LIFECYCLE?1 : b===LIFECYCLE?-1 : a.localeCompare(b));
-
-  $('#tabBody').innerHTML = `
-    <div style="padding:14px 16px">
-      <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Cấu trúc: <b>màn hình</b> (cha) → <b>event</b> (con). Bấm "gán" → dialog popup để map tên + suggest event từ convention.
-      </div>
-      ${screens.length? screens.map(s=>{
-        const leaves = Object.values(tree[s]).sort((a,b)=>b.hits-a.hits);
-        return `<div class="treeScreen" style="margin-bottom:10px">
-          <div class="row" style="gap:8px;padding:8px 10px;background:var(--panel2);border-radius:8px;cursor:pointer;user-select:none" data-screen>
-            <span style="font-weight:600">▾ ${esc(s)}</span>
-            <span class="pill">${leaves.length} event</span>
-          </div>
-          <div class="treeKids" style="padding:4px 0 4px 16px;display:none">
-            ${leaves.map((l,i)=>{
-              const rule = ruleFor(l.event_name, l.screen, l.element);
-              return `<div class="row" style="gap:10px;padding:5px 8px;justify-content:space-between">
-                <div style="flex:1">
-                  <span class="badge ${esc(l.event_name)}">${esc(l.event_name)}</span>
-                  ${l.element?`<span class="mono muted" style="font-size:11px"> ${esc(l.element)}</span>`:''}
-                  ${rule?` <span style="color:var(--accent2);font-size:11px">→ ${esc(rule.to_name)}</span>`:''}
-                </div>
-                <div class="row" style="gap:8px">
-                  <span class="pill">${l.hits} hits</span>
-                  <button class="btn ghost sm treeAssign" data-ev="${esc(l.event_name)}" data-screen="${esc(l.screen)}" data-elem="${esc(l.element)}">${rule?'sửa':'gán'}</button>
-                  ${rule?`<button class="btn ghost sm treeUnassign" data-to="${esc(rule.to_name)}">×</button>`:''}
-                </div>
-              </div>`;
-            }).join('')}
-          </div>
-        </div>`;
-      }).join('') : '<div class="empty">Chưa có log. Chạy app để thu event.</div>'}
-    </div>`;
-
-  document.querySelectorAll('.treeScreen > [data-screen]').forEach(h=>h.onclick=()=>{
-    const k=h.nextElementSibling;
-    const show=k.style.display==='none';
-    k.style.display = show?'block':'none';
-    const sp=h.querySelector('span');
-    sp.textContent = sp.textContent.replace(/^[▾▸]/, show?'▾':'▸');
-  });
-
-  document.querySelectorAll('.treeAssign').forEach(b=>b.onclick=async()=>{
-    const ev=b.dataset.ev, screen=b.dataset.screen, elem=b.dataset.elem;
-    const existing=ruleFor(ev,screen,elem);
-    const allEventNames=[...new Set(rules.map(r=>r.to_name))].sort();
-
-    window._treeMapInfo={ev,screen,elem,existing,pid,rules,LIFECYCLE};
-    $('#treeMappingInfo').textContent=`Map "${ev}"${elem?' ['+elem+']':''} trên "${screen||LIFECYCLE}"`;
-    $('#treeMapName').value=existing?.to_name||'';
-    $('#treeMapSchema').value=(existing?.add_props?._schema)||'';
-
-    const suggest=$('#treeNameSuggest');
-    $('#treeMapName').oninput=()=>{
-      const val=$('#treeMapName').value.toLowerCase();
-      const matches=allEventNames.filter(n=>n.toLowerCase().includes(val)).slice(0,8);
-      suggest.innerHTML=matches.map(n=>`<div class="item" onclick="$('#treeMapName').value='${esc(n)}';$('#treeNameSuggest').style.display='none'">${esc(n)}</div>`).join('');
-      suggest.style.display=matches.length?'block':'none';
-    };
-
-    $('#treeSaveMap').onclick=async()=>{
-      const toName=$('#treeMapName').value.trim();
-      if(!toName){ toast('Nhập tên sự kiện','err'); return; }
-      const schema=$('#treeMapSchema').value.trim();
-
-      const next = rules.filter(r=>!(r.match_event===ev && (r.match_screen||'')===(screen||'') && (r.match_element_key||'')===(elem||'')));
-      const rule = { match_event:ev, to_name:toName };
-      if(screen && screen!==LIFECYCLE) rule.match_screen=screen;
-      if(elem) rule.match_element_key=elem;
-      if(schema) rule.add_props={ _schema:schema };
-      next.push(rule);
-
-      await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:next})});
-      toast('Đã lưu rule');
-      $('#treeMappingDlg').close();
-      renderTree(pid);
-    };
-
-    $('#treeMappingDlg').showModal();
-  });
-
-  document.querySelectorAll('.treeUnassign').forEach(b=>b.onclick=async()=>{
-    const next=rules.filter(r=>r.to_name!==b.dataset.to);
-    await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:next})});
-    toast('Đã gỡ rule'); renderTree(pid);
-  });
 }
 
 function openDrawer(r){

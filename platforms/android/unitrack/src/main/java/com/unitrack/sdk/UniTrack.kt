@@ -199,27 +199,6 @@ object UniTrack {
         if (initialized) NativeBridge.reset()
     }
 
-    // Event rewrite rules (Phase 2 — config-driven). A matching rule renames an
-    // auto-captured event into a business event + merges props at this chokepoint.
-    // NOTE: tap & screen_view flow through track() so they're covered; network
-    // events bypass track() (NativeBridge.logNetwork) so rules don't reach them.
-    data class EventRule(
-        val matchEvent: String,
-        val matchScreen: String?,
-        val matchElementKey: String?,
-        /** View class name (target.javaClass.name from ClickTracker) — useful
-         *  when label text is dynamic / localized but class is stable. */
-        val matchClassName: String? = null,
-        val toName: String,
-        val addProps: Map<String, Any?> = emptyMap(),
-    )
-    private val eventRules = mutableListOf<EventRule>()
-
-    @JvmStatic
-    fun setEventRules(rules: List<EventRule>) {
-        eventRules.clear(); eventRules.addAll(rules)
-    }
-
     // ── W3C distributed tracing ────────────────────────────────────────────
     //
     // Apps install UniTrackTracingInterceptor on their OkHttpClient (and/or
@@ -271,29 +250,11 @@ object UniTrack {
         return false
     }
 
-    private fun applyRules(event: String, props: Map<String, Any?>): Pair<String, Map<String, Any?>>? {
-        val screen = (props["screen"] ?: props["screen_name"]) as? String
-        val elem = props["element_key"] as? String
-        val cls  = props["class_name"] as? String
-        for (r in eventRules) {
-            if (r.matchEvent != event) continue
-            if (r.matchScreen != null && r.matchScreen != screen) continue
-            if (r.matchElementKey != null && r.matchElementKey != elem) continue
-            if (r.matchClassName != null && r.matchClassName != cls) continue
-            return r.toName to (props + r.addProps)
-        }
-        return null
-    }
-
     @JvmStatic
     @JvmOverloads
     fun track(event: String, properties: Map<String, Any?> = emptyMap()) {
-        var name = event
-        var props = properties
-        applyRules(event, properties)?.let { (n, p) ->
-            name = n; props = p
-            log("UniTrack", "rule rewrite: $event → $n")
-        }
+        val name = event
+        val props = properties
         if (verboseLogging) {
             val provNames = providers.joinToString(",") { it::class.simpleName ?: "?" }
             log("UniTrack", "track event=\"$name\" props=${JSONObject(props)} → providers=[${if (provNames.isEmpty()) "(none)" else provNames}]")

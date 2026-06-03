@@ -30,7 +30,6 @@ class UniTrackRemoteConfig {
   /// silence is consent".
   bool get snowplowEnabled => snowplow['enabled'] != false;
   bool get firebaseEnabled => firebase['enabled'] != false;
-  List<dynamic> get rules => (raw['rules'] as List?) ?? const [];
   /// W3C distributed-tracing settings (may be absent — treat as disabled).
   Map<String, dynamic> get tracing => _obj(raw['tracing']);
 
@@ -137,20 +136,6 @@ class UniTrackRemoteConfig {
     return out;
   }
 
-  /// Map config rules → SDK rules and install them on UniTrack.
-  List<UniTrackEventRule> toEventRules() => rules.map((r) {
-        final m = Map<String, dynamic>.from(r as Map);
-        return UniTrackEventRule(
-          matchEvent: m['match_event'] as String,
-          matchScreen: m['match_screen'] as String?,
-          matchElementKey: m['match_element_key'] as String?,
-          matchClassName: m['match_class_name'] as String?,
-          toName: m['to_name'] as String,
-          addProps: (m['add_props'] is Map)
-              ? Map<String, Object?>.from(m['add_props'] as Map)
-              : const {},
-        );
-      }).toList();
 
   // In-memory cache (per api_key). The app can persist `raw` itself if desired.
   static final Map<String, Map<String, dynamic>> _cache = {};
@@ -212,6 +197,5 @@ class UniTrackRemoteConfig {
         // Snowplow still short-circuits in the provider construction below.
         'snowplow': {'enabled': true},
         'firebase': {'enabled': true},
-        'rules': [],
       };
 }
