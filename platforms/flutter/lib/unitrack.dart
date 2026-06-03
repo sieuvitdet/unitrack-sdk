@@ -121,6 +121,18 @@ class UniTrack {
   /// UniTrackConfig.screenLoadEvent (or portal sdk_config.screen_load_event).
   static String screenLoadEventName = 'screen_load_completed';
 
+  /// Per-event debugPrint of what flows through UniTrack / Snowplow / Firebase.
+  /// Default ON so integrators see traffic immediately while wiring the SDK up;
+  /// flip OFF (UniTrack.verboseLogging = false) before shipping a release build.
+  /// Matches iOS UniTrack.verboseLogging and Android UniTrack.verboseLogging.
+  static bool verboseLogging = true;
+
+  /// Helper used by the SDK + providers instead of debugPrint directly so the
+  /// integrator can mute every log line with one flag. Mirrors iOS UniTrack.log.
+  static void log(String message) {
+    if (verboseLogging) debugPrint(message);
+  }
+
   /// App lifecycle listeners — apps register via [addLifecycleListener] to be
   /// called when the SDK observes a foreground / background transition. The
   /// SDK already emits app_foreground / app_background to the core's offline
@@ -225,7 +237,7 @@ class UniTrack {
             try {
               final dynamic decoded = jsonDecode(raw);
               if (decoded is Map<String, dynamic>) {
-                debugPrint('[UniTrack] fan-out recovered crash to ${_providers.length} Dart provider(s)');
+                log('[UniTrack] fan-out recovered crash to ${_providers.length} Dart provider(s)');
                 _forEachProvider((p) => p.track('crash', decoded));
               }
             } catch (e) {
@@ -371,7 +383,21 @@ class UniTrack {
     var name = event;
     // Phase 2: a config rule may rewrite an auto-captured event before sending.
     final rewritten = _applyRules(event, props);
-    if (rewritten != null) { name = rewritten.key; props = rewritten.value; }
+    if (rewritten != null) {
+      name = rewritten.key;
+      props = rewritten.value;
+      log('[UniTrack] rule rewrite: $event → $name');
+    }
+    // Visibility — one line per event so the developer can see what's about
+    // to be forwarded and to which provider list. Gated by verboseLogging
+    // so a release build can mute it. Mirrors iOS UniTrack.track.
+    if (verboseLogging) {
+      final provNames = _providers
+          .map((p) => p.runtimeType.toString())
+          .join(',');
+      log('[UniTrack] track event="$name" props=${jsonEncode(props)} '
+          '→ providers=[${provNames.isEmpty ? "(none)" : provNames}]');
+    }
     // Forward to every registered provider (Snowplow, Firebase, …).
     _forEachProvider((p) => p.track(name, props));
     return _channel.invokeMethod('track', {
@@ -382,6 +408,7 @@ class UniTrack {
 
   Future<void> setScreen(String name) {
     _lastScreen = name.isEmpty ? null : name;
+    if (verboseLogging) log('[UniTrack] setScreen="$name"');
     _forEachProvider((p) => p.setScreen(name));
     return _channel.invokeMethod('setScreen', {'name': name});
   }
