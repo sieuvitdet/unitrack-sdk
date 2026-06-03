@@ -421,6 +421,29 @@ class SnowplowProvider(
         trackSelfDescribingInternal(schema, name, payload, extraContexts, skipGlobalContexts)
     }
 
+    /**
+     * Session-lifecycle convention — kind=`session`. Use for session_started /
+     * session_ended / any state-of-session event. `action` is the lifecycle
+     * verb (started / ended / resumed); `reason` is what triggered the
+     * transition (cold_start / backgrounded / timeout / explicit_logout).
+     */
+    fun trackingSession(action: String,
+                        reason: String? = null,
+                        durationMs: Int? = null,
+                        source: String? = null,
+                        data: Map<String, Any?>? = null,
+                        extraContexts: List<SelfDescribingJson>? = null,
+                        skipGlobalContexts: Boolean = false) {
+        val name = eventName("session", "event_session")
+        val schema = schemaFor(name) ?: return
+        val payload = mutableMapOf<String, Any?>("action" to action)
+        if (reason     != null) payload["reason"]      = reason
+        if (durationMs != null) payload["duration_ms"] = durationMs
+        if (source     != null) payload["source"]      = source
+        if (data       != null) payload.putAll(data)
+        trackSelfDescribingInternal(schema, name, payload, extraContexts, skipGlobalContexts)
+    }
+
     fun trackingCustomEvent(eventName: String,
                             data: Map<String, Any?>? = null,
                             extraContexts: List<SelfDescribingJson>? = null,

@@ -512,6 +512,27 @@ public final class SnowplowProvider: AnalyticsProvider {
                             skipGlobalContexts: skipGlobalContexts)
     }
 
+    /// Session-lifecycle convention — kind=`session`. Use for session_started
+    /// / session_ended / any state-of-session event. Action is the lifecycle
+    /// verb (started / ended / resumed); reason is what triggered the
+    /// transition (cold_start / backgrounded / timeout / explicit_logout).
+    public func trackingSession(action: String, reason: String? = nil,
+                                durationMs: Int? = nil, source: String? = nil,
+                                data: [String: Any]? = nil,
+                                extraContexts: [SelfDescribingJson]? = nil,
+                                skipGlobalContexts: Bool = false) {
+        let name = resolveEventName(kind: "session", defaultName: "event_session")
+        guard let schema = schemaFor(eventName: name) else { return }
+        var payload: [String: Any] = ["action": action]
+        if let reason     = reason     { payload["reason"]      = reason }
+        if let durationMs = durationMs { payload["duration_ms"] = durationMs }
+        if let source     = source     { payload["source"]      = source }
+        if let data       = data       { payload.merge(data) { _, new in new } }
+        trackSelfDescribing(schema: schema, eventName: name, data: payload,
+                            extraContexts: extraContexts,
+                            skipGlobalContexts: skipGlobalContexts)
+    }
+
     /// Escape hatch — for one-off events not (yet) lifted into a typed helper.
     /// Schema is built the same way: iglu:<vendor>/<eventName>/jsonschema/<version>.
     public func trackingCustomEvent(_ eventName: String, data: [String: Any]? = nil,
@@ -621,6 +642,11 @@ public final class SnowplowProvider: AnalyticsProvider {
                             errorMessage: String? = nil, data: [String: Any]? = nil,
                             extraContexts: [Any]? = nil,
                             skipGlobalContexts: Bool = false) {}
+    public func trackingSession(action: String, reason: String? = nil,
+                                durationMs: Int? = nil, source: String? = nil,
+                                data: [String: Any]? = nil,
+                                extraContexts: [Any]? = nil,
+                                skipGlobalContexts: Bool = false) {}
     public func trackingCustomEvent(_ eventName: String, data: [String: Any]? = nil,
                                     extraContexts: [Any]? = nil,
                                     skipGlobalContexts: Bool = false) {}

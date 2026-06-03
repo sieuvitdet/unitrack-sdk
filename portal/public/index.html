@@ -1042,6 +1042,7 @@ async function renderConfig(pid){
             ['screen_view', 'event_screen_view',  'trackingScreenView'],
             ['crash',       'event_crash',        'trackingCrash'],
             ['api',         'event_api',          'trackingAPI'],
+            ['session',     'event_session',      'trackingSession'],
           ];
           const builtinKeys = new Set(builtin.map((r) => r[0]));
           // Anything in event_names that isn't a built-in kind is a custom kind.
@@ -1614,7 +1615,7 @@ async function renderConfig(pid){
     // Convention layer — vendor + version + per-kind event name overrides.
     // Empty input = keep the SDK default; we drop blanks here so the saved
     // map only carries genuine overrides (smaller wire payload, easier diff).
-    const conventionKinds = ['click', 'result', 'screen_view', 'crash', 'api'];
+    const conventionKinds = ['click', 'result', 'screen_view', 'crash', 'api', 'session'];
     const eventNames = Object.fromEntries(
       conventionKinds
         .map((k) => [k, ($('#cfSpEvName_' + k)?.value || '').trim()])

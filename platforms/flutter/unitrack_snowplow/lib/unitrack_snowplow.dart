@@ -441,6 +441,34 @@ class SnowplowProvider extends AnalyticsProvider {
     );
   }
 
+  /// Session-lifecycle convention — kind=`session`, default name
+  /// `event_session`. Use for session_started / session_ended / any
+  /// state-of-session event. `action` is the lifecycle verb (started /
+  /// ended / resumed); `reason` is what triggered the transition
+  /// (cold_start / backgrounded / timeout / explicit_logout).
+  void trackingSession({
+    required String action,
+    String? reason,
+    int? durationMs,
+    String? source,
+    Map<String, Object?>? data,
+    List<SelfDescribing>? extraContexts,
+    bool skipGlobalContexts = false,
+  }) {
+    final name = _eventName('session', 'event_session');
+    final schema = _schemaFor(name);
+    if (schema == null) return;
+    final payload = <String, Object?>{'action': action};
+    if (reason     != null) payload['reason']      = reason;
+    if (durationMs != null) payload['duration_ms'] = durationMs;
+    if (source     != null) payload['source']      = source;
+    if (data != null) payload.addAll(data);
+    trackSelfDescribing(
+      schema: schema, nameHint: name, data: payload,
+      extraContexts: extraContexts, skipGlobalContexts: skipGlobalContexts,
+    );
+  }
+
   /// Custom convention kind — looks up `eventNames[kind]` (falls back to
   /// [kind] itself) then builds the schema URI from the configured vendor.
   /// Used by code-generated `trackingXxx()` helpers and by app code that

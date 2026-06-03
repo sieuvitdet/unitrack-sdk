@@ -118,6 +118,7 @@ function defaults(project) {
         screen_view: 'event_screen_view',
         crash:       'event_crash',
         api:         'event_api',
+        session:     'event_session',
       },
       // Auto-attached context entities for every tracking* call. Two names
       // are built into the SDK (data sourced from setUser + event meta):
