@@ -1243,11 +1243,7 @@ async function renderConfig(pid){
       ${flavorOverrideHtml('Tr', tr)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 4px;font-size:14px">Event registry</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Danh sách event hợp lệ + schema. (Gán nhanh ở tab "Cây class → event".)</div>
-      <pre id="cfReg" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.event_registry||[],null,2))}</pre>
-
-      <h3 style="margin:14px 0 4px;font-size:14px">Rewrite rules (Phase 2)</h3>
+      <h3 style="margin:0 0 4px;font-size:14px">Rewrite rules (Phase 2)</h3>
       <div class="muted" style="font-size:12px;margin-bottom:6px">SDK đổi event auto-capture → tên nghiệp vụ ngay tại app. Tạo/sửa ở tab "Cây class → event".</div>
       <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:140px;overflow:auto">${esc(JSON.stringify(c.rules||[],null,2))}</pre>
 
@@ -1742,7 +1738,7 @@ async function renderConfig(pid){
     const fromName = bundle.exported_from && bundle.exported_from.name;
     if (!confirm(
       `Import config từ "${fromName || 'unknown'}" vào project hiện tại?\n\n` +
-      `• Replace: sdk_config, snowplow, firebase, tracing, rules, event_registry, sp_event_maps\n` +
+      `• Replace: sdk_config, snowplow, firebase, tracing, rules, sp_event_maps\n` +
       `• Bump config version (app sẽ tự pull lại lần fetch tới)`
     )) return;
     try {

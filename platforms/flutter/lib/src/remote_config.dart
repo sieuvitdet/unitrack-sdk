@@ -23,7 +23,13 @@ class UniTrackRemoteConfig {
   Map<String, dynamic> get sdkConfig => _obj(raw['sdk_config']);
   Map<String, dynamic> get snowplow => _obj(raw['snowplow']);
   Map<String, dynamic> get firebase => _obj(raw['firebase']);
-  List<dynamic> get eventRegistry => (raw['event_registry'] as List?) ?? const [];
+
+  /// Convenience flags. Default `true` when the key isn't present at all —
+  /// only an explicit `enabled: false` from the portal turns the provider off.
+  /// Matches the operator mental model: "I configured providers on the portal,
+  /// silence is consent".
+  bool get snowplowEnabled => snowplow['enabled'] != false;
+  bool get firebaseEnabled => firebase['enabled'] != false;
   List<dynamic> get rules => (raw['rules'] as List?) ?? const [];
   /// W3C distributed-tracing settings (may be absent — treat as disabled).
   Map<String, dynamic> get tracing => _obj(raw['tracing']);
@@ -138,6 +144,7 @@ class UniTrackRemoteConfig {
           matchEvent: m['match_event'] as String,
           matchScreen: m['match_screen'] as String?,
           matchElementKey: m['match_element_key'] as String?,
+          matchClassName: m['match_class_name'] as String?,
           toName: m['to_name'] as String,
           addProps: (m['add_props'] is Map)
               ? Map<String, Object?>.from(m['add_props'] as Map)
@@ -200,9 +207,11 @@ class UniTrackRemoteConfig {
           'batchSize': 10, 'flushIntervalMs': 3000, 'autoCapture': true,
           'trackScreens': true, 'trackTaps': true, 'trackNetwork': true,
         },
-        'snowplow': {'enabled': false},
-        'firebase': {'enabled': false},
-        'event_registry': [],
+        // Default ON so a fetch timeout doesn't silently mute every provider —
+        // operator opts OUT explicitly from the portal. Endpoint-empty for
+        // Snowplow still short-circuits in the provider construction below.
+        'snowplow': {'enabled': true},
+        'firebase': {'enabled': true},
         'rules': [],
       };
 }

@@ -133,7 +133,6 @@ function defaults(project) {
       },
     },
     firebase: { enabled: false },
-    event_registry: [],
     rules: [],
     // W3C distributed tracing. Default OFF + empty allowlist — the SDK is
     // fail-closed on the host side too, so a fresh project never injects
@@ -178,7 +177,6 @@ function configForProject(project, flavor = null) {
     endpoint:       row.endpoint || def.endpoint,
     flavor:         resolved,
     ...out,
-    event_registry: parse(row.event_registry, def.event_registry),
     rules:          parse(row.rules, def.rules),
     updated_at:     row.updated_at || 0,
   };
@@ -188,26 +186,24 @@ function configForProject(project, flavor = null) {
 function saveConfig(projectId, body) {
   const cur = getRow.get(projectId);
   const next = {
-    endpoint:       body.endpoint       !== undefined ? body.endpoint : (cur && cur.endpoint),
-    sdk_config:     body.sdk_config     !== undefined ? JSON.stringify(body.sdk_config)     : (cur && cur.sdk_config),
-    snowplow:       body.snowplow       !== undefined ? JSON.stringify(body.snowplow)       : (cur && cur.snowplow),
-    firebase:       body.firebase       !== undefined ? JSON.stringify(body.firebase)       : (cur && cur.firebase),
-    event_registry: body.event_registry !== undefined ? JSON.stringify(body.event_registry) : (cur && cur.event_registry),
-    rules:          body.rules           !== undefined ? JSON.stringify(body.rules)           : (cur && cur.rules),
-    tracing:        body.tracing        !== undefined ? JSON.stringify(body.tracing)        : (cur && cur.tracing),
+    endpoint:   body.endpoint   !== undefined ? body.endpoint                : (cur && cur.endpoint),
+    sdk_config: body.sdk_config !== undefined ? JSON.stringify(body.sdk_config) : (cur && cur.sdk_config),
+    snowplow:   body.snowplow   !== undefined ? JSON.stringify(body.snowplow)   : (cur && cur.snowplow),
+    firebase:   body.firebase   !== undefined ? JSON.stringify(body.firebase)   : (cur && cur.firebase),
+    rules:      body.rules      !== undefined ? JSON.stringify(body.rules)      : (cur && cur.rules),
+    tracing:    body.tracing    !== undefined ? JSON.stringify(body.tracing)    : (cur && cur.tracing),
   };
   const version = (cur ? cur.version : 0) + 1;
   db.prepare(`
-    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, event_registry, rules, tracing, version, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, rules, tracing, version, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id) DO UPDATE SET
       endpoint = excluded.endpoint, sdk_config = excluded.sdk_config,
       snowplow = excluded.snowplow, firebase = excluded.firebase,
-      event_registry = excluded.event_registry, rules = excluded.rules,
-      tracing = excluded.tracing,
+      rules = excluded.rules, tracing = excluded.tracing,
       version = excluded.version, updated_at = excluded.updated_at
   `).run(projectId, next.endpoint ?? null, next.sdk_config ?? null, next.snowplow ?? null,
-         next.firebase ?? null, next.event_registry ?? null, next.rules ?? null,
+         next.firebase ?? null, next.rules ?? null,
          next.tracing ?? null, version, Date.now());
   return version;
 }

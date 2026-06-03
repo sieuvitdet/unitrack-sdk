@@ -39,6 +39,7 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
                 matchEvent = r.optString("match_event"),
                 matchScreen = r.optString("match_screen", null),
                 matchElementKey = r.optString("match_element_key", null),
+                matchClassName = r.optString("match_class_name", null),
                 toName = r.optString("to_name"),
                 addProps = add,
             ))
@@ -119,7 +120,6 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
             })
             put("snowplow", JSONObject().put("enabled", false))
             put("firebase", JSONObject().put("enabled", false))
-            put("event_registry", org.json.JSONArray())
             put("rules", org.json.JSONArray())
         })
     }

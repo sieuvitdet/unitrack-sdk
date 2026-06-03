@@ -26,7 +26,6 @@ public struct UniTrackRemoteConfig: Codable {
     public var sdkConfig: SDKConfig
     public var snowplow: SnowplowConfig
     public var firebase: FirebaseConfig
-    public var eventRegistry: [EventDef]
     public var rules: [Rule]?
     /// W3C distributed-tracing settings (optional — absent = disabled).
     public var tracing: TracingConfig?
@@ -164,19 +163,11 @@ public struct UniTrackRemoteConfig: Codable {
         }
     }
 
-    public struct EventDef: Codable {
-        public var name: String
-        public var template: [String: String]?
-        public var schema: String?
-        public var forward: Bool?
-    }
-
     // JSON keys are snake_case on the wire.
     enum CodingKeys: String, CodingKey {
         case version, endpoint, rules, tracing
         case sdkConfig = "sdk_config"
         case snowplow, firebase
-        case eventRegistry = "event_registry"
     }
 
     /// Map decoded config rules → UniTrack.EventRule for the SDK.
@@ -278,7 +269,6 @@ public struct UniTrackRemoteConfig: Codable {
                                  trackNetwork: true, logLevel: "warn"),
             snowplow: SnowplowConfig(enabled: false),
             firebase: FirebaseConfig(enabled: false),
-            eventRegistry: [],
             rules: nil
         )
     }

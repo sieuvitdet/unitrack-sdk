@@ -12,6 +12,7 @@ export interface RemoteConfigRule {
   match_event: string;
   match_screen?: string;
   match_element_key?: string;
+  match_class_name?: string;
   to_name: string;
   add_props?: EventProperties;
 }
@@ -29,7 +30,6 @@ export interface RemoteConfigData {
   sdk_config?: Record<string, unknown>;
   snowplow?: Record<string, unknown>;
   firebase?: Record<string, unknown>;
-  event_registry?: unknown[];
   rules?: RemoteConfigRule[];
   /** W3C distributed-tracing block — apply via applyTracing(). */
   tracing?: RemoteConfigTracing;
@@ -45,7 +45,6 @@ function builtinDefault(): RemoteConfigData {
                   trackScreens: true, trackTaps: true, trackNetwork: true },
     snowplow: { enabled: false },
     firebase: { enabled: false },
-    event_registry: [],
     rules: [],
   };
 }
@@ -70,6 +69,7 @@ export const UniTrackRemoteConfig = {
       matchEvent: r.match_event,
       matchScreen: r.match_screen,
       matchElementKey: r.match_element_key,
+      matchClassName: r.match_class_name,
       toName: r.to_name,
       addProps: r.add_props ?? {},
     }));

@@ -180,7 +180,6 @@ db.exec(`
     sdk_config     TEXT,                  -- JSON: batchSize, flushIntervalMs, autoCapture flags, logLevel
     snowplow       TEXT,                  -- JSON: {enabled, endpoint, appId, userContext, userContextSchema, options, schemas}
     firebase       TEXT,                  -- JSON: {enabled, options:{apiKey,appId,projectId,gcmSenderId,bundleId,storageBucket}, superProperties, userProperties}
-    event_registry TEXT,                  -- JSON array: [{name, template, schema, forward}]
     rules          TEXT,                  -- JSON array: [{match_event,match_screen,match_element_key,to_name,add_props}]
     tracing        TEXT,                  -- JSON: {enabled, header_name, allowlist_hosts:[...], sampled}
     version        INTEGER NOT NULL DEFAULT 1,
@@ -212,6 +211,19 @@ ensureColumn('projects', 'providers', 'TEXT');
 ensureColumn('projects', 'screen_labels', 'TEXT');
 ensureColumn('project_config', 'rules', 'TEXT');
 ensureColumn('project_config', 'tracing', 'TEXT');
+
+// event_registry was a parked field — no SDK ever read it, only the portal UI
+// showed it as a JSON pre. Drop it from existing databases. SQLite 3.35+
+// supports DROP COLUMN; pre-3.35 just keeps the column (harmless) since
+// nothing references it from this revision onwards.
+function dropColumnIfExists(table, col) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.some((c) => c.name === col)) {
+    try { db.exec(`ALTER TABLE ${table} DROP COLUMN ${col}`); }
+    catch (_) { /* old SQLite — leave the column, the code stopped writing it */ }
+  }
+}
+dropColumnIfExists('project_config', 'event_registry');
 // agent_config may predate the llm_model column (added when wiring the
 // OpenAI-compatible endpoint). Add it to existing databases.
 ensureColumn('agent_config', 'llm_model', 'TEXT');
