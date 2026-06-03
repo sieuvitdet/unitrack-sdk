@@ -904,11 +904,21 @@ async function renderConfig(pid){
         <div><label>flushIntervalMs</label><input id="cfFlush" type="number" style="width:110px" value="${s.flushIntervalMs??3000}"/></div>
         <div><label>logLevel</label><select id="cfLog"><option ${s.logLevel==='debug'?'selected':''}>debug</option><option ${s.logLevel!=='debug'?'selected':''}>warn</option></select></div>
       </div>
-      <div class="row" style="gap:14px;margin-top:8px">
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> screens</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> taps</label>
-        <label class="row" style="gap:5px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> network</label>
+      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">Auto-capture flags <span class="muted" style="font-weight:400">— SDK tự fire mỗi khi user tap / navigate / HTTP. Tắt để chỉ ghi nhận business event app code chủ động fire.</span></div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:start">
+          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
+          <span class="muted" style="font-size:11px">Bật toàn bộ chuỗi auto-capture. Tắt = SDK chỉ track event app code chủ động fire.</span>
+
+          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> trackScreens</label>
+          <span class="muted" style="font-size:11px">Tự fire <span class="mono">screen_load_completed</span> mỗi khi route đổi (qua RouteObserver / swizzler / FragmentLifecycle).</span>
+
+          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> trackTaps</label>
+          <span class="muted" style="font-size:11px">Tự fire <span class="mono">click</span> cho MỌI tap button — kèm metadata (class_name, framework, package). <b>Tắt nếu app đã wire <span class="mono">trackingClickEvent()</span> ở mọi nơi cần</b>: tránh dup 2 event/tap.</span>
+
+          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> trackNetwork</label>
+          <span class="muted" style="font-size:11px">Tự fire <span class="mono">network_request</span> cho mỗi HTTP call (URLProtocol / OkHttp / fetch interceptor). Tắt nếu chỉ muốn log lượt API quan trọng qua <span class="mono">trackingAPI()</span>.</span>
+        </div>
       </div>
 
       <!-- Screen lifecycle event names. Empty = core SDK keeps default
