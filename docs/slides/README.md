@@ -17,6 +17,7 @@ tạo thành 1 bài trình bày dài ~20 phút.
 | 09 | [09-real-results.md](09-real-results.md) | 4 demo apps live: iOS / Android / Flutter / RN; 30 events mapping sheet |
 | 10 | [10-roadmap.md](10-roadmap.md) | Đã làm Phase 1-3, roadmap Q1-Q4 2026, câu hỏi mở |
 | | [Q&A.md](Q&A.md) | 25 câu hỏi thường gặp + trả lời ngắn (migration / kỹ thuật / vận hành / tương lai) |
+| | [GEMINI_PROMPT.md](GEMINI_PROMPT.md) | Script prompt cho Gemini soạn văn nói + xử lý Q&A + closing |
 
 ## Cách trình bày
 - **Đọc dưới dạng Markdown** trên VS Code / GitHub.
