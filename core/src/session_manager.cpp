@@ -1,13 +1,117 @@
 #include "session_manager.h"
 #include "util.h"
 
+#include <fstream>
+#include <sstream>
+
 namespace unitrack {
 
 SessionManager::SessionManager() {
     // First session of the process — no previous session to close.
+    // load_from() may overwrite these if a persisted state exists & is fresh.
     session_id_       = generate_uuid();
     started_at_ms_    = current_time_ms();
     last_activity_ms_ = started_at_ms_;
+}
+
+// Tiny JSON reader for the 5 keys we persist. We avoid pulling in a JSON dep
+// here because the core is meant to compile with just sqlite3 + libc++; the
+// state file is internal and always shaped the same way.
+//
+// Format on disk:
+//   {"session_id":"...","session_index":12,"last_activity_ms":1700000,
+//    "started_at_ms":1700000,"previous_session_id":"..."}
+static std::string read_str_field(const std::string& blob, const std::string& key) {
+    std::string needle = "\"" + key + "\":\"";
+    auto p = blob.find(needle);
+    if (p == std::string::npos) return "";
+    p += needle.size();
+    auto q = blob.find('"', p);
+    if (q == std::string::npos) return "";
+    return blob.substr(p, q - p);
+}
+static int64_t read_int_field(const std::string& blob, const std::string& key) {
+    std::string needle = "\"" + key + "\":";
+    auto p = blob.find(needle);
+    if (p == std::string::npos) return 0;
+    p += needle.size();
+    // Skip whitespace
+    while (p < blob.size() && (blob[p] == ' ' || blob[p] == '\t')) ++p;
+    int64_t out = 0;
+    int sign = 1;
+    if (p < blob.size() && blob[p] == '-') { sign = -1; ++p; }
+    while (p < blob.size() && blob[p] >= '0' && blob[p] <= '9') {
+        out = out * 10 + (blob[p] - '0');
+        ++p;
+    }
+    return sign * out;
+}
+
+void SessionManager::load_from(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mu_);
+    persist_path_ = path;
+    std::ifstream f(path);
+    if (!f.good()) {
+        // No prior state — keep the fresh UUID from the ctor + index=1, and
+        // write the initial file so the next launch can resume.
+        save_locked();
+        return;
+    }
+    std::stringstream buf; buf << f.rdbuf();
+    std::string blob = buf.str();
+    if (blob.empty()) { save_locked(); return; }
+
+    std::string saved_id     = read_str_field(blob, "session_id");
+    std::string saved_prev   = read_str_field(blob, "previous_session_id");
+    int64_t saved_idx        = read_int_field(blob, "session_index");
+    int64_t saved_started    = read_int_field(blob, "started_at_ms");
+    int64_t saved_last_act   = read_int_field(blob, "last_activity_ms");
+
+    if (saved_id.empty() || saved_idx <= 0) {
+        // Corrupt or partial file — start fresh but keep index=1.
+        save_locked();
+        return;
+    }
+
+    int64_t now = current_time_ms();
+    // Resume the persisted session iff it was active within the timeout
+    // window. Otherwise treat the gap as a fresh launch and bump the index.
+    if (now - saved_last_act <= timeout_ms_) {
+        session_id_       = saved_id;
+        started_at_ms_    = saved_started ? saved_started : now;
+        last_activity_ms_ = saved_last_act;
+        session_index_    = saved_idx;
+        // No previous_id for a resumed session — we didn't actually rotate.
+        prev_id_.clear();
+    } else {
+        // Gap exceeded timeout → roll forward. The newly generated session_id_
+        // in the ctor stays; record the prior id as previous + bump index.
+        prev_id_         = saved_id;
+        prev_started_ms_ = saved_started;
+        prev_ended_ms_   = saved_last_act;
+        prev_reason_     = SessionEndReason::timeout;
+        pending_boundary_ = true;
+        session_index_   = saved_idx + 1;
+    }
+    save_locked();
+}
+
+void SessionManager::save_locked() {
+    if (persist_path_.empty()) return;
+    std::ostringstream out;
+    out << "{\"session_id\":\""          << session_id_           << "\","
+        << "\"session_index\":"          << session_index_        << ","
+        << "\"started_at_ms\":"          << started_at_ms_        << ","
+        << "\"last_activity_ms\":"       << last_activity_ms_     << ","
+        << "\"previous_session_id\":\""  << prev_id_              << "\"}";
+    // Write atomically: dump to .tmp then rename. Survives a kill mid-write.
+    std::string tmp = persist_path_ + ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f.good()) return;
+        f << out.str();
+    }
+    std::rename(tmp.c_str(), persist_path_.c_str());
 }
 
 void SessionManager::rotate_locked(SessionEndReason reason) {
@@ -27,6 +131,9 @@ void SessionManager::rotate_locked(SessionEndReason reason) {
     session_id_       = generate_uuid();
     started_at_ms_    = now;
     last_activity_ms_ = now;
+    session_index_   += 1;
+    first_event_id_.clear();
+    save_locked();
 }
 
 void SessionManager::rotate(SessionEndReason reason) {
@@ -44,6 +151,27 @@ std::string SessionManager::current_session_id() {
     return session_id_;
 }
 
+SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
+    std::lock_guard<std::mutex> lock(mu_);
+    int64_t now = current_time_ms();
+    if (now - last_activity_ms_ > timeout_ms_) {
+        rotate_locked(SessionEndReason::timeout);
+    }
+    last_activity_ms_ = now;
+    // Capture the first event id of this session the first time we see one.
+    // Subsequent events in the same session echo this back as first_event_id.
+    if (first_event_id_.empty() && !event_id.empty()) {
+        first_event_id_ = event_id;
+        save_locked();  // remember across launches
+    }
+    SessionStamp s;
+    s.id              = session_id_;
+    s.index           = session_index_;
+    s.previous_id     = prev_id_;
+    s.first_event_id  = first_event_id_;
+    return s;
+}
+
 SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
     std::lock_guard<std::mutex> lock(mu_);
     int64_t now = current_time_ms();
@@ -55,6 +183,7 @@ SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
     SessionResolution r;
     r.id            = session_id_;
     r.started_at_ms = started_at_ms_;
+    r.index         = session_index_;
     r.rotated       = pending_boundary_;
     if (pending_boundary_) {
         r.prev_id         = prev_id_;
@@ -70,7 +199,14 @@ SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
 
 void SessionManager::mark_activity() {
     std::lock_guard<std::mutex> lock(mu_);
-    last_activity_ms_ = current_time_ms();
+    int64_t now = current_time_ms();
+    // Throttle persistence: only re-save last_activity_ms every ~10s so a
+    // chatty SDK call site doesn't hammer the disk. Worst-case a crash forgets
+    // the most recent ≤10s of activity — well below the 30-min timeout, so
+    // resume-on-launch logic still works as expected.
+    bool need_save = (now - last_activity_ms_) > 10 * 1000;
+    last_activity_ms_ = now;
+    if (need_save) save_locked();
 }
 
 void SessionManager::set_timeout_ms(int64_t ms) {

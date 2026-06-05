@@ -35,6 +35,15 @@ std::string Event::to_json() const {
     o << "\"event_name\":"; escape_json(o, event_name);  o << ',';
     o << "\"timestamp\":"  << timestamp_ms              << ',';
     o << "\"session_id\":"; escape_json(o, session_id);  o << ',';
+    // Snowplow client_session parity — emitted even when index=0 / prev=""
+    // (downstream pipeline expects the keys to always exist).
+    o << "\"session_index\":" << session_index << ',';
+    if (!previous_session_id.empty()) {
+        o << "\"previous_session_id\":"; escape_json(o, previous_session_id); o << ',';
+    }
+    if (!first_event_id.empty()) {
+        o << "\"first_event_id\":"; escape_json(o, first_event_id); o << ',';
+    }
     if (!user_id.empty()) {
         o << "\"user_id\":"; escape_json(o, user_id);    o << ',';
     }

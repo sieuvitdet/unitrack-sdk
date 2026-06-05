@@ -39,6 +39,11 @@ Tracker::Tracker(Config cfg, ut_platform platform)
     dir = (slash == std::string::npos) ? "." : dir.substr(0, slash);
     CrashHandler::install(dir);
 
+    // Restore session state from disk so session_id + session_index survive
+    // across launches (Snowplow client_session parity). Must come AFTER the
+    // session timeout is set above and BEFORE the first build_event call.
+    session_.load_from(dir + "/session.json");
+
     // Pick up any crash captured on the previous launch. A crash recovered at
     // startup is, by definition, the crash that ended the *previous* session —
     // we can't time it against this init, so mark it not-on-launch (the SDK was
@@ -92,7 +97,14 @@ Event Tracker::build_event(const std::string& name, const std::string& props_jso
     e.event_id     = generate_uuid();
     e.event_name   = name;
     e.timestamp_ms = current_time_ms();
-    e.session_id   = session_.current_session_id();
+    // Stamp the full client_session bag onto every event so downstream can
+    // aggregate by session_index / dedupe via first_event_id, matching the
+    // shape Snowplow's tracker auto-attaches as a context entity.
+    SessionStamp ss = session_.stamp_for_event(e.event_id);
+    e.session_id           = ss.id;
+    e.session_index        = ss.index;
+    e.previous_session_id  = ss.previous_id;
+    e.first_event_id       = ss.first_event_id;
 
     std::lock_guard<std::mutex> lock(state_mu_);
     e.user_id          = user_id_;
