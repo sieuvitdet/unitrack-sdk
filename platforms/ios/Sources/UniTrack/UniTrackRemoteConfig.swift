@@ -44,6 +44,12 @@ public struct UniTrackRemoteConfig: Codable {
         public var screenStartEvent: String?
         public var screenEndEvent:   String?
         public var screenLoadEvent:  String?
+        /// Arbitrary key/value bag the portal serves to the app at runtime —
+        /// the source of truth for `UniTrack.getRemoteValue(_:default:)`. App
+        /// reads `feature_x`, `experiment_y` here; portal operator edits via
+        /// the Config tab. Falls back to a Firebase RemoteConfig provider if
+        /// the key is absent. See `UniTrackValueResolver.swift`.
+        public var customValues: [String: AnyCodable]?
         enum CodingKeys: String, CodingKey {
             case batchSize, flushIntervalMs, samplingRate
             case autoCapture, trackScreens, trackTaps, trackNetwork
@@ -51,6 +57,7 @@ public struct UniTrackRemoteConfig: Codable {
             case screenStartEvent = "screen_start_event"
             case screenEndEvent   = "screen_end_event"
             case screenLoadEvent  = "screen_load_event"
+            case customValues = "custom_values"
         }
     }
 
@@ -225,6 +232,23 @@ public struct UniTrackRemoteConfig: Codable {
         if let data = try? JSONEncoder().encode(cfg) {
             UserDefaults.standard.set(data, forKey: cacheKey(apiKey))
         }
+        // Snapshot the most recent successful fetch in a process-wide global so
+        // resolver helpers (getRemoteValue) can read sdk_config.custom_values
+        // without the caller threading apiKey through. The on-disk cache above
+        // stays the source of truth across launches.
+        latest = cfg
+    }
+
+    /// Most recent fetched config, or nil before the first successful fetch.
+    /// Updated by `fetch(...)` on success; also seeded by `cached(apiKey:)`
+    /// callers if they want resolver lookups to work pre-fetch on cold start.
+    public private(set) static var latest: UniTrackRemoteConfig?
+
+    /// Prime `latest` from the on-disk cache. Call once early in app launch
+    /// (before the async fetch returns) so the very first `getRemoteValue`
+    /// query already has portal values to consult.
+    public static func primeLatest(apiKey: String) {
+        if latest == nil { latest = cached(apiKey: apiKey) }
     }
 
     /// Minimal default when there is no cache and the portal is unreachable.

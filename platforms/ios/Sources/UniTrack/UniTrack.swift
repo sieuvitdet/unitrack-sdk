@@ -63,7 +63,7 @@ public final class UniTrack {
 
     // Registered third-party providers (Snowplow, Firebase, …). Every event is
     // forwarded to each one. Empty by default — core has zero such dependencies.
-    private var providers: [AnalyticsProvider] = []
+    internal var providers: [AnalyticsProvider] = []
 
     // Per-event NSLog of what flows through UniTrack/Snowplow/Firebase. Default ON
     // so integrators see traffic immediately while wiring the SDK up; flip to OFF

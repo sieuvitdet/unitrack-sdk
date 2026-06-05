@@ -804,6 +804,14 @@ function wireChartHover(wrap) {
 // shows the BASE values + a "Override per flavor" expander; the app side
 // resolves the right block by passing ?flavor=… to /config.
 const FLAVORS = ['dev', 'staging', 'beta', 'production'];
+// Visual tag per flavor (dot color in override panels + dropzone headers).
+// Declared at module scope so every template literal in renderConfig can read
+// it — earlier this lived inside renderConfig and the IIFE at line 1258 hit
+// ReferenceError, which blanked the Config tab entirely.
+const FLAVOR_COLOR = {
+  dev: 'var(--muted)', staging: 'var(--accent)',
+  beta: 'var(--warn)', production: 'var(--accent2)',
+};
 
 // JS replica of the Flutter SnowplowProvider's blueprint resolver +
 // entity builder — used by the "🧪 Test với event name" preview to show
@@ -953,6 +961,26 @@ async function renderConfig(pid){
         </div>
       </div>
 
+      <!-- Custom values: key/value bag app reads via UniTrack.getRemoteValue.
+           Replaces Firebase RemoteConfig for keys an operator wants to flip
+           without a Firebase Console publish cycle. Edit as key=value lines —
+           values typed by their literal form: "true"/"false" → bool, integer
+           → int, decimal → double, anything else → string. -->
+      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">
+          Custom values <span class="muted" style="font-weight:400">— remote feature flags / experiment knobs (app gọi <span class="mono">UniTrack.getRemoteValue("key", default: ...)</span>)</span>
+        </div>
+        <textarea id="cfCustomValues" style="width:100%;height:88px;font-family:ui-monospace,monospace;font-size:11.5px"
+          placeholder="feature_camera_grid=true
+home_banner_copy=Welcome
+ab_bucket=2
+retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</textarea>
+        <div class="muted" style="font-size:10.5px;margin-top:4px">
+          <b>Resolve order</b>: portal custom_values → Firebase RemoteConfig (nếu app có wire <span class="mono">UniTrackFirebase</span>) → defaultValue ở app.
+          Value <span class="mono">true</span>/<span class="mono">false</span> được parse boolean, số nguyên → int, số thập phân → double, còn lại → string.
+        </div>
+      </div>
+
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}> Snowplow</label></h3>
       <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
@@ -962,39 +990,69 @@ async function renderConfig(pid){
 
       <!-- Per-platform override — SDK trên iOS pick {endpoint, appId} từ
            snowplow.ios nếu non-empty, fallback các value chung ở trên.
-           Same cho Android. Để trống = dùng chung — không phải project nào
-           cũng cần collector / appId khác nhau giữa 2 platform. -->
-      <details style="margin-top:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
-        <summary style="cursor:pointer;padding:8px 10px;font-size:12px;font-weight:600;color:var(--muted)">
-          📱 Per-platform override <span style="font-weight:400">— endpoint + appId riêng cho iOS / Android (tuỳ chọn)</span>
-        </summary>
-        <div style="padding:0 10px 10px">
-          ${(() => {
-            const iosOv = sp.ios || {};
-            const andOv = sp.android || {};
-            const renderRow = (label, ovEp, ovAppId, epId, appIdId) => `
-              <div style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:5px">
-                <div style="font-size:11.5px;font-weight:600;margin-bottom:4px">${label}</div>
+           Same cho Android. Mỗi platform thêm 4 sub-row flavor (dev/staging/
+           beta/production) — endpoint+appId riêng cho từng platform × flavor.
+           Resolve: platform.flavor_overrides[X] → platform → flavor_overrides[X] → base. -->
+      <div style="margin-top:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:10px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">
+          📱 Per-platform override <span style="font-weight:400">— endpoint + appId riêng cho iOS / Android (tuỳ chọn), kèm 4 flavor</span>
+        </div>
+        ${(() => {
+          const renderPlatform = (label, key, plat) => {
+            const platOv = (plat && plat.flavor_overrides) || {};
+            const baseRow = `
+              <div style="padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:#0e0e0e">
+                <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">Base (fallback khi flavor không khớp)</div>
                 <div class="row" style="gap:8px;flex-wrap:wrap">
                   <div style="flex:2;min-width:200px">
                     <label style="font-size:11px">Collector endpoint</label>
-                    <input id="${epId}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                           placeholder="trống = dùng collector chung ở trên"
-                           value="${esc(ovEp||'')}"/>
+                    <input id="cfSp${key}Ep" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                           placeholder="trống = dùng collector chung ngoài"
+                           value="${esc((plat&&plat.endpoint)||'')}"/>
                   </div>
                   <div style="flex:1;min-width:120px">
                     <label style="font-size:11px">appId</label>
-                    <input id="${appIdId}" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                    <input id="cfSp${key}App" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
                            placeholder="trống = dùng appId chung"
-                           value="${esc(ovAppId||'')}"/>
+                           value="${esc((plat&&plat.appId)||'')}"/>
                   </div>
                 </div>
               </div>`;
-            return renderRow('iOS',     iosOv.endpoint, iosOv.appId, 'cfSpIosEp', 'cfSpIosApp')
-                 + renderRow('Android', andOv.endpoint, andOv.appId, 'cfSpAndEp', 'cfSpAndApp');
-          })()}
-        </div>
-      </details>
+            const flavorRows = FLAVORS.map((f) => {
+              const ov = platOv[f] || {};
+              const color = FLAVOR_COLOR[f];
+              return `
+                <div style="margin-top:6px;padding:6px 8px;border:1px solid var(--line);border-radius:5px">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>
+                    <span style="color:${color};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">${f}</span>
+                    <span class="muted" style="font-size:10.5px">override khi app gọi <span class="mono">?flavor=${f}</span></span>
+                  </div>
+                  <div class="row" style="gap:8px;flex-wrap:wrap">
+                    <div style="flex:2;min-width:200px">
+                      <input id="cfSp${key}Fv_${f}_endpoint" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                             placeholder="endpoint — trống = dùng Base của ${label}"
+                             value="${esc(ov.endpoint||'')}"/>
+                    </div>
+                    <div style="flex:1;min-width:120px">
+                      <input id="cfSp${key}Fv_${f}_appId" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                             placeholder="appId — trống = dùng Base"
+                             value="${esc(ov.appId||'')}"/>
+                    </div>
+                  </div>
+                </div>`;
+            }).join('');
+            return `
+              <div style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg)">
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">${label}</div>
+                ${baseRow}
+                ${flavorRows}
+              </div>`;
+          };
+          return renderPlatform('iOS',     'Ios', sp.ios)
+               + renderPlatform('Android', 'And', sp.android);
+        })()}
+      </div>
       <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
       <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
 
@@ -1227,22 +1285,65 @@ async function renderConfig(pid){
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}> Firebase</label></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Kéo-thả <b>google-services.json</b> hoặc <b>GoogleService-Info.plist</b> vào ô dưới để tự điền:</div>
-      <div id="cfFbDrop" style="border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px">Thả file vào đây</div>
-      <div class="row" style="gap:10px;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px"><label>GOOGLE_APP_ID (appId)</label><input id="cfFbApp" style="width:100%" value="${esc(fbo.appId||'')}"/></div>
-        <div style="flex:1;min-width:160px"><label>GCM_SENDER_ID</label><input id="cfFbSender" style="width:100%" value="${esc(fbo.gcmSenderId||'')}"/></div>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Kéo-thả <b>google-services.json</b> hoặc <b>GoogleService-Info.plist</b> vào ô <b>Base</b> để tự điền base config. 4 dropzone bên dưới cho từng flavor — env nào kéo file vào, info hiện ngay & app gọi <span class="mono">?flavor=X</span> sẽ ăn theo.</div>
+
+      <!-- ── Base config ────────────────────────────────────────────── -->
+      <div style="border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">🟦 Base (fallback)</div>
+        <div id="cfFbDrop" style="border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px">Thả file vào đây</div>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px"><label>GOOGLE_APP_ID (appId)</label><input id="cfFbApp" style="width:100%" value="${esc(fbo.appId||'')}"/></div>
+          <div style="flex:1;min-width:160px"><label>GCM_SENDER_ID</label><input id="cfFbSender" style="width:100%" value="${esc(fbo.gcmSenderId||'')}"/></div>
+        </div>
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:8px">
+          <div style="flex:1;min-width:160px"><label>API_KEY</label><input id="cfFbKey" style="width:100%" value="${esc(fbo.apiKey||'')}"/></div>
+          <div style="flex:1;min-width:140px"><label>PROJECT_ID</label><input id="cfFbProj" style="width:100%" value="${esc(fbo.projectId||'')}"/></div>
+          <div style="flex:1;min-width:140px"><label>BUNDLE_ID</label><input id="cfFbBundle" style="width:100%" value="${esc(fbo.bundleId||'')}"/></div>
+        </div>
+        <label style="margin-top:8px">superProperties (mọi event)</label>
+        <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
+        <label>userProperties (audience)</label>
+        <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
       </div>
-      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:8px">
-        <div style="flex:1;min-width:160px"><label>API_KEY</label><input id="cfFbKey" style="width:100%" value="${esc(fbo.apiKey||'')}"/></div>
-        <div style="flex:1;min-width:140px"><label>PROJECT_ID</label><input id="cfFbProj" style="width:100%" value="${esc(fbo.projectId||'')}"/></div>
-        <div style="flex:1;min-width:140px"><label>BUNDLE_ID</label><input id="cfFbBundle" style="width:100%" value="${esc(fbo.bundleId||'')}"/></div>
+
+      <!-- ── 4 dropzones per flavor ─────────────────────────────────── -->
+      <div style="margin-top:6px;padding:10px;border:1px solid var(--line);border-radius:8px">
+        <div style="font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:4px">📂 Firebase per flavor</div>
+        <div class="muted" style="font-size:11px;margin-bottom:8px">App truyền <span class="mono">?flavor=X</span> sẽ nhận options của flavor X (merge lên base). Bỏ trống = ăn base.</div>
+        ${(() => {
+          // Pre-load saved options per flavor from firebase.flavor_overrides[f].options
+          const fbOv = (fb && fb.flavor_overrides) || {};
+          return FLAVORS.map(f => {
+            const fbf = (fbOv[f] && fbOv[f].options) || {};
+            const color = FLAVOR_COLOR[f];
+            const has = !!(fbf.appId || fbf.apiKey || fbf.projectId);
+            return `
+              <div id="cfFbFv_${f}_card" data-flavor="${f}" style="margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:10px;background:#0e0e0e">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span>
+                  <b style="color:${color};font-size:12px;text-transform:uppercase;letter-spacing:0.5px">${f}</b>
+                  <span class="muted" style="font-size:10.5px;flex:1">kéo google-services.json / GoogleService-Info.plist</span>
+                  <button class="btn ghost sm cfFbFv_clear" type="button" data-flavor="${f}" style="padding:2px 8px;display:${has?'inline-block':'none'}">✕ Xoá</button>
+                </div>
+                <div id="cfFbFv_${f}_drop" class="cfFbFv_drop" data-flavor="${f}"
+                     style="border:1px dashed var(--line);border-radius:6px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px;cursor:pointer">
+                  ${has ? '🟢 Đã có config — kéo file mới để thay' : 'Thả file vào đây'}
+                </div>
+                <div id="cfFbFv_${f}_info" style="display:${has?'block':'none'};font-size:11.5px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font-family:ui-monospace,monospace">
+                  <div style="display:grid;grid-template-columns:90px 1fr;gap:4px 10px">
+                    <span class="muted">file</span><span id="cfFbFv_${f}_file">${has?'(saved)':'—'}</span>
+                    <span class="muted">appId</span><span id="cfFbFv_${f}_appId">${esc(fbf.appId||'')}</span>
+                    <span class="muted">apiKey</span><span id="cfFbFv_${f}_apiKey">${esc(fbf.apiKey||'')}</span>
+                    <span class="muted">projectId</span><span id="cfFbFv_${f}_projectId">${esc(fbf.projectId||'')}</span>
+                    <span class="muted">bundleId</span><span id="cfFbFv_${f}_bundleId">${esc(fbf.bundleId||'')}</span>
+                    <span class="muted">senderId</span><span id="cfFbFv_${f}_gcmSenderId">${esc(fbf.gcmSenderId||'')}</span>
+                  </div>
+                </div>
+                <input type="hidden" id="cfFbFv_${f}_data" value='${esc(JSON.stringify(fbf||{}))}'/>
+              </div>`;
+          }).join('');
+        })()}
       </div>
-      <label style="margin-top:8px">superProperties (mọi event)</label>
-      <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
-      <label>userProperties (audience)</label>
-      <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
-      ${flavorOverrideHtml('Fb', fb)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}> W3C Tracing (traceparent)</label></h3>
@@ -1266,52 +1367,113 @@ async function renderConfig(pid){
 
   const parseKV=(id)=>{const o={};$(id).value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();});return o;};
 
-  // Per-flavor override panel for a block. Each flavor gets a JSON textarea so
-  // the operator can override any keys for that build flavor (matches the
-  // server-side mergeFlavor: shallow merge for primitives/arrays, one-level
-  // deep merge for nested objects like firebase.options). Kept as raw JSON
-  // (not split into N typed inputs) because the override shape is open-ended
-  // and a textarea is robust against future fields being added to a block.
+  // Per-flavor override panel — 4 panels (dev/staging/beta/production) expanded
+  // by default, each carrying typed fields specific to the block (Sp = Snowplow,
+  // Tr = Tracing; Firebase flavors live in 4 dropzones above). Empty fields →
+  // not persisted; the server merges only the keys an operator actually filled.
+  //
+  // Why typed fields instead of JSON textarea: ops kept fat-fingering JSON; a
+  // form is harder to break and surfaces only the fields that vary per env.
+  // FLAVOR_COLOR is declared at module scope (above renderConfig).
   function flavorOverrideHtml(prefix, block){
     const ov = (block && block.flavor_overrides) || {};
     const rows = FLAVORS.map(f => {
-      const cur = ov[f];
-      const val = cur ? JSON.stringify(cur, null, 2) : '';
-      const tag = f === 'production' ? 'var(--accent2)' : (f === 'beta' ? 'var(--warn)' : (f === 'staging' ? 'var(--accent)' : 'var(--muted)'));
-      return `<div style="margin-top:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:11px">
-          <span style="color:${tag};font-weight:600;min-width:80px">${f}</span>
-          <span class="muted" style="font-size:10px">JSON các trường ghi đè (rỗng = dùng base)</span>
-        </label>
-        <textarea id="cf${prefix}Ov_${f}" placeholder='{"enabled":true,"endpoint":"..."}'
-          style="width:100%;height:54px;font-family:ui-monospace,monospace;font-size:11px">${esc(val)}</textarea>
-      </div>`;
+      const cur = ov[f] || {};
+      const color = FLAVOR_COLOR[f];
+      let inner = '';
+      if (prefix === 'Sp') {
+        inner = `
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <div style="flex:2;min-width:200px">
+              <label style="font-size:11px">Collector endpoint</label>
+              <input id="cfSpOv_${f}_endpoint" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                     placeholder="trống = dùng base ở trên"
+                     value="${esc(cur.endpoint||'')}"/>
+            </div>
+            <div style="flex:1;min-width:120px">
+              <label style="font-size:11px">appId</label>
+              <input id="cfSpOv_${f}_appId" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                     placeholder="trống = dùng base"
+                     value="${esc(cur.appId||'')}"/>
+            </div>
+          </div>`;
+      } else if (prefix === 'Tr') {
+        const hosts = Array.isArray(cur.allowlist_hosts) ? cur.allowlist_hosts.join('\n') : '';
+        const enabledState = cur.enabled === true ? 'on' : (cur.enabled === false ? 'off' : '');
+        const sampledState = cur.sampled === true ? 'on' : (cur.sampled === false ? 'off' : '');
+        inner = `
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:140px">
+              <label style="font-size:11px">enabled</label>
+              <select id="cfTrOv_${f}_enabled" style="width:100%;font-size:11.5px">
+                <option value="" ${enabledState===''?'selected':''}>— giữ base —</option>
+                <option value="on" ${enabledState==='on'?'selected':''}>true</option>
+                <option value="off" ${enabledState==='off'?'selected':''}>false</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:140px">
+              <label style="font-size:11px">sampled</label>
+              <select id="cfTrOv_${f}_sampled" style="width:100%;font-size:11.5px">
+                <option value="" ${sampledState===''?'selected':''}>— giữ base —</option>
+                <option value="on" ${sampledState==='on'?'selected':''}>true</option>
+                <option value="off" ${sampledState==='off'?'selected':''}>false</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:160px">
+              <label style="font-size:11px">header_name</label>
+              <input id="cfTrOv_${f}_header" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+                     placeholder="trống = dùng base"
+                     value="${esc(cur.header_name||'')}"/>
+            </div>
+          </div>
+          <label style="font-size:11px;margin-top:6px;display:block">allowlist_hosts (1 dòng / pattern; trống = dùng base)</label>
+          <textarea id="cfTrOv_${f}_hosts" style="width:100%;height:48px;font-family:ui-monospace,monospace;font-size:11.5px"
+            placeholder="*.fpt.vn">${esc(hosts)}</textarea>`;
+      } else {
+        // Fallback (Fb) — không dùng nữa nhưng để safe.
+        inner = `<div class="muted" style="font-size:11px">Firebase per-flavor: dùng dropzone ở trên.</div>`;
+      }
+      return `
+        <div style="margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:#0e0e0e">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span>
+            <b style="color:${color};font-size:12px;text-transform:uppercase;letter-spacing:0.5px">${f}</b>
+            <span class="muted" style="font-size:10.5px">override khi app gọi <span class="mono">?flavor=${f}</span></span>
+          </div>
+          ${inner}
+        </div>`;
     }).join('');
-    return `<details style="margin-top:10px;border:1px dashed var(--line);border-radius:6px;padding:8px 12px">
-      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">⚙ Override per flavor (dev / staging / beta / production)</summary>
-      <div class="muted" style="font-size:11px;margin:6px 0">App truyền <span class="mono">?flavor=staging</span> tới <span class="mono">/config</span> → portal merge override này lên base. Bỏ trống = dùng base.</div>
+    return `<div style="margin-top:14px;padding:10px;border:1px solid var(--line);border-radius:8px">
+      <div style="font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:4px">⚙ Override per flavor</div>
+      <div class="muted" style="font-size:11px;margin-bottom:4px">App truyền <span class="mono">?flavor=staging</span> (hoặc header <span class="mono">X-UniTrack-Flavor</span>) tới <span class="mono">/config</span> → portal merge override này lên base.</div>
       ${rows}
-    </details>`;
+    </div>`;
   }
 
-  // Read overrides back out of the panel. Returns { dev?, staging?, beta?, production? }
-  // with only the flavors that have non-empty, valid JSON. Invalid JSON keeps
-  // the SAVE handler going (toast warns) so an operator's typo doesn't wipe
-  // the rest of the form.
+  // Read overrides back out of the panels. Only keys with non-empty values get
+  // persisted, so the saved blob stays minimal and base values remain authoritative.
   function collectFlavorOverrides(prefix){
     const out = {};
-    let badFlavor = null;
     for (const f of FLAVORS) {
-      const raw = $('#cf' + prefix + 'Ov_' + f).value.trim();
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          out[f] = parsed;
-        }
-      } catch (_) { badFlavor = badFlavor || (prefix + '/' + f); }
+      const ov = {};
+      if (prefix === 'Sp') {
+        const ep = ($('#cfSpOv_' + f + '_endpoint')?.value || '').trim();
+        const ap = ($('#cfSpOv_' + f + '_appId')?.value    || '').trim();
+        if (ep) ov.endpoint = ep;
+        if (ap) ov.appId    = ap;
+      } else if (prefix === 'Tr') {
+        const en  = $('#cfTrOv_' + f + '_enabled')?.value || '';
+        const sm  = $('#cfTrOv_' + f + '_sampled')?.value || '';
+        const hdr = ($('#cfTrOv_' + f + '_header')?.value || '').trim();
+        const hosts = ($('#cfTrOv_' + f + '_hosts')?.value || '')
+          .split('\n').map(s => s.trim()).filter(Boolean);
+        if (en === 'on' || en === 'off') ov.enabled = (en === 'on');
+        if (sm === 'on' || sm === 'off') ov.sampled = (sm === 'on');
+        if (hdr) ov.header_name = hdr;
+        if (hosts.length) ov.allowlist_hosts = hosts;
+      }
+      if (Object.keys(ov).length) out[f] = ov;
     }
-    if (badFlavor) toast('JSON override không hợp lệ ở ' + badFlavor + ' (bỏ qua)', 'err');
     return Object.keys(out).length ? out : undefined;
   }
 
@@ -1578,20 +1740,109 @@ async function renderConfig(pid){
     r.readAsText(f);
   });
   function fillFirebaseFromFile(name, text){
-    if(name.endsWith('.json')){
-      const j=JSON.parse(text); const cli=(j.client&&j.client[0])||{};
-      $('#cfFbApp').value   = cli.client_info?.mobilesdk_app_id || '';
-      $('#cfFbSender').value= j.project_info?.project_number || '';
-      $('#cfFbKey').value   = (cli.api_key&&cli.api_key[0]?.current_key) || '';
-      $('#cfFbProj').value  = j.project_info?.project_id || '';
-      $('#cfFbBundle').value= cli.client_info?.android_client_info?.package_name || '';
-    } else { // .plist (XML) — pull values by key
-      const get=(k)=>{const m=text.match(new RegExp('<key>'+k+'</key>\\s*<string>([^<]*)</string>'));return m?m[1]:'';};
-      $('#cfFbApp').value   = get('GOOGLE_APP_ID');
-      $('#cfFbSender').value= get('GCM_SENDER_ID');
-      $('#cfFbKey').value   = get('API_KEY');
-      $('#cfFbProj').value  = get('PROJECT_ID');
-      $('#cfFbBundle').value= get('BUNDLE_ID');
+    const opts = parseFirebaseFile(name, text);
+    $('#cfFbApp').value   = opts.appId       || '';
+    $('#cfFbSender').value= opts.gcmSenderId || '';
+    $('#cfFbKey').value   = opts.apiKey      || '';
+    $('#cfFbProj').value  = opts.projectId   || '';
+    $('#cfFbBundle').value= opts.bundleId    || '';
+  }
+  // Parse google-services.json / GoogleService-Info.plist → { appId, apiKey, ... }
+  // Shared between base dropzone + per-flavor dropzones.
+  function parseFirebaseFile(name, text){
+    if (name.toLowerCase().endsWith('.json')) {
+      const j = JSON.parse(text);
+      const cli = (j.client && j.client[0]) || {};
+      return {
+        appId:       cli.client_info?.mobilesdk_app_id || '',
+        gcmSenderId: j.project_info?.project_number || '',
+        apiKey:      (cli.api_key && cli.api_key[0]?.current_key) || '',
+        projectId:   j.project_info?.project_id || '',
+        bundleId:    cli.client_info?.android_client_info?.package_name || '',
+      };
+    }
+    // .plist (XML) — pull values by key
+    const get = (k) => {
+      const m = text.match(new RegExp('<key>' + k + '</key>\\s*<string>([^<]*)</string>'));
+      return m ? m[1] : '';
+    };
+    return {
+      appId:       get('GOOGLE_APP_ID'),
+      gcmSenderId: get('GCM_SENDER_ID'),
+      apiKey:      get('API_KEY'),
+      projectId:   get('PROJECT_ID'),
+      bundleId:    get('BUNDLE_ID'),
+    };
+  }
+
+  // ── Per-flavor Firebase dropzones ─────────────────────────────────────
+  // Each card has: drop area + info card + hidden input <cfFbFv_${f}_data>.
+  // On drop: parse file → fill info card + stash JSON in the hidden input.
+  // cfSave reads the hidden inputs to build firebase.flavor_overrides[f].options.
+  FLAVORS.forEach((f) => {
+    const dropEl = $('#cfFbFv_' + f + '_drop');
+    if (!dropEl) return;
+    dropEl.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropEl.style.borderColor = 'var(--accent)';
+    });
+    dropEl.addEventListener('dragleave', () => {
+      dropEl.style.borderColor = 'var(--line)';
+    });
+    dropEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropEl.style.borderColor = 'var(--line)';
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const opts = parseFirebaseFile(file.name, r.result);
+          applyFlavorFirebaseOpts(f, opts, file.name);
+          toast(`Đã đọc ${file.name} cho ${f}`);
+        } catch (err) {
+          toast('File không hợp lệ', 'err');
+        }
+      };
+      r.readAsText(file);
+    });
+  });
+  // Clear button — wipe one flavor's Firebase override.
+  document.querySelectorAll('.cfFbFv_clear').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const f = btn.dataset.flavor;
+      if (!f) return;
+      applyFlavorFirebaseOpts(f, null, null);
+      toast(`Đã xoá Firebase override cho ${f}`);
+    });
+  });
+  // Update info card + hidden input + drop label for one flavor.
+  function applyFlavorFirebaseOpts(f, opts, fileName){
+    const dataEl = $('#cfFbFv_' + f + '_data');
+    const dropEl = $('#cfFbFv_' + f + '_drop');
+    const infoEl = $('#cfFbFv_' + f + '_info');
+    const clearBtn = document.querySelector('.cfFbFv_clear[data-flavor="' + f + '"]');
+    const fields = ['appId','apiKey','projectId','bundleId','gcmSenderId'];
+    if (opts && fields.some((k) => opts[k])) {
+      dataEl.value = JSON.stringify(opts);
+      fields.forEach((k) => {
+        const cell = $('#cfFbFv_' + f + '_' + k);
+        if (cell) cell.textContent = opts[k] || '';
+      });
+      const fileCell = $('#cfFbFv_' + f + '_file');
+      if (fileCell) fileCell.textContent = fileName || '(saved)';
+      infoEl.style.display = 'block';
+      dropEl.innerHTML = '🟢 Đã có config — kéo file mới để thay';
+      if (clearBtn) clearBtn.style.display = 'inline-block';
+    } else {
+      dataEl.value = '{}';
+      fields.forEach((k) => {
+        const cell = $('#cfFbFv_' + f + '_' + k);
+        if (cell) cell.textContent = '';
+      });
+      infoEl.style.display = 'none';
+      dropEl.innerHTML = 'Thả file vào đây';
+      if (clearBtn) clearBtn.style.display = 'none';
     }
   }
 
@@ -1648,15 +1899,30 @@ async function renderConfig(pid){
       if (name && schema) spEntities[name] = schema;
     });
 
-    // Per-platform override — only persist a block when at least one of its
-    // fields is non-empty. Keeps the saved config small + easy to diff.
-    const platOv = (epId, appId) => {
-      const ep = ($('#' + epId)?.value || '').trim();
-      const ap = ($('#' + appId)?.value || '').trim();
-      return (ep || ap) ? { endpoint: ep || undefined, appId: ap || undefined } : undefined;
+    // Per-platform override — base + 4 flavor sub-rows per platform.
+    // Resolve precedence (server-side mergeFlavor): platform.flavor_overrides[X]
+    // → platform → flavor_overrides[X] → base. Each input persists only when
+    // non-empty so the saved blob stays minimal + auditable.
+    const collectPlatform = (key) => {
+      const ep = ($('#cfSp' + key + 'Ep')?.value  || '').trim();
+      const ap = ($('#cfSp' + key + 'App')?.value || '').trim();
+      const platFv = {};
+      for (const f of FLAVORS) {
+        const fep = ($('#cfSp' + key + 'Fv_' + f + '_endpoint')?.value || '').trim();
+        const fap = ($('#cfSp' + key + 'Fv_' + f + '_appId')?.value    || '').trim();
+        const fv = {};
+        if (fep) fv.endpoint = fep;
+        if (fap) fv.appId    = fap;
+        if (Object.keys(fv).length) platFv[f] = fv;
+      }
+      const out = {};
+      if (ep) out.endpoint = ep;
+      if (ap) out.appId    = ap;
+      if (Object.keys(platFv).length) out.flavor_overrides = platFv;
+      return Object.keys(out).length ? out : undefined;
     };
-    const iosOv = platOv('cfSpIosEp', 'cfSpIosApp');
-    const andOv = platOv('cfSpAndEp', 'cfSpAndApp');
+    const iosOv = collectPlatform('Ios');
+    const andOv = collectPlatform('And');
 
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
       userContext: parseKV('#cfSpCtx'),
@@ -1673,7 +1939,21 @@ async function renderConfig(pid){
       options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
         projectId:$('#cfFbProj').value.trim(), bundleId:$('#cfFbBundle').value.trim() },
       superProperties:parseKV('#cfFbSuper'), userProperties:parseKV('#cfFbUser') };
-    const fbOv = collectFlavorOverrides('Fb'); if (fbOv) firebase.flavor_overrides = fbOv;
+    // Per-flavor Firebase: read hidden JSON from each dropzone card. Flavor
+    // only persists if its stashed JSON has at least one non-empty field —
+    // empty / cleared cards drop out so the saved blob stays minimal.
+    const fbOv = {};
+    for (const f of FLAVORS) {
+      const raw = $('#cfFbFv_' + f + '_data')?.value || '';
+      try {
+        const parsed = JSON.parse(raw || '{}');
+        if (parsed && typeof parsed === 'object'
+            && ['appId','apiKey','projectId','bundleId','gcmSenderId'].some((k) => parsed[k])) {
+          fbOv[f] = { options: parsed };
+        }
+      } catch (_) { /* hidden input shouldn't have bad JSON, but stay defensive */ }
+    }
+    if (Object.keys(fbOv).length) firebase.flavor_overrides = fbOv;
 
     // Tracing block (was missing from the save handler before this commit —
     // editing it on the portal had no effect).
@@ -1685,6 +1965,26 @@ async function renderConfig(pid){
     };
     const trOv = collectFlavorOverrides('Tr'); if (trOv) tracing.flavor_overrides = trOv;
 
+    // Custom values: parse `key=value` lines and coerce the value to a typed
+    // primitive so the app side reads it back without manual conversion.
+    // Resolution mirrors the contract documented in the textarea hint.
+    const parseTypedKV = (raw) => {
+      const out = {};
+      String(raw || '').split('\n').forEach(line => {
+        const eq = line.indexOf('=');
+        if (eq <= 0) return;
+        const k = line.slice(0, eq).trim();
+        const vRaw = line.slice(eq + 1).trim();
+        if (!k) return;
+        if (vRaw === 'true')  { out[k] = true;  return; }
+        if (vRaw === 'false') { out[k] = false; return; }
+        if (/^-?\d+$/.test(vRaw)) { out[k] = parseInt(vRaw, 10); return; }
+        if (/^-?\d+\.\d+$/.test(vRaw)) { out[k] = parseFloat(vRaw); return; }
+        out[k] = vRaw;
+      });
+      return out;
+    };
+
     const body = {
       endpoint: $('#cfEndpoint').value.trim(),
       sdk_config: { batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
@@ -1694,6 +1994,7 @@ async function renderConfig(pid){
         screen_start_event: $('#cfScreenStart').value.trim(),
         screen_end_event:   $('#cfScreenEnd').value.trim(),
         screen_load_event:  $('#cfScreenLoad').value.trim(),
+        custom_values: parseTypedKV($('#cfCustomValues').value),
       },
       snowplow, firebase, tracing,
     };

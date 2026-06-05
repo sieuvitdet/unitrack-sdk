@@ -30,12 +30,28 @@ const FLAVOR_KEY = 'flavor_overrides';
 // SDK never sees flavor_overrides leaked into its resolved settings. Deep
 // nested objects (firebase.options, snowplow.userContext) merge by spreading
 // their inner keys too — one level deep is enough for the shapes we use.
+//
+// Nested per-platform overrides: blocks like `snowplow.ios` / `snowplow.android`
+// can themselves carry a `flavor_overrides` map. Before merging the outer block
+// we recursively flatten those nested overrides so the SDK only ever sees the
+// resolved {endpoint, appId} for the requested flavor. That lets one project
+// configure { ios.endpoint, ios.flavor_overrides.staging.endpoint, ... } and
+// have the iOS SDK get exactly the right value when it calls ?flavor=staging.
 function mergeFlavor(base, flavor) {
   if (!base || typeof base !== 'object') return base;
   const overrides = base[FLAVOR_KEY];
-  // Clone shallow, drop the overrides container — it's a config-time concept.
   const out = { ...base };
   delete out[FLAVOR_KEY];
+
+  // Recurse into any nested object that carries its own flavor_overrides so
+  // per-platform × flavor matrices resolve correctly. Done before the outer
+  // merge so the outer override can still replace the whole sub-object.
+  for (const [k, v] of Object.entries(out)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && v[FLAVOR_KEY]) {
+      out[k] = mergeFlavor(v, flavor);
+    }
+  }
+
   if (!flavor || !overrides || typeof overrides !== 'object') return out;
   const ov = overrides[flavor];
   if (!ov || typeof ov !== 'object') return out;
@@ -83,6 +99,11 @@ function defaults(project) {
       // Empty = keep default. Useful when team rewrites taxonomy to
       // "screen_load_done" or similar without breaking historic queries.
       screen_load_event:  '',
+      // Arbitrary key/value bag the app reads via UniTrack.getRemoteValue(...).
+      // Replaces Firebase Remote Config for keys an operator wants to flip
+      // without a Firebase Console publish cycle. Values may be string / int /
+      // double / bool — JSON-safe primitives, no nested objects.
+      custom_values: {},
     },
     // snowplow.blueprints / entities / event_blueprint_map drive the per-event
     // SelfDescribing payload + attached contexts (user_context, core_action,
