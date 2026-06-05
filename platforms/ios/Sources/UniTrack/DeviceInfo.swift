@@ -6,8 +6,8 @@
 
 import Foundation
 import UIKit
-import SystemConfiguration
 import CoreTelephony
+import Network
 
 enum DeviceInfo {
 
@@ -27,6 +27,7 @@ enum DeviceInfo {
             ? (str(info["CFBundleName"]).isEmpty ? "" : str(info["CFBundleName"]))
             : str(info["CFBundleDisplayName"])
         let bundleId = bundle.bundleIdentifier ?? ""
+        let net = networkSnapshot()
 
         let fields: [String: String] = [
             "platform":       "ios",
@@ -47,7 +48,20 @@ enum DeviceInfo {
             "locale":         Locale.current.identifier,                       // "vi_VN"
             "timezone":       TimeZone.current.identifier,
             "screen":         "\(Int(screen.width))x\(Int(screen.height))@\(Int(scale))x",
-            "network_type":   networkType(),                                  // wifi | cellular | 2g | 3g | 4g | 5g | none
+            // Network family captured once at init via NWPathMonitor. Camera
+            // streaming team queries these together to attribute TTFF / buffer
+            // events to underlying connectivity:
+            //   network_type      — wifi | cellular | wired | vpn | none
+            //   cellular_subtype  — 2g | 3g | 4g | 5g | "" (filled only when cellular)
+            //   is_expensive      — true when traffic goes over a metered link;
+            //                       on iOS this catches "Wi-Fi Assist" where the
+            //                       OS silently falls back to cellular while the
+            //                       status bar still shows the Wi-Fi icon.
+            //   is_constrained    — true when Low Data Mode is on (iOS 13+).
+            "network_type":     net["type"] ?? "unknown",
+            "cellular_subtype": net["cellular_subtype"] ?? "",
+            "is_expensive":     net["is_expensive"] ?? "false",
+            "is_constrained":   net["is_constrained"] ?? "false",
             "is_debug":       isDebug() ? "true" : "false",
             "is_rooted":      isJailbroken() ? "true" : "false",              // jailbreak on iOS
             "device_id":      deviceId(),                                     // identifierForVendor
@@ -69,22 +83,61 @@ enum DeviceInfo {
         #endif
     }
 
-    /// Reachability snapshot via SCNetworkReachability flags (no extra deps).
-    /// For cellular we go one step further and map the radio access technology
-    /// to a generation (3g/4g/5g) via CoreTelephony.
-    private static func networkType() -> String {
-        guard let reach = SCNetworkReachabilityCreateWithName(nil, "8.8.8.8") else {
-            return "unknown"
+    /// One-shot snapshot via NWPathMonitor. Returns a dict the caller can
+    /// merge into the device info bag — we report the primary transport plus
+    /// the two NWPath signals that matter for streaming attribution:
+    ///   • is_expensive   — Wi-Fi Assist on iOS silently switches to cellular
+    ///                      when the Wi-Fi link can't carry data; the status
+    ///                      bar still shows Wi-Fi but `path.isExpensive` flips
+    ///                      to true. That's the field to trust over `type`.
+    ///   • is_constrained — Low Data Mode (iOS 13+); user-toggled throttle.
+    /// We start the monitor on a dedicated queue, wait briefly for the first
+    /// path update, then cancel — keeping init synchronous + lifecycle clean.
+    private static func networkSnapshot() -> [String: String] {
+        let monitor = NWPathMonitor()
+        let q = DispatchQueue(label: "unitrack.netcheck")
+        let sem = DispatchSemaphore(value: 0)
+        var captured: NWPath?
+        monitor.pathUpdateHandler = { path in
+            captured = path
+            sem.signal()
         }
-        var flags = SCNetworkReachabilityFlags()
-        guard SCNetworkReachabilityGetFlags(reach, &flags),
-              flags.contains(.reachable) else {
-            return "none"
+        monitor.start(queue: q)
+        // Bounded wait: NWPathMonitor delivers the current path almost
+        // immediately, but cap at 500ms so a stuck network daemon can't hang
+        // app init.
+        _ = sem.wait(timeout: .now() + .milliseconds(500))
+        monitor.cancel()
+
+        guard let path = captured else {
+            return ["type": "unknown"]
         }
-        #if os(iOS)
-        if flags.contains(.isWWAN) { return cellularGeneration() }
-        #endif
-        return "wifi"
+        if path.status != .satisfied {
+            return ["type": "none"]
+        }
+        var out: [String: String] = [
+            "is_expensive":   path.isExpensive ? "true" : "false",
+            "is_constrained": path.isConstrained ? "true" : "false",
+        ]
+        // Wired check first — even on iOS this can be true for tethered
+        // Ethernet adapters (rare but real). VPN must beat the others because
+        // a VPN tunnel hides what the underlying transport actually is.
+        if path.usesInterfaceType(.wiredEthernet) {
+            out["type"] = "wired"
+        } else if path.usesInterfaceType(.wifi) {
+            out["type"] = "wifi"
+        } else if path.usesInterfaceType(.cellular) {
+            out["type"] = "cellular"
+            out["cellular_subtype"] = cellularGeneration()
+        } else if path.usesInterfaceType(.other) {
+            // .other covers VPN tunnels + relayed traffic. Report it
+            // explicitly so the downstream pipeline doesn't misread it as
+            // wifi.
+            out["type"] = "vpn"
+        } else {
+            out["type"] = "unknown"
+        }
+        return out
     }
 
     /// Map the current radio access technology to a generation label.
