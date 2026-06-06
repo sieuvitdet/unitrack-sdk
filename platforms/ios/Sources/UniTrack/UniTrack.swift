@@ -65,6 +65,29 @@ public final class UniTrack {
     // forwarded to each one. Empty by default — core has zero such dependencies.
     internal var providers: [AnalyticsProvider] = []
 
+    // Snapshot of the device/app bag the core stamps onto every event. Lives
+    // on the shared instance so providers building their own context entities
+    // (vd Snowplow application_context) read the same source the wire payload
+    // uses. Set inside initialize() right after ut_set_device_info().
+    internal var cachedDeviceBag: [String: Any] = [:]
+
+    /// Returns the device/app metadata bag (platform, app_version, network_*,
+    /// device_*) captured at init time. SnowplowProvider attaches this as the
+    /// `application_context` entity — kept public so apps that build their own
+    /// providers can do the same without re-running the platform queries.
+    public static func applicationContext() -> [String: Any] {
+        return shared.cachedDeviceBag
+    }
+
+    /// Parse the JSON object the C core consumes back into a Swift dict for
+    /// in-process consumers. Returns an empty bag on malformed input.
+    fileprivate static func parseDeviceBag(_ json: String) -> [String: Any] {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let dict = obj as? [String: Any] else { return [:] }
+        return dict
+    }
+
     // Per-event NSLog of what flows through UniTrack/Snowplow/Firebase. Default ON
     // so integrators see traffic immediately while wiring the SDK up; flip to OFF
     // (UniTrack.verboseLogging = false) before shipping a release build.
@@ -288,8 +311,13 @@ public final class UniTrack {
         ut_set_log_level(context, ut_log_level(rawValue: UInt32(config.logLevel.rawValue)))
 
         // Attach device/app metadata to every event (model, OS, app version,
-        // locale, …) — collected once here.
-        ut_set_device_info(context, DeviceInfo.json())
+        // locale, …) — collected once here. Snapshot is kept on the shared
+        // instance so providers (SnowplowProvider) can build their own
+        // application_context entity from the same bag without re-running
+        // the platform queries.
+        let deviceJSON = DeviceInfo.json()
+        ut_set_device_info(context, deviceJSON)
+        cachedDeviceBag = Self.parseDeviceBag(deviceJSON)
 
         // Install the HTTP transport callback (uses URLSession).
         HTTPBridge.install(into: context!)

@@ -150,8 +150,12 @@ function defaults(project) {
       // its data via the helper's extraContexts: parameter — the SDK only
       // knows how to build the two above without app input.
       entities: {
-        user_context: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
-        core_action:  'iglu:vn.fpt.ftel.snowplow/core_action/jsonschema/1-0-0',
+        user_context:        'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
+        core_action:         'iglu:vn.fpt.ftel.snowplow/core_action/jsonschema/1-0-0',
+        // application_context — SDK fills automatically from DeviceInfo
+        // (platform, app_version, network_type, …). Just being present in
+        // this map enables the entity; the integrator never types the data.
+        application_context: 'iglu:vn.fpt.ftel.snowplow/application_context/jsonschema/1-0-0',
       },
     },
     firebase: { enabled: false },

@@ -226,12 +226,14 @@ public final class SnowplowProvider: AnalyticsProvider {
     }
 
     /// Build the entity list attached to one event:
-    ///   1. user_context  — from userContext bag (if entities["user_context"] set).
-    ///   2. core_action   — from event meta (if entities["core_action"] set).
-    ///   3. extraContexts — anything the caller passed (campaign, experiment, …).
+    ///   1. user_context        — from userContext bag (if entities["user_context"] set).
+    ///   2. core_action         — from event meta (if entities["core_action"] set).
+    ///   3. application_context — from UniTrack.applicationContext()
+    ///                            (if entities["application_context"] set).
+    ///   4. extraContexts       — anything the caller passed (campaign, experiment, …).
     /// Any other name in `entities` is registered but data-less — pass it via
     /// extraContexts when calling the helper. `skipGlobalContexts: true` drops
-    /// user_context + core_action (useful when the caller is overriding).
+    /// the three built-ins (useful when the caller is overriding).
     private func buildEntities(forEventName name: String,
                                screen: String?,
                                elementKey: String?,
@@ -246,13 +248,30 @@ public final class SnowplowProvider: AnalyticsProvider {
             }
             if let coreRaw = entities["core_action"],
                let coreSchema = normalizeEntityURI(coreRaw) {
+                let now = isoNow()
                 var data: [String: Any] = [
                     "action_name": name,
-                    "timestamp":   isoNow(),
+                    "timestamp":   now,
+                    // start_time mirrors the Iglu schema FPT Life consumes —
+                    // the event was created on the client at this instant.
+                    // Kept alongside the legacy `timestamp` field so existing
+                    // downstream queries don't break.
+                    "start_time":  now,
                 ]
                 if let screen = screen, !screen.isEmpty       { data["screen"]      = screen }
                 if let key    = elementKey, !key.isEmpty      { data["element_key"] = key }
                 out.append(SelfDescribingJson(schema: coreSchema, andData: data))
+            }
+            // application_context — built from the device/app bag UniTrack
+            // already collected at init (DeviceInfo). The SDK fills the
+            // common fields; the integrator only registers the schema in the
+            // portal entities map.
+            if let appRaw = entities["application_context"],
+               let appSchema = normalizeEntityURI(appRaw) {
+                let bag = UniTrack.applicationContext()
+                if !bag.isEmpty {
+                    out.append(SelfDescribingJson(schema: appSchema, andData: bag))
+                }
             }
         }
         if let extra = extra { out.append(contentsOf: extra) }

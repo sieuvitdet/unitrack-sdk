@@ -1181,7 +1181,7 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
         <div style="margin-top:14px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
             <b style="font-size:12.5px">Auto-attached entities</b>
-            <span class="muted" style="font-size:11px;flex:1">SDK đính entity này vào mọi event tracking*. Built-in: <span class="mono">user_context</span>, <span class="mono">core_action</span></span>
+            <span class="muted" style="font-size:11px;flex:1">SDK đính entity này vào mọi event tracking*. Built-in: <span class="mono">user_context</span>, <span class="mono">core_action</span>, <span class="mono">application_context</span></span>
             <button class="btn ghost sm" id="cfSpEntAdd" type="button" title="Thêm entity ngoài built-in">+ Add entity</button>
           </div>
           <div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">
@@ -1196,13 +1196,14 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
               <tbody id="cfSpEntBody">
                 ${(() => {
                   // Render saved entities + always seed user_context + core_action
-                  // if missing so the operator sees the built-ins right away.
+                  // + application_context if missing so the operator sees the
+                  // built-ins right away.
                   // Legacy values may carry a full URI ("iglu:.../foo/jsonschema/1-0-0")
                   // or a half-typed path ("vn.fpt.ftel.snowplow/foo/jsonschema/1-0-0").
                   // Show those as-is so the operator sees what's stored; the SDK
                   // normalizeEntityURI() accepts both shapes.
                   const seed = sp.entities || {};
-                  const builtin = ['user_context', 'core_action'];
+                  const builtin = ['user_context', 'core_action', 'application_context'];
                   const rows = [];
                   for (const k of builtin) {
                     rows.push([k, seed[k] || k]);       // default short name = the entity name itself
@@ -1243,7 +1244,7 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
             </table>
           </div>
           <div class="muted" style="font-size:10.5px;margin-top:6px">
-            Bỏ trống short name → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name (event resolved), timestamp (now), screen, element_key. Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>. SDK chấp nhận cả full URI (legacy) — chỉ short name là khuyến nghị.
+            Bỏ trống short name → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name, timestamp (now), start_time, screen, element_key. <b>application_context</b> auto-fill từ DeviceInfo (platform, app_version, network_type, build_number, device_*). Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>. SDK chấp nhận cả full URI (legacy) — chỉ short name là khuyến nghị.
           </div>
         </div>
       </div>
