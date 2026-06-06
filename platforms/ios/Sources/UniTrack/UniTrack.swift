@@ -367,6 +367,14 @@ public final class UniTrack {
                     UniTrackURLProtocol.excludeURL(containing: host)
                 }
             }
+            // Surface what we installed so a "trackTaps stays silent" bug
+            // becomes obvious in the Xcode console (vs. silently no-op'ing
+            // because the portal turned a flag off). Each swizzler is
+            // idempotent so repeating this on hot-reload is safe.
+            UniTrack.log("[UniTrack] auto-capture installed → screens=%@ taps=%@ network=%@",
+                         config.trackScreens ? "ON" : "off",
+                         config.trackTaps    ? "ON" : "off",
+                         config.trackNetwork ? "ON" : "off")
             if config.trackMemoryWarnings  { MemoryWarningObserver.install() }
             AppLifecycleObserver.install()
         }

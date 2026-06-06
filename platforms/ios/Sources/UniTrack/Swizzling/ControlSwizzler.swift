@@ -61,6 +61,11 @@ private extension UIApplication {
         // schema URI lands at iglu:<vendor>/event_click/jsonschema/<v>. App
         // code that needs a different business event for a specific button
         // still uses a Phase-2 rewrite rule (match_event=click + element_key).
+        // Trace the catch so a "trackTaps stays silent" bug is one log line
+        // away from a diagnosis (swizzler not installed? installed but the
+        // sendAction funnel never gets called? -> answer is "yes, but you're
+        // tapping a non-UIControl").
+        UniTrack.log("[UniTrack] tap captured key=%@ screen=%@ class=%@", key, screen, className)
         UniTrack.track("click", properties: [
             "element_key": key,
             "screen":      screen,
