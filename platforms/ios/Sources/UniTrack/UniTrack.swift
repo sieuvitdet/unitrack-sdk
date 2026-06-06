@@ -100,9 +100,43 @@ public final class UniTrack {
 
     /// Provider/helper code uses this instead of NSLog directly so the integrator
     /// can mute every log line with one flag. Format is the same as NSLog.
+    ///
+    /// Long payloads (vd: Snowplow envelope JSON ~3-10KB) get **chunked** so
+    /// the os_log unified-logging backend doesn't truncate them at ~1024 chars
+    /// — NSLog under the hood pipes through os_log, which trims long messages
+    /// to keep the system log fast. We detect the long-message case by looking
+    /// at the formatted string length and switch to per-line print() (raw
+    /// stdout, no truncation) for the body. Header still goes through NSLog so
+    /// it still shows in Console.app with the timestamp + process id prefix.
     public static func log(_ format: String, _ args: CVarArg...) {
         guard verboseLogging else { return }
-        withVaList(args) { NSLogv(format, $0) }
+        let formatted = withVaList(args) { NSString(format: format, arguments: $0) as String }
+        emit(formatted)
+    }
+
+    /// Common log sink. NSLog for short (single-line) messages, chunked
+    /// print() for long multi-line payloads. ~800 chars per chunk leaves
+    /// headroom under both Xcode console (4KB) and unified logging (1024).
+    internal static func emit(_ text: String) {
+        let CHUNK = 800
+        if text.count <= CHUNK && !text.contains("\n") {
+            NSLog("%@", text)
+            return
+        }
+        // Multi-line OR long: emit each line individually. If a single line
+        // is still > CHUNK, split it further so we never lose a tail.
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.count <= CHUNK {
+                print(line)
+            } else {
+                var idx = line.startIndex
+                while idx < line.endIndex {
+                    let end = line.index(idx, offsetBy: CHUNK, limitedBy: line.endIndex) ?? line.endIndex
+                    print(line[idx..<end])
+                    idx = end
+                }
+            }
+        }
     }
 
     // MARK: - Public API
