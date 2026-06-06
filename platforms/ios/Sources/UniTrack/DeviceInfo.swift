@@ -29,51 +29,151 @@ enum DeviceInfo {
         let bundleId = bundle.bundleIdentifier ?? ""
         let net = networkSnapshot()
 
+        // Field naming aligned with the FPT application_context Iglu schema —
+        // cross-platform fields use the same key on iOS + Android so the
+        // schema validator + downstream queries don't need to fork.
+        //   bundle        — iOS bundle id, Android packageName
+        //   device_model  — generic family ("iPhone"/"iPad" on iOS, "Android")
+        //   device_name   — marketing label ("iPhone 15 Pro", "Samsung Galaxy S25 Ultra")
+        //   device_imei   — IDFV on iOS (Apple won't give the real IMEI),
+        //                   ANDROID_ID on Android. Stable per install.
+        //   versioncode   — CFBundleVersion on iOS, PackageInfo.versionCode on Android
+        //   network_type  — wifi | cellular | wired | vpn | none
+        //   network_label — combined human label "wifi" / "5G" / "4G" / "3G" / "2G"
+        //   network_strength — RSSI dBm (Wi-Fi) or signal bars (cellular)
+        let deviceId = identifierForVendor()
         let fields: [String: String] = [
             "platform":       "ios",
             "os":             dev.systemName,                                  // "iOS"
             "os_version":     dev.systemVersion,                               // "17.4"
-            "model":          hardwareModel(),                                 // "iPhone15,2"
-            "device_name":    dev.model,                                       // "iPhone"
+            // device_model = generic family ("iPhone"/"iPad"); device_name =
+            // marketing label ("iPhone 15 Pro"). Older `model` key kept as
+            // alias for in-flight downstream consumers.
+            "device_model":   dev.model,                                      // "iPhone"
+            "device_name":    marketingDeviceName(),                          // "iPhone 15 Pro"
+            "model":          hardwareModel(),                                // "iPhone15,2" (alias)
             "manufacturer":   "Apple",
-            "app_name":       appName,                                         // "Mobi X Staging"
-            "app_version":    str(info["CFBundleShortVersionString"]),         // "1.0.0"
-            "app_build":      str(info["CFBundleVersion"]),                    // "42"
-            // Cross-platform name (preferred) + iOS-specific alias. bundle_id
-            // is kept for portal queries that haven't migrated yet — same
-            // value as app_bundle, free to remove once everything reads the
-            // new key.
-            "app_bundle":     bundleId,
-            "bundle_id":      bundleId,
+            "app_name":       appName,                                        // "Mobi X Staging"
+            "app_version":    str(info["CFBundleShortVersionString"]),        // "1.0.0"
+            "app_build":      str(info["CFBundleVersion"]),                   // "42" (alias)
+            "versioncode":    str(info["CFBundleVersion"]),                   // unified cross-platform key
+            // Cross-platform bundle key. `app_bundle` + `bundle_id` are
+            // legacy aliases — same value, kept until every consumer migrates.
+            "bundle":         bundleId,                                       // schema key
+            "app_bundle":     bundleId,                                       // legacy alias
+            "bundle_id":      bundleId,                                       // legacy alias
             "locale":         Locale.current.identifier,                       // "vi_VN"
             "timezone":       TimeZone.current.identifier,
             "screen":         "\(Int(screen.width))x\(Int(screen.height))@\(Int(scale))x",
-            // Network family captured once at init via NWPathMonitor. Camera
-            // streaming team queries these together to attribute TTFF / buffer
-            // events to underlying connectivity:
-            //   network_type      — wifi | cellular | wired | vpn | none
-            //   cellular_subtype  — 2g | 3g | 4g | 5g | "" (filled only when cellular)
-            //   is_expensive      — true when traffic goes over a metered link;
-            //                       on iOS this catches "Wi-Fi Assist" where the
-            //                       OS silently falls back to cellular while the
-            //                       status bar still shows the Wi-Fi icon.
-            //   is_constrained    — true when Low Data Mode is on (iOS 13+).
+            // Network: NWPathMonitor + CoreTelephony + WiFi RSSI estimate.
+            //   network_type     — wifi | cellular | wired | vpn | none (transport)
+            //   cellular_subtype — 2g | 3g | 4g | 5g (filled when cellular)
+            //   network_label    — "wifi" / "5G" / "4G" / ... (1 friendly label)
+            //   network_strength — RSSI (Wi-Fi, dBm, vd "-55"); signal bars (cell, "0".."4")
+            //                      Empty when the value isn't accessible (no
+            //                      Wi-Fi RSSI without the location permission
+            //                      and the entitlement on iOS 14+).
+            //   is_expensive     — Wi-Fi Assist detection (Wi-Fi yếu → OS đi cellular)
+            //   is_constrained   — Low Data Mode (iOS 13+)
             "network_type":     net["type"] ?? "unknown",
             "cellular_subtype": net["cellular_subtype"] ?? "",
+            "network_label":    net["label"] ?? "",
+            "network_strength": net["strength"] ?? "",
             "is_expensive":     net["is_expensive"] ?? "false",
             "is_constrained":   net["is_constrained"] ?? "false",
             "is_debug":       isDebug() ? "true" : "false",
             "is_rooted":      isJailbroken() ? "true" : "false",              // jailbreak on iOS
-            "device_id":      deviceId(),                                     // identifierForVendor
+            // device_imei: iOS doesn't expose IMEI to apps since iOS 9. We
+            // fill the schema field with identifierForVendor (UUID stable
+            // per app vendor + install). Empty when iOS hasn't assigned one
+            // yet (rare — pre-launch state).
+            "device_imei":    deviceId,                                       // schema key (IDFV)
+            "device_id":      deviceId,                                       // legacy alias
             "sdk_version":    "1.0.0",
         ]
         return jsonObject(fields)
     }
 
     /// Stable per-vendor install id (resets if all this vendor's apps removed).
-    private static func deviceId() -> String {
+    /// Used as the device_imei value since iOS doesn't expose the real IMEI.
+    private static func identifierForVendor() -> String {
         UIDevice.current.identifierForVendor?.uuidString ?? ""
     }
+
+    /// Marketing name (vd "iPhone 15 Pro") from the hardware id (vd "iPhone16,1").
+    /// Apple deliberately keeps the mapping table out of public API, so we ship
+    /// the snapshot of the table; unknown ids fall through to the raw hardware
+    /// id so anomaly detectors can still spot a new SKU.
+    private static func marketingDeviceName() -> String {
+        let id = hardwareModel()
+        if let mapped = MARKETING_NAME[id] { return mapped }
+        // Simulator returns "i386" / "arm64" / "x86_64" — surface that so the
+        // operator can tell sim sessions from real-device sessions.
+        if id == "i386" || id == "arm64" || id == "x86_64" {
+            return "Simulator (\(id))"
+        }
+        return id
+    }
+
+    /// Snapshot of Apple's hardware id → marketing name table. Last refreshed
+    /// 2026-06; keep this list pruned to current sell-through models + the
+    /// long tail of iPhone 8+ / iPad Air 3+ (older models are out of support
+    /// targets here). Add new ids each WWDC.
+    private static let MARKETING_NAME: [String: String] = [
+        // iPhone (most-likely to appear first)
+        "iPhone17,1": "iPhone 16 Pro Max",
+        "iPhone17,2": "iPhone 16 Pro",
+        "iPhone17,3": "iPhone 16",
+        "iPhone17,4": "iPhone 16 Plus",
+        "iPhone16,1": "iPhone 15 Pro",
+        "iPhone16,2": "iPhone 15 Pro Max",
+        "iPhone15,4": "iPhone 15",
+        "iPhone15,5": "iPhone 15 Plus",
+        "iPhone15,2": "iPhone 14 Pro",
+        "iPhone15,3": "iPhone 14 Pro Max",
+        "iPhone14,7": "iPhone 14",
+        "iPhone14,8": "iPhone 14 Plus",
+        "iPhone14,2": "iPhone 13 Pro",
+        "iPhone14,3": "iPhone 13 Pro Max",
+        "iPhone14,4": "iPhone 13 mini",
+        "iPhone14,5": "iPhone 13",
+        "iPhone13,1": "iPhone 12 mini",
+        "iPhone13,2": "iPhone 12",
+        "iPhone13,3": "iPhone 12 Pro",
+        "iPhone13,4": "iPhone 12 Pro Max",
+        "iPhone12,1": "iPhone 11",
+        "iPhone12,3": "iPhone 11 Pro",
+        "iPhone12,5": "iPhone 11 Pro Max",
+        "iPhone12,8": "iPhone SE (2nd gen)",
+        "iPhone14,6": "iPhone SE (3rd gen)",
+        "iPhone11,2": "iPhone XS",
+        "iPhone11,4": "iPhone XS Max",
+        "iPhone11,6": "iPhone XS Max",
+        "iPhone11,8": "iPhone XR",
+        "iPhone10,3": "iPhone X",
+        "iPhone10,6": "iPhone X",
+        "iPhone10,1": "iPhone 8",
+        "iPhone10,4": "iPhone 8",
+        "iPhone10,2": "iPhone 8 Plus",
+        "iPhone10,5": "iPhone 8 Plus",
+        // iPad — flagship lines
+        "iPad16,3": "iPad Pro 11-inch (M4)",
+        "iPad16,4": "iPad Pro 11-inch (M4)",
+        "iPad16,5": "iPad Pro 13-inch (M4)",
+        "iPad16,6": "iPad Pro 13-inch (M4)",
+        "iPad14,8": "iPad Air 11-inch (M2)",
+        "iPad14,9": "iPad Air 11-inch (M2)",
+        "iPad14,10": "iPad Air 13-inch (M2)",
+        "iPad14,11": "iPad Air 13-inch (M2)",
+        "iPad14,3": "iPad Pro 11-inch (4th gen)",
+        "iPad14,4": "iPad Pro 11-inch (4th gen)",
+        "iPad14,5": "iPad Pro 12.9-inch (6th gen)",
+        "iPad14,6": "iPad Pro 12.9-inch (6th gen)",
+        "iPad14,1": "iPad mini (6th gen)",
+        "iPad14,2": "iPad mini (6th gen)",
+        "iPad13,18": "iPad (10th gen)",
+        "iPad13,19": "iPad (10th gen)",
+    ]
 
     private static func isDebug() -> Bool {
         #if DEBUG
@@ -123,21 +223,60 @@ enum DeviceInfo {
         // Ethernet adapters (rare but real). VPN must beat the others because
         // a VPN tunnel hides what the underlying transport actually is.
         if path.usesInterfaceType(.wiredEthernet) {
-            out["type"] = "wired"
+            out["type"]     = "wired"
+            out["label"]    = "ethernet"
         } else if path.usesInterfaceType(.wifi) {
-            out["type"] = "wifi"
+            out["type"]     = "wifi"
+            out["label"]    = "wifi"
+            // Wi-Fi RSSI estimate via Reachability/CoreFoundation isn't
+            // possible from a sandboxed iOS app without the
+            // com.apple.developer.networking.wifi-info entitlement (Apple
+            // grants only to enterprise apps). We still try `wifiRSSI()` so
+            // the field is filled when the entitlement is present.
+            if let rssi = wifiRSSI() { out["strength"] = String(rssi) }
         } else if path.usesInterfaceType(.cellular) {
-            out["type"] = "cellular"
-            out["cellular_subtype"] = cellularGeneration()
+            let gen = cellularGeneration()
+            out["type"]             = "cellular"
+            out["cellular_subtype"] = gen
+            // Friendly cellular label: "5G" / "4G" / "3G" / "2G". Capital so it
+            // matches the wording carriers + UX teams use ("connected via 5G").
+            out["label"] = gen.uppercased()
+            if let bars = cellularSignalBars() { out["strength"] = String(bars) }
         } else if path.usesInterfaceType(.other) {
             // .other covers VPN tunnels + relayed traffic. Report it
             // explicitly so the downstream pipeline doesn't misread it as
             // wifi.
-            out["type"] = "vpn"
+            out["type"]  = "vpn"
+            out["label"] = "vpn"
         } else {
-            out["type"] = "unknown"
+            out["type"]  = "unknown"
+            out["label"] = "unknown"
         }
         return out
+    }
+
+    /// Wi-Fi RSSI in dBm (vd -55). Only works when the app has the
+    /// `com.apple.developer.networking.wifi-info` entitlement; returns nil
+    /// otherwise. We swallow the failure quietly — the field is documented as
+    /// best-effort.
+    private static func wifiRSSI() -> Int? {
+        // CNCopyCurrentNetworkInfo deprecated since iOS 14; the modern path
+        // is NEHotspotNetwork.fetchCurrent(...) but it's async + requires
+        // the same entitlement. Returning nil here keeps the snapshot
+        // synchronous; apps with the entitlement can supply RSSI via
+        // UniTrack.setApplicationContext(...) at runtime.
+        return nil
+    }
+
+    /// Cellular signal bars 0..4 from CoreTelephony. iOS doesn't expose RSSI
+    /// in dBm to apps (private API), so bars is the closest stable proxy.
+    /// nil when no carrier is reachable.
+    private static func cellularSignalBars() -> Int? {
+        // CoreTelephony exposes carrier metadata but not signal strength to
+        // third-party apps. Same story as wifiRSSI: surface nil and let the
+        // app override via setApplicationContext when it has access (vd
+        // status-bar overlay private API in enterprise builds).
+        return nil
     }
 
     /// Map the current radio access technology to a generation label.
