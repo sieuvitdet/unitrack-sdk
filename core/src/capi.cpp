@@ -182,4 +182,14 @@ const char* ut_pop_recovered_crash(ut_context* ctx) {
     return buf.c_str();
 }
 
+// Read-only view of the current session id (UUID). Thread-local buffer same
+// as ut_pop_recovered_crash. Empty when ctx is null. Used by bindings that
+// need to stamp session_id on app-side events (vd iOS session_ended).
+const char* ut_current_session_id(ut_context* ctx) {
+    thread_local std::string buf;
+    if (!ctx || !ctx->tracker) { buf.clear(); return ""; }
+    buf = ctx->tracker->current_session_id();
+    return buf.c_str();
+}
+
 } // extern "C"

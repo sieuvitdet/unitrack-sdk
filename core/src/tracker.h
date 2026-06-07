@@ -32,6 +32,12 @@ public:
     void identify(const std::string& user_id, const std::string& traits_json);
     void reset();
 
+    // Lightweight read of the active session id — used by bindings that need
+    // to stamp session_id onto app-side events (vd iOS session_ended fired
+    // from the AppLifecycleObserver after a foreground rotation). Returns ""
+    // if no session has been opened yet.
+    std::string current_session_id() { return session_.current_session_id(); }
+
     // Auto-capture entry points.
     void log_tap(const std::string& element_key,
                  const std::string& screen,

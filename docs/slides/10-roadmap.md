@@ -29,9 +29,9 @@ footer: 'Tích hợp UniTrack vào FPT Life'
 
 | Hạng mục | Status | Lý do |
 |---|---|---|
-| **Snowplow provider cho RN** | ❌ | RN demo hiện tại chỉ qua portal forward. Cần native Snowplow tracker RN package |
-| **Firebase provider cho Flutter** | ⚠️ partial | `unitrack_firebase` Dart có; cần test thực tế với google-services.json |
-| **iOS native session_ended callback** | ⚠️ | Có ở Android + Flutter; iOS chưa wire `AppLifecycleObserver` |
+| **Snowplow provider cho RN** | ✅ ready | `@unitrack/snowplow` package — 6 convention helper + 3 entity auto-attach, parity iOS/Android; wrap `@snowplow/react-native-tracker` |
+| **Firebase provider cho Flutter** | ✅ ready | `unitrack_firebase` Dart hoàn chỉnh, `flutter analyze` xanh, README hướng dẫn google-services.json + plist setup |
+| **iOS native session_ended callback** | ✅ | `AppLifecycleObserver` fire `session_ended` với duration + screen_count khi foreground sau timeout (SwiftPackage 0.3.7) |
 | **Screen wireframe capture** | ⚠️ parked | Code có (`UniTrackWireframe.swift`) nhưng OOM trên Flutter; cần optimize |
 | **Per-event verbose log RN** | ❌ | iOS/Android có; RN chỉ log HTTP POST size — khó debug |
 | **Unit tests coverage** | ⚠️ <30% | Core C++ test tốt; binding chưa nhiều |

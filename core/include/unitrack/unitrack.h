@@ -211,6 +211,13 @@ UT_EXPORT const char* ut_version(void);
  * the SDK; caller must NOT free. */
 UT_EXPORT const char* ut_pop_recovered_crash(ut_context* ctx);
 
+/* Read-only view of the active session id (UUID v4). Lives in a thread-local
+ * buffer; the next call on the same thread overwrites it. Returns "" if ctx
+ * is null. Used by bindings that need to stamp session_id onto app-side
+ * events (vd iOS AppLifecycleObserver firing session_ended after foreground
+ * rotation). Cheap — pure read under a single mutex. */
+UT_EXPORT const char* ut_current_session_id(ut_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif

@@ -71,6 +71,77 @@ public final class UniTrack {
     // uses. Set inside initialize() right after ut_set_device_info().
     internal var cachedDeviceBag: [String: Any] = [:]
 
+    // Session-stat snapshot tracked at the binding layer so AppLifecycleObserver
+    // (and apps) can fire `session_ended` with duration + counters without
+    // re-reading the core. The core owns session_id rotation; this is just a
+    // sidebag the binding fills as it observes events.
+    private let sessionStatLock = NSLock()
+    private var sessionStartedAtSnapshot: Date?
+    private var sessionScreenCountSnapshot: Int = 0
+    private var sessionHadErrorSnapshot: Bool = false
+    private var sessionHadCrashSnapshot: Bool = false
+    private var sessionTimeoutMsValue: Int = 1_800_000
+
+    // MARK: - Session helpers (used by AppLifecycleObserver + app code)
+
+    /// Current session id (UUID v4). Empty before initialize().
+    public static func currentSessionId() -> String {
+        guard let ctx = shared.context else { return "" }
+        guard let cstr = ut_current_session_id(ctx) else { return "" }
+        return String(cString: cstr)
+    }
+
+    /// When the active session started (monotonic clock-based). Nil before init.
+    public static func sessionStartedAt() -> Date? {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.sessionStartedAtSnapshot
+    }
+
+    /// Inactivity window after which the core rotates the session.
+    public static func sessionTimeoutMs() -> Int {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.sessionTimeoutMsValue
+    }
+
+    /// Lightweight per-session counters the app can opt into so session_ended
+    /// carries useful business data. Apps call incrementScreenCount() when a
+    /// new screen mounts, markError()/markCrash() at the appropriate spots.
+    public static func sessionScreenCount() -> Int {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.sessionScreenCountSnapshot
+    }
+    public static func sessionHadError() -> Bool {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.sessionHadErrorSnapshot
+    }
+    public static func sessionHadCrash() -> Bool {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.sessionHadCrashSnapshot
+    }
+
+    public static func incrementScreenCount() {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        shared.sessionScreenCountSnapshot += 1
+    }
+    public static func markSessionError() {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        shared.sessionHadErrorSnapshot = true
+    }
+    public static func markSessionCrash() {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        shared.sessionHadCrashSnapshot = true
+    }
+    /// Reset the per-session counters — typically called from the app's own
+    /// session_started handler after the core rotates (the binding doesn't
+    /// auto-reset because that would race with mid-event observers).
+    public static func resetSessionStats() {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        shared.sessionScreenCountSnapshot = 0
+        shared.sessionHadErrorSnapshot = false
+        shared.sessionHadCrashSnapshot = false
+        shared.sessionStartedAtSnapshot = Date()
+    }
+
     /// Returns the device/app metadata bag (platform, app_version, network_*,
     /// device_*) captured at init time. SnowplowProvider attaches this as the
     /// `application_context` entity — kept public so apps that build their own
@@ -343,6 +414,13 @@ public final class UniTrack {
             return
         }
         ut_set_log_level(context, ut_log_level(rawValue: UInt32(config.logLevel.rawValue)))
+
+        // Seed the session-stat snapshot so AppLifecycleObserver + apps see
+        // the right values immediately (vs racing the first background event).
+        sessionStatLock.lock()
+        sessionStartedAtSnapshot = Date()
+        sessionTimeoutMsValue = config.sessionTimeoutMs
+        sessionStatLock.unlock()
 
         // Attach device/app metadata to every event (model, OS, app version,
         // locale, …) — collected once here. Snapshot is kept on the shared
