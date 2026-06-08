@@ -133,7 +133,12 @@ public final class SnowplowProvider: AnalyticsProvider {
         if let host = URL(string: endpoint)?.host {
             UniTrack.excludeFromNetworkCapture(urlContaining: host)
         }
-        let network = NetworkConfiguration(endpoint: endpoint, method: .post)
+        // Custom NetworkConnection that wraps the default one and logs each
+        // outgoing POST body + response status. Without this the only
+        // visibility into wire-level traffic is "Connection error: -" from
+        // Snowplow's internal Logger, which we muted above.
+        let netConn = UniTrackSnowplowNetworkConnection(endpoint: endpoint, method: .post)
+        let network = NetworkConfiguration(networkConnection: netConn)
         let trackerConfig = TrackerConfiguration()
             .appId(appId)
             .base64Encoding(options.base64Encoding)
