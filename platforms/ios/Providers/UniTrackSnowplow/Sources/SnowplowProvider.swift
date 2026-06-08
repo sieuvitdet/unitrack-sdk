@@ -169,14 +169,71 @@ public final class SnowplowProvider: AnalyticsProvider {
     }
 
     /// Generic catch-all that the UniTrack core fans events out to. Routed
-    /// through the convention path: `name` becomes the event name, schema URI
-    /// is built from vendor + name + version. App code should prefer the
-    /// typed tracking* helpers (built-in + generated per-kind) for type safety.
+    /// through the convention path:
+    ///   1. Map raw event name → convention kind (vd "screen_viewed" → "screen_view")
+    ///   2. Resolve kind → wire name via portal event_names[kind]
+    ///      (vd "screen_view" → "event_screen_view" or whatever operator set)
+    ///   3. Build schema URI from vendor + resolved name + version
+    ///   4. Stamp event_action = raw name into data so consumers can tell
+    ///      "screen_viewed" vs "screen_exited" under the same schema parent
+    /// App code should prefer the typed tracking* helpers for type safety.
     public func track(_ name: String, _ properties: [String: Any]) {
-        guard let schema = schemaFor(eventName: name) else { return }
-        trackSelfDescribing(schema: schema, eventName: name,
-                            data: properties, extraContexts: nil,
+        // Auto-capture / screen-lifecycle events get routed to the right kind
+        // so they all share 1 schema (vd: screen_viewed + screen_exited +
+        // screen_load_completed → kind=screen_view → 1 iglu schema). When the
+        // raw name isn't a known auto-capture event, the kind defaults to the
+        // raw name itself (app-fired business events keep 1-to-1 mapping).
+        let kind = Self.kindForRawEvent(name) ?? name
+        let resolvedName = resolveEventName(kind: kind, defaultName: defaultEventNameFor(kind: kind, raw: name))
+        guard let schema = schemaFor(eventName: resolvedName) else { return }
+        // Stamp event_action so 3 events sharing the same schema parent stay
+        // distinguishable downstream without parsing data fields.
+        var enriched = properties
+        if enriched["event_action"] == nil { enriched["event_action"] = name }
+        trackSelfDescribing(schema: schema, eventName: resolvedName,
+                            data: enriched, extraContexts: nil,
                             skipGlobalContexts: false)
+    }
+
+    /// Map raw event names emitted by core / auto-capture / app to a convention
+    /// kind so they all share 1 iglu schema parent. Returns nil → caller uses
+    /// the raw name as kind (app-fired custom business events).
+    private static func kindForRawEvent(_ name: String) -> String? {
+        switch name {
+        // Click family
+        case "click", "tap":
+            return "click"
+        // Screen family — 3 lifecycle events share `screen_view` kind
+        case "screen_view", "screen_viewed", "screen_exited", "screen_load_completed":
+            return "screen_view"
+        // Network / API family
+        case "network_request":
+            return "api"
+        // Crash family
+        case "crash", "application_error":
+            return "crash"
+        // Session family
+        case "session_started", "session_ended", "session_start", "session_end":
+            return "session"
+        default:
+            return nil
+        }
+    }
+
+    /// Default wire event name when portal didn't override.
+    /// For unknown kinds (custom business events), the raw event name IS the
+    /// default — so app code emitting `camera_pairing_completed` lands at
+    /// `iglu:<vendor>/camera_pairing_completed/jsonschema/<ver>` unchanged.
+    private func defaultEventNameFor(kind: String, raw: String) -> String {
+        switch kind {
+        case "click":       return "event_click"
+        case "result":      return "event_result"
+        case "screen_view": return "event_screen_view"
+        case "crash":       return "event_crash"
+        case "api":         return "event_api"
+        case "session":     return "event_session"
+        default:            return raw   // custom business event keeps its name
+        }
     }
 
     public func setScreen(_ name: String) {
