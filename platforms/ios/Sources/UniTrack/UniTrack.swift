@@ -304,6 +304,11 @@ public final class UniTrack {
     }
 
     public static func setScreen(_ name: String) {
+        // Trace so a "screen_viewed/screen_exited not firing" bug is one log
+        // line away from a diagnosis. The core dedupes by screen-name equality
+        // (same name twice in a row = no boundary events), so the next line
+        // confirms the boundary path was even reached on the C++ side.
+        UniTrack.log("[UniTrack] setScreen → name=%@ (calls core ut_set_screen which fires screen_start/screen_view/screen_end)", name)
         forEachProvider { $0.setScreen(name) }
         guard let ctx = shared.context else { return }
         ut_set_screen(ctx, name)

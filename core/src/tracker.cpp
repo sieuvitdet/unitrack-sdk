@@ -140,13 +140,25 @@ void Tracker::set_screen(const std::string& screen_name) {
     long long now = current_time_ms();
     {
         std::lock_guard<std::mutex> lock(state_mu_);
-        if (current_screen_ == screen_name) return;   // same screen → nothing
+        if (current_screen_ == screen_name) {
+            // Same name twice in a row = no boundary events. Log so a missing
+            // screen_start/screen_end can be diagnosed without bisecting the
+            // C++ side.
+            UT_LOGI("Tracker", "set_screen(" + screen_name + ") deduped — same as current");
+            return;
+        }
         previous = current_screen_;
         if (!previous.empty() && screen_entered_at_ms_ > 0)
             dwell_ms = now - screen_entered_at_ms_;
         current_screen_ = screen_name;
         screen_entered_at_ms_ = now;
     }
+    // What the core is ABOUT to fire — confirms screen_lifecycle flag + which
+    // event names will be used (these come from portal sdk_config.screen_*).
+    UT_LOGI("Tracker", "set_screen prev=\"" + previous + "\" new=\"" + screen_name +
+            "\" lifecycle=" + (config_.screen_lifecycle ? "ON" : "off") +
+            " start_event=\"" + config_.screen_start_event +
+            "\" end_event=\""  + config_.screen_end_event + "\"");
 
     // screen_end for the screen we're leaving (with how long we stayed on it),
     // then screen_view (back-compat), then screen_start for the new screen.
