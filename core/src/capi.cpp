@@ -192,4 +192,20 @@ const char* ut_current_session_id(ut_context* ctx) {
     return buf.c_str();
 }
 
+// Lifetime session counter (persists across launches). 1 on first install,
+// +1 per timeout rotation. Returns 0 when ctx is null.
+int64_t ut_current_session_index(ut_context* ctx) {
+    if (!ctx || !ctx->tracker) return 0;
+    return ctx->tracker->current_session_index();
+}
+
+// UUID of the session that just closed (empty when this is the first session
+// after install). Thread-local buffer same convention as ut_current_session_id.
+const char* ut_previous_session_id(ut_context* ctx) {
+    thread_local std::string buf;
+    if (!ctx || !ctx->tracker) { buf.clear(); return ""; }
+    buf = ctx->tracker->previous_session_id();
+    return buf.c_str();
+}
+
 } // extern "C"

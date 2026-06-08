@@ -151,6 +151,16 @@ std::string SessionManager::current_session_id() {
     return session_id_;
 }
 
+int64_t SessionManager::current_session_index() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return session_index_;
+}
+
+std::string SessionManager::previous_session_id() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return prev_id_;
+}
+
 SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     std::lock_guard<std::mutex> lock(mu_);
     int64_t now = current_time_ms();

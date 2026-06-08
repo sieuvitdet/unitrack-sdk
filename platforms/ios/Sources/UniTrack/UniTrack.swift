@@ -91,6 +91,24 @@ public final class UniTrack {
         return String(cString: cstr)
     }
 
+    /// Lifetime session counter. Persists across launches — 1 on first install,
+    /// +1 per timeout rotation. App stamps this on session_started events so
+    /// the value survives app kill (vs a local static var which resets to 1
+    /// every cold start). Returns 0 before initialize().
+    public static func sessionIndex() -> Int {
+        guard let ctx = shared.context else { return 0 }
+        return Int(ut_current_session_index(ctx))
+    }
+
+    /// UUID of the previous (just-closed) session, or empty on the very first
+    /// session after install. Pair with sessionIndex() when emitting
+    /// session_started so backends can chain consecutive sessions.
+    public static func previousSessionId() -> String {
+        guard let ctx = shared.context else { return "" }
+        guard let cstr = ut_previous_session_id(ctx) else { return "" }
+        return String(cString: cstr)
+    }
+
     /// When the active session started (monotonic clock-based). Nil before init.
     public static func sessionStartedAt() -> Date? {
         shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }

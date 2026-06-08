@@ -53,6 +53,13 @@ public:
     // session boundaries. Kept for hot-path callers that only need the id.
     std::string current_session_id();
 
+    // Read-only views of the persisted session state. Cheap snapshot under
+    // the same mutex as current_session_id(). Bindings expose these so apps
+    // can stamp session_index / previous_session_id onto custom events
+    // without holding a SessionStamp object.
+    int64_t     current_session_index();
+    std::string previous_session_id();
+
     // Stamp for the current event: id, index, previous_id, first_event_id.
     // Pass the event_id of the event being built — if this is the first
     // event in the session it is recorded so subsequent events can quote it.

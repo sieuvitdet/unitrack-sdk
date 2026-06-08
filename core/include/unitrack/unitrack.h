@@ -218,6 +218,19 @@ UT_EXPORT const char* ut_pop_recovered_crash(ut_context* ctx);
  * rotation). Cheap — pure read under a single mutex. */
 UT_EXPORT const char* ut_current_session_id(ut_context* ctx);
 
+/* Lifetime session counter — persists across launches via session.json.
+ * 1 on first install, +1 per timeout-driven rotation. Apps stamp this as
+ * `session_index` on session_started events so they don't have to maintain
+ * their own counter (which would reset to 1 each launch). Returns 0 when
+ * ctx is null. */
+UT_EXPORT int64_t ut_current_session_index(ut_context* ctx);
+
+/* UUID of the session that just closed; empty on the very first session
+ * after install. Apps stamp this as `previous_session_id` on session_started
+ * events so backends can chain consecutive sessions for a user. Same
+ * thread-local buffer convention as ut_current_session_id. */
+UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif

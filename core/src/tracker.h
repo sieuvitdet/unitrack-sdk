@@ -38,6 +38,16 @@ public:
     // if no session has been opened yet.
     std::string current_session_id() { return session_.current_session_id(); }
 
+    // Lifetime counter — persists across launches via session.json. 1 on
+    // first install, +1 per timeout-driven rotation. Apps read this to stamp
+    // event_action=session_started events without managing their own counter.
+    int64_t     current_session_index() { return session_.current_session_index(); }
+
+    // UUID of the session that just closed (empty if this is the very first
+    // session). Useful for FPT-style session_started payloads that carry
+    // previous_session_id so backend can chain consecutive sessions.
+    std::string previous_session_id()   { return session_.previous_session_id(); }
+
     // Auto-capture entry points.
     void log_tap(const std::string& element_key,
                  const std::string& screen,
