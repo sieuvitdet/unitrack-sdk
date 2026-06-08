@@ -267,4 +267,11 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeRotateSession(
     ut_rotate_session(ctx_of(p));
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativePendingEventCounts(
+    JNIEnv* env, jobject, jlong p) {
+    const char* s = ut_pending_event_counts(ctx_of(p));
+    return env->NewStringUTF(s ? s : "{}");
+}
+
 } // extern "C"

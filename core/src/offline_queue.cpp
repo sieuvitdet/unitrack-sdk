@@ -243,4 +243,41 @@ int OfflineQueue::count() {
     return n;
 }
 
+std::vector<std::pair<std::string, int>> OfflineQueue::counts_by_event_name() {
+    std::vector<std::pair<std::string, int>> out;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!db_) return out;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT payload FROM events;", -1, &stmt, nullptr) != SQLITE_OK) {
+        return out;
+    }
+    // Tally into a flat vector + linear scan — the queue is bounded by
+    // max_queue_size (default 10k) so this is fine and avoids dragging in
+    // <unordered_map> which already costs more on small N.
+    auto bump = [&out](const std::string& name) {
+        for (auto& p : out) {
+            if (p.first == name) { p.second += 1; return; }
+        }
+        out.emplace_back(name, 1);
+    };
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* txt = sqlite3_column_text(stmt, 0);
+        if (!txt) continue;
+        // Payload shape (Event::to_json):
+        //   {"event_id":"...","event_name":"<name>","timestamp":...,...}
+        // event_name is always the 2nd key. Find by literal substring —
+        // no JSON parser needed and immune to schema reordering since we
+        // own to_json().
+        std::string payload(reinterpret_cast<const char*>(txt));
+        auto p = payload.find("\"event_name\":\"");
+        if (p == std::string::npos) continue;
+        p += 14;  // strlen(`"event_name":"`)
+        auto q = payload.find('"', p);
+        if (q == std::string::npos) continue;
+        bump(payload.substr(p, q - p));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
 } // namespace unitrack

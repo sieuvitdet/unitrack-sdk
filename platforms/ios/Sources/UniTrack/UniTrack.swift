@@ -125,6 +125,25 @@ public final class UniTrack {
         ut_rotate_session(ctx)
     }
 
+    /// Snapshot of events still sitting in the offline queue, grouped by raw
+    /// event_name. Returns `["ev_click": 3, "ev_result": 2]` for the demo UI
+    /// that shows "Saved 3 ev_click, 2 ev_result" while the device is offline.
+    /// Empty dict on queue empty or before init.
+    ///
+    /// Cheap (single SQLite scan over the payload column). Safe to call on any
+    /// thread but don't poll it more than ~1Hz — the offline queue can hold
+    /// up to maxQueueSize rows (default 10k).
+    public static func pendingEventCounts() -> [String: Int] {
+        guard let ctx = shared.context else { return [:] }
+        let cstr = ut_pending_event_counts(ctx)
+        let json = cstr.map { String(cString: $0) } ?? "{}"
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Int] else {
+            return [:]
+        }
+        return obj
+    }
+
     /// When the active session started (monotonic clock-based). Nil before init.
     public static func sessionStartedAt() -> Date? {
         shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }

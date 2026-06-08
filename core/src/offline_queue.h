@@ -57,6 +57,13 @@ public:
     // Total event count currently in queue.
     int count();
 
+    // Counts of pending events grouped by event_name. Cheap scan over the
+    // payload column — parses event_name with a substring search so it works
+    // on iOS system sqlite (no JSON_EXTRACT). Used by demo / debug UIs to
+    // show "Saved 3 ev_click, 2 ev_result" when network comes back.
+    // Returns name → count, sorted by count desc on the caller side.
+    std::vector<std::pair<std::string, int>> counts_by_event_name();
+
 private:
     sqlite3*    db_ = nullptr;
     std::mutex  mu_;

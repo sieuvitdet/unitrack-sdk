@@ -132,6 +132,8 @@ object NativeBridge {
     fun sessionIndex(): Long         = if (ctxPtr != 0L) nativeSessionIndex(ctxPtr) else 0L
     fun previousSessionId(): String  = if (ctxPtr != 0L) nativePreviousSessionId(ctxPtr) else ""
     fun rotateSession()              { if (ctxPtr != 0L) nativeRotateSession(ctxPtr) }
+    fun pendingEventCountsJson(): String =
+        if (ctxPtr != 0L) nativePendingEventCounts(ctxPtr) else "{}"
 
     fun shutdown() {
         if (ctxPtr != 0L) {
@@ -170,4 +172,7 @@ object NativeBridge {
     private external fun nativeSessionIndex(ctx: Long): Long
     private external fun nativePreviousSessionId(ctx: Long): String
     private external fun nativeRotateSession(ctx: Long)
+    // Offline-queue counts grouped by event_name. Returns JSON object like
+    // {"ev_click":3,"ev_result":2}. Empty queue → "{}".
+    private external fun nativePendingEventCounts(ctx: Long): String
 }

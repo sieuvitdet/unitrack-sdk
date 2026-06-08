@@ -341,6 +341,29 @@ object UniTrack {
         if (initialized) NativeBridge.rotateSession()
     }
 
+    /** Snapshot of events still sitting in the offline queue, grouped by raw
+     *  event_name. Used by demo / debug UIs that show "Saved 3 ev_click,
+     *  2 ev_result" while the device is offline. Empty map before init or
+     *  when the queue is empty. */
+    @JvmStatic
+    fun pendingEventCounts(): Map<String, Int> {
+        if (!initialized) return emptyMap()
+        val json = NativeBridge.pendingEventCountsJson()
+        if (json.isBlank() || json == "{}") return emptyMap()
+        return try {
+            val obj = JSONObject(json)
+            val out = LinkedHashMap<String, Int>(obj.length())
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                out[k] = obj.optInt(k, 0)
+            }
+            out
+        } catch (_: Throwable) {
+            emptyMap()
+        }
+    }
+
     // Session-stat sidebag — counters the binding tracks so session_ended
     // payloads can carry screen_count + had_error + had_crash without the
     // app having to keep its own state. Reset via resetSessionStats() at

@@ -391,4 +391,21 @@ void Tracker::do_flush() {
     queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
 }
 
+std::string Tracker::pending_event_counts_json() {
+    auto pairs = queue_.counts_by_event_name();
+    if (pairs.empty()) return "{}";
+    std::ostringstream o;
+    o << '{';
+    bool first = true;
+    for (auto& p : pairs) {
+        if (!first) o << ',';
+        first = false;
+        // Event names are SDK-internal identifiers (ev_click, ev_screen_view…)
+        // — ASCII, no escaping needed. Wrap defensively anyway with " quotes.
+        o << '"' << p.first << "\":" << p.second;
+    }
+    o << '}';
+    return o.str();
+}
+
 } // namespace unitrack

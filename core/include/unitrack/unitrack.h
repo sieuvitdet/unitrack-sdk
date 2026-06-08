@@ -239,6 +239,13 @@ UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
  * so analytics can tell timeout vs. manual rotations apart. */
 UT_EXPORT void ut_rotate_session(ut_context* ctx);
 
+/* Snapshot of the offline queue grouped by event_name. Returns a JSON object
+ * string like {"ev_click":3,"ev_result":2}. Empty queue or null ctx → "{}".
+ * Same thread-local buffer convention as ut_current_session_id — caller must
+ * NOT free; next call on the same thread overwrites it. Useful for demo UIs
+ * showing what's still pending while the device is offline. */
+UT_EXPORT const char* ut_pending_event_counts(ut_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif

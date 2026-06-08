@@ -79,6 +79,11 @@ public:
     // Forces a flush (blocks briefly).
     void flush_now();
 
+    // Snapshot of the offline queue grouped by event_name — used by demo /
+    // debug UIs to show "Saved 3 ev_click, 2 ev_result" while offline. Returns
+    // a JSON object string: {"ev_click":3,"ev_result":2}. Empty queue → "{}".
+    std::string pending_event_counts_json();
+
     void set_enabled(bool e) { enabled_.store(e); }
     bool is_enabled() const  { return enabled_.load(); }
 

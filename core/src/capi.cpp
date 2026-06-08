@@ -218,4 +218,14 @@ void ut_rotate_session(ut_context* ctx) {
     ctx->tracker->rotate_session();
 }
 
+// Snapshot of pending offline-queued events grouped by event_name. Thread-local
+// buffer same convention as the other string getters. Returns "{}" on null ctx
+// or empty queue. The JSON shape is {"ev_click":3,"ev_result":2}.
+const char* ut_pending_event_counts(ut_context* ctx) {
+    thread_local std::string buf;
+    if (!ctx || !ctx->tracker) { buf = "{}"; return buf.c_str(); }
+    buf = ctx->tracker->pending_event_counts_json();
+    return buf.c_str();
+}
+
 } // extern "C"
