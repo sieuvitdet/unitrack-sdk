@@ -148,10 +148,54 @@ public final class SnowplowProvider: AnalyticsProvider {
             .installAutotracking(options.installAutotracking)
             .deepLinkContext(options.deepLinkContext)
             .userAnonymisation(options.userAnonymisation)
+
+        // Plugin: hook every event the Snowplow tracker emits (including the
+        // auto-tracked ones — application_foreground/background, screen views,
+        // installs, exceptions). Without this, lifecycleAutotracking fires
+        // events inside the tracker queue but the integrator sees nothing in
+        // the Xcode console + nothing in the portal (the auto events skip
+        // SnowplowProvider.track()). The plugin gives us 2 wins:
+        //   1. Log each event to the verbose console so a "background event
+        //      not firing" bug is one log line away from a diagnosis.
+        //   2. Mirror the event back through UniTrack.track so the portal +
+        //      every other provider (Firebase, custom dashboards) see it too.
+        //      The mirror is namespaced with `_skip_snowplow: true` so we
+        //      don't loop the event back through this same plugin.
+        let plugin = PluginConfiguration(identifier: "UniTrackForwarder")
+            .afterTrack { [weak self] inspectable in
+                guard let self = self else { return }
+                let schema = inspectable.schema ?? "(no schema)"
+                let payload = inspectable.payload
+                UniTrack.log("[UniTrackSnowplow] auto-tracked schema=%@ payload=%@",
+                             schema,
+                             String(describing: payload))
+                // Mirror to UniTrack so portal + other providers see it.
+                // Extract a short event name from the schema URI tail so the
+                // mirrored event is queryable by name on the portal side:
+                //   iglu:com.snowplowanalytics.snowplow/application_background/jsonschema/1-0-0
+                //   → "application_background"
+                let name = Self.extractEventName(fromSchema: schema)
+                guard !name.isEmpty else { return }
+                var props: [String: Any] = [:]
+                for (k, v) in payload { props[k] = v }
+                props["_skip_snowplow"] = true
+                UniTrack.track(name, properties: props)
+            }
+
         tracker = Snowplow.createTracker(namespace: namespace,
                                          network: network,
-                                         configurations: [trackerConfig])
+                                         configurations: [trackerConfig, plugin])
         NSLog("[UniTrackSnowplow] tracker ready (\(endpoint), appId=\(appId), vendor=\(igluVendor ?? "—"), version=\(defaultVersion), entities=\(entities.keys.sorted().joined(separator: ",")))")
+    }
+
+    /// Pull the short event name out of an iglu URI tail. Returns "" if the
+    /// URI doesn't match the standard 4-part shape.
+    /// `iglu:vendor/event_name/jsonschema/1-0-0` → `event_name`
+    private static func extractEventName(fromSchema schema: String) -> String {
+        let parts = schema.split(separator: "/")
+        // ["iglu:vendor", "event_name", "jsonschema", "1-0-0"]
+        guard parts.count >= 4 else { return "" }
+        return String(parts[1])
     }
 
     // MARK: - Hot reloads from remote config
@@ -178,6 +222,10 @@ public final class SnowplowProvider: AnalyticsProvider {
     ///      "screen_viewed" vs "screen_exited" under the same schema parent
     /// App code should prefer the typed tracking* helpers for type safety.
     public func track(_ name: String, _ properties: [String: Any]) {
+        // Loop guard — events we mirrored from the Snowplow plugin back to
+        // UniTrack carry `_skip_snowplow: true`. Tracking them again would
+        // double-emit to the collector and loop infinitely.
+        if (properties["_skip_snowplow"] as? Bool) == true { return }
         // Auto-capture / screen-lifecycle events get routed to the right kind
         // so they all share 1 schema (vd: screen_viewed + screen_exited +
         // screen_load_completed → kind=screen_view → 1 iglu schema). When the
