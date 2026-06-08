@@ -163,37 +163,43 @@ public final class SnowplowProvider: AnalyticsProvider {
             // as the single source of console output.
             .logLevel(.off)
 
-        // Plugin: hook every event the Snowplow tracker emits (including the
-        // auto-tracked ones — application_foreground/background, screen views,
-        // installs, exceptions). Without this, lifecycleAutotracking fires
-        // events inside the tracker queue but the integrator sees nothing in
-        // the Xcode console + nothing in the portal (the auto events skip
-        // SnowplowProvider.track()). The plugin gives us 2 wins:
-        //   1. Log each event to the verbose console so a "background event
-        //      not firing" bug is one log line away from a diagnosis.
-        //   2. Mirror the event back through UniTrack.track so the portal +
-        //      every other provider (Firebase, custom dashboards) see it too.
-        //      The mirror is namespaced with `_skip_snowplow: true` so we
-        //      don't loop the event back through this same plugin.
+        // Plugin: hook every event the Snowplow tracker emits so the
+        // integrator at least sees an Xcode log line per event (gated by
+        // UniTrack.verboseLogging). Without this, autotracked events
+        // (application_foreground/background, screen_end, install,
+        // exception) fire inside the tracker queue silently.
+        //
+        // We deliberately DON'T mirror these auto-tracked Snowplow events
+        // back through UniTrack.track. Reason: Snowplow native events use
+        // vendor `com.snowplowanalytics.mobile` / `com.snowplowanalytics.snowplow`
+        // with their own schema names (vd `screen_end`, `application_background`).
+        // Mirroring them would land on the portal as those raw names instead
+        // of the team's own convention names (vd `event_screen_view`,
+        // `event_app_background`). Plus the business events team cares about
+        // already go through SnowplowProvider.track() → portal sees them via
+        // UniTrack core fan-out — the mirror was double-emission.
+        //
+        // Apps that NEED a specific Snowplow auto event mirrored should add
+        // their own per-schema plugin via the SnowplowTracker SDK directly.
+        let pluginVendorAllowlist = self.igluVendor ?? ""
         let plugin = PluginConfiguration(identifier: "UniTrackForwarder")
-            .afterTrack { [weak self] inspectable in
-                guard let self = self else { return }
+            .afterTrack { inspectable in
                 let schema = inspectable.schema ?? "(no schema)"
                 let payload = inspectable.payload
                 UniTrack.log("[UniTrackSnowplow] auto-tracked schema=%@ payload=%@",
                              schema,
                              String(describing: payload))
-                // Mirror to UniTrack so portal + other providers see it.
-                // Extract a short event name from the schema URI tail so the
-                // mirrored event is queryable by name on the portal side:
-                //   iglu:com.snowplowanalytics.snowplow/application_background/jsonschema/1-0-0
-                //   → "application_background"
-                let name = Self.extractEventName(fromSchema: schema)
-                guard !name.isEmpty else { return }
-                var props: [String: Any] = [:]
-                for (k, v) in payload { props[k] = v }
-                props["_skip_snowplow"] = true
-                UniTrack.track(name, properties: props)
+                // Skip mirror for Snowplow internal events — only mirror
+                // events from the team's own iglu vendor so portal queries
+                // match the convention names.
+                if !pluginVendorAllowlist.isEmpty,
+                   !schema.contains("/" + pluginVendorAllowlist + "/") {
+                    return
+                }
+                // (Reserved hook — currently no team event reaches here
+                // because every team event already flows through
+                // SnowplowProvider.track(). Kept as a stub so future custom
+                // tracker calls that bypass the provider still get mirrored.)
             }
 
         tracker = Snowplow.createTracker(namespace: namespace,
