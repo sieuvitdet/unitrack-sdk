@@ -30,7 +30,7 @@ object CameraAnalytics {
      * [done] callback runs after initialize() so SDK-dependent tracking is safe.
      */
     fun bootstrap(app: Application, done: () -> Unit) {
-        UniTrackRemoteConfig.fetch(app, apiKey, configURL, 3000) { cfg ->
+        UniTrackRemoteConfig.fetch(app, apiKey, configURL, flavor = null, timeoutMs = 3000) { cfg ->
             app.mainExecutorCompat {
                 start(app, cfg)
                 done()
@@ -63,10 +63,10 @@ object CameraAnalytics {
         //   2. apply the google-services plugin + drop in google-services.json
         //   3. here:  if (cfg.firebase.optBoolean("enabled")) UniTrack.addProvider(FirebaseProvider())
 
-        // Phase 2: rewrite rules from the portal. The SDK turns auto-captured
-        // tap/screen events into business events by name — so a NEW tracked
-        // moment for an existing screen/button needs no app code, just a portal rule.
-        UniTrack.setEventRules(cfg.toEventRules())
+        // (Phase 2 rewrite-rule wiring removed — superseded by the convention
+        // layer which routes raw event names → kinds → schemas in the
+        // Snowplow provider. App-side businees events go through
+        // UniTrack.track() / convention helpers directly.)
 
         // Core SDK config from the portal (with sensible fallbacks).
         val s = cfg.sdkConfig

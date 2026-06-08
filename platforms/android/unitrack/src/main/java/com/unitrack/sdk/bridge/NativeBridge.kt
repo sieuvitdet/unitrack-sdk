@@ -125,6 +125,14 @@ object NativeBridge {
         return Pair(pair[0], pair[1])
     }
 
+    // Session API — parity with iOS UniTrack.currentSessionId / sessionIndex /
+    // previousSessionId / rotateSession. Reads/writes go through the same
+    // SessionManager persisted state the C++ core owns.
+    fun currentSessionId(): String   = if (ctxPtr != 0L) nativeCurrentSessionId(ctxPtr) else ""
+    fun sessionIndex(): Long         = if (ctxPtr != 0L) nativeSessionIndex(ctxPtr) else 0L
+    fun previousSessionId(): String  = if (ctxPtr != 0L) nativePreviousSessionId(ctxPtr) else ""
+    fun rotateSession()              { if (ctxPtr != 0L) nativeRotateSession(ctxPtr) }
+
     fun shutdown() {
         if (ctxPtr != 0L) {
             nativeShutdown(ctxPtr)
@@ -157,4 +165,9 @@ object NativeBridge {
     private external fun nativePopRecoveredCrash(ctx: Long): String
     // length-2 result: [traceId 32-hex, spanId 16-hex]
     private external fun nativeNewTrace(): Array<String>
+    // Session API (parity with iOS) — backed by SessionManager state in core.
+    private external fun nativeCurrentSessionId(ctx: Long): String
+    private external fun nativeSessionIndex(ctx: Long): Long
+    private external fun nativePreviousSessionId(ctx: Long): String
+    private external fun nativeRotateSession(ctx: Long)
 }

@@ -118,8 +118,41 @@ class SnowplowProvider(
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$name\" — _skip_snowplow=true")
             return
         }
-        val schema = schemaFor(name) ?: return
-        trackSelfDescribingInternal(schema, name, properties, null, false)
+        // Auto-capture / lifecycle events get routed to the right convention
+        // kind so they all share 1 iglu schema parent (vd screen_viewed +
+        // screen_exited + screen_load_completed → kind=screen_view → 1 schema).
+        // Custom business events (unknown kind) keep 1-to-1 mapping.
+        val kind = kindForRawEvent(name) ?: name
+        val resolved = eventName(kind, defaultEventNameFor(kind, name))
+        val schema = schemaFor(resolved) ?: return
+        // Stamp event_action so events sharing a parent schema stay
+        // distinguishable downstream without parsing data fields.
+        val enriched = if (properties.containsKey("event_action")) properties
+                       else properties + ("event_action" to name)
+        trackSelfDescribingInternal(schema, resolved, enriched, null, false)
+    }
+
+    /** Map raw event names emitted by core / auto-capture / app to a
+     *  convention kind so they share 1 iglu schema parent. Returns null
+     *  → use the raw name as kind. Mirror of iOS SnowplowProvider.kindForRawEvent. */
+    private fun kindForRawEvent(name: String): String? = when (name) {
+        "click", "tap" -> "click"
+        "screen_view", "screen_viewed", "screen_exited", "screen_load_completed" -> "screen_view"
+        "network_request" -> "api"
+        "crash", "application_error" -> "crash"
+        "session_started", "session_ended", "session_start", "session_end" -> "session"
+        else -> null
+    }
+
+    /** Default wire name when portal didn't override the kind. */
+    private fun defaultEventNameFor(kind: String, raw: String): String = when (kind) {
+        "click"       -> "event_click"
+        "result"      -> "event_result"
+        "screen_view" -> "event_screen_view"
+        "crash"       -> "event_crash"
+        "api"         -> "event_api"
+        "session"     -> "event_session"
+        else          -> raw
     }
 
     override fun setScreen(name: String) {
@@ -187,13 +220,29 @@ class SnowplowProvider(
             }
             val coreSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
             if (coreSchema != null) {
+                val now = java.time.Instant.now().toString()
                 val data = mutableMapOf<String, Any?>(
                     "action_name" to eventName,
-                    "timestamp"   to java.time.Instant.now().toString(),
+                    "timestamp"   to now,
+                    // start_time mirrors iOS — the event was created on the
+                    // client at this instant. Kept alongside `timestamp` so
+                    // existing downstream queries don't break.
+                    "start_time"  to now,
                 )
                 if (!screen.isNullOrEmpty())     data["screen"]      = screen
                 if (!elementKey.isNullOrEmpty()) data["element_key"] = elementKey
                 out.add(SelfDescribingJson(coreSchema, data.mapValues { it.value ?: "" }))
+            }
+            // application_context — built from the device/app bag UniTrack
+            // already collected at init. The SDK fills the common fields;
+            // the integrator only registers the schema in portal entities map.
+            val appSchema = entities["application_context"]?.let { normalizeEntityURI(it) }
+            if (appSchema != null) {
+                val bag = com.unitrack.sdk.UniTrack.applicationContext()
+                if (bag.isNotEmpty()) {
+                    out.add(SelfDescribingJson(appSchema,
+                        bag.mapValues { it.value ?: "" }))
+                }
             }
         }
         if (extra != null) out.addAll(extra)

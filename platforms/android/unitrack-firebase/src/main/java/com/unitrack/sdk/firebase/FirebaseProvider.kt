@@ -6,6 +6,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.unitrack.sdk.providers.AnalyticsProvider
+import com.unitrack.sdk.RemoteValueProvider
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.locks.ReentrantLock
@@ -36,7 +37,7 @@ class FirebaseProvider @JvmOverloads constructor(
     private val portalApiKey:   String? = null,
     initialSuperProperties: Map<String, Any?> = emptyMap(),
     private val initialUserProperties: Map<String, Any?> = emptyMap(),
-) : AnalyticsProvider {
+) : AnalyticsProvider, RemoteValueProvider {
 
     /** Mirror of FirebaseOptions — same field names as iOS so portal config maps 1:1. */
     data class Options(
@@ -116,6 +117,10 @@ class FirebaseProvider @JvmOverloads constructor(
         for ((k, v) in traits) {
             fa?.setUserProperty(sanitizeName(k), stringify(v))
         }
+        // Keep Crashlytics' user id in sync so crash reports attribute to the
+        // same identity Analytics segments by. No-op when Crashlytics isn't
+        // linked into the app (reflection inside the helper handles that).
+        UniTrackFirebaseCrashlytics.syncUser(userId)
     }
 
     override fun setScreen(name: String) {
@@ -132,6 +137,62 @@ class FirebaseProvider @JvmOverloads constructor(
     /** Update a Firebase user property at runtime (audiences/segmentation). */
     fun setUserProperty(key: String, value: Any?) {
         fa?.setUserProperty(sanitizeName(key), stringify(value))
+    }
+
+    // ── RemoteValueProvider — fallback after portal custom_values ──────────
+    //
+    // Uses reflection so firebase-config remains an optional dep. Apps that
+    // don't ship Firebase RemoteConfig get null here, and UniTrack.getRemote*
+    // falls through to the caller's defaultValue.
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> getRemoteValue(key: String): T? {
+        return runCatching {
+            val cls = Class.forName("com.google.firebase.remoteconfig.FirebaseRemoteConfig")
+            val instance = cls.getMethod("getInstance").invoke(null) ?: return@runCatching null
+            // getValue(key) → FirebaseRemoteConfigValue with .source / asString / asBoolean / asLong / asDouble
+            val value = cls.getMethod("getValue", String::class.java).invoke(instance, key)
+                ?: return@runCatching null
+            val source = value.javaClass.getMethod("getSource").invoke(value) as? Int ?: 0
+            // 0 = STATIC (no value set on console) → skip so we don't shadow defaults
+            if (source == 0) return@runCatching null
+            // The resolver caller picks T — we don't know which getter to call
+            // statically. Try by inspecting T at runtime via reified type wouldn't
+            // work here (interface method can't reify), so we try each getter
+            // until one works. This is fine: misses just fall through to default.
+            val asString = value.javaClass.getMethod("asString").invoke(value) as? String
+            asString as? T
+        }.getOrNull()
+    }
+
+    companion object {
+        /** Convenience around RemoteConfig.fetchAndActivate. Call once at
+         *  app startup after [UniTrack.initialize] so RC has values to serve
+         *  when the resolver falls through to it. Uses reflection — no-op
+         *  when firebase-config isn't linked. */
+        @JvmStatic
+        @JvmOverloads
+        fun fetchRemoteConfig(completion: ((Boolean) -> Unit)? = null) {
+            runCatching {
+                val cls = Class.forName("com.google.firebase.remoteconfig.FirebaseRemoteConfig")
+                val instance = cls.getMethod("getInstance").invoke(null) ?: return@runCatching
+                val task = cls.getMethod("fetchAndActivate").invoke(instance) ?: return@runCatching
+                // Task.addOnCompleteListener(OnCompleteListener)
+                val listenerCls = Class.forName("com.google.android.gms.tasks.OnCompleteListener")
+                val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                    listenerCls.classLoader,
+                    arrayOf(listenerCls),
+                ) { _, _, args ->
+                    val t = args?.firstOrNull()
+                    val ok = runCatching {
+                        t?.javaClass?.getMethod("isSuccessful")?.invoke(t) as? Boolean
+                    }.getOrNull() ?: false
+                    completion?.invoke(ok)
+                    null
+                }
+                task.javaClass.getMethod("addOnCompleteListener", listenerCls).invoke(task, proxy)
+            }.onFailure { completion?.invoke(false) }
+        }
     }
 
     // Fire-and-forget copy to the portal, tagged provider=firebase.

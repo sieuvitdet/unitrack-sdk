@@ -25,8 +25,109 @@ object UniTrack {
 
     // Registered third-party providers (Snowplow, Firebase, …). Every event is
     // forwarded to each one. Empty by default — core has zero such dependencies.
-    private val providers = mutableListOf<AnalyticsProvider>()
+    // Internal so RemoteValueProvider lookup can iterate the list.
+    internal val providers = mutableListOf<AnalyticsProvider>()
     private var appRef: Application? = null
+
+    // Device bag (model, OS, app version, network_*) the core stamps onto
+    // every event. Snapshot at init so providers (Snowplow) can build their
+    // own application_context entity from the same source the wire payload
+    // uses, without re-running platform queries.
+    internal var cachedDeviceBag: Map<String, Any?> = emptyMap()
+
+    /** Device/app metadata bag captured at init (platform, app_version,
+     *  network_*, device_*). SnowplowProvider attaches this as the
+     *  `application_context` entity. Empty before initialize(). */
+    @JvmStatic
+    fun applicationContext(): Map<String, Any?> = cachedDeviceBag
+
+    /** Parse the JSON the core consumes back into a Kotlin map. */
+    private fun parseDeviceBag(json: String): Map<String, Any?> = runCatching {
+        val o = org.json.JSONObject(json)
+        buildMap {
+            o.keys().forEach { k -> put(k, o.opt(k)) }
+        }
+    }.getOrDefault(emptyMap())
+
+    // ── Remote value resolver (iOS parity) ─────────────────────────────────
+    //
+    // Resolve runtime values in order:
+    //   1. Portal sdk_config.custom_values[key] (operator-edited)
+    //   2. Any registered RemoteValueProvider (FirebaseProvider conforms)
+    //   3. Caller's defaultValue
+    //
+    // Portal first lets ops override Firebase RC without touching the app
+    // or Firebase Console — useful for incident response + incremental
+    // migration off Firebase.
+
+    @JvmStatic
+    fun getRemoteString(key: String, default: String): String {
+        portalRemoteValue<String>(key)?.let { return it }
+        providers.forEach { p ->
+            if (p is RemoteValueProvider) p.getRemoteValue<String>(key)?.let { return it }
+        }
+        return default
+    }
+
+    @JvmStatic
+    fun getRemoteInt(key: String, default: Int): Int {
+        portalRemoteValue<Int>(key)?.let { return it }
+        providers.forEach { p ->
+            if (p is RemoteValueProvider) p.getRemoteValue<Int>(key)?.let { return it }
+        }
+        return default
+    }
+
+    @JvmStatic
+    fun getRemoteLong(key: String, default: Long): Long {
+        portalRemoteValue<Long>(key)?.let { return it }
+        providers.forEach { p ->
+            if (p is RemoteValueProvider) p.getRemoteValue<Long>(key)?.let { return it }
+        }
+        return default
+    }
+
+    @JvmStatic
+    fun getRemoteDouble(key: String, default: Double): Double {
+        portalRemoteValue<Double>(key)?.let { return it }
+        providers.forEach { p ->
+            if (p is RemoteValueProvider) p.getRemoteValue<Double>(key)?.let { return it }
+        }
+        return default
+    }
+
+    @JvmStatic
+    fun getRemoteBoolean(key: String, default: Boolean): Boolean {
+        portalRemoteValue<Boolean>(key)?.let { return it }
+        providers.forEach { p ->
+            if (p is RemoteValueProvider) p.getRemoteValue<Boolean>(key)?.let { return it }
+        }
+        return default
+    }
+
+    /** Pull [key] out of [UniTrackRemoteConfig.latest].customValues and
+     *  coerce to T. Returns null if no fetch happened yet or the key is
+     *  missing or the value can't be cast (config bug, caller falls back
+     *  to default). */
+    @Suppress("UNCHECKED_CAST")
+    private inline fun <reified T> portalRemoteValue(key: String): T? {
+        val bag = UniTrackRemoteConfig.latest?.customValues ?: return null
+        if (!bag.has(key)) return null
+        val raw = bag.opt(key) ?: return null
+        return when (T::class) {
+            String::class  -> raw.toString() as? T
+            Int::class     -> (raw as? Number)?.toInt() as? T
+            Long::class    -> (raw as? Number)?.toLong() as? T
+            Double::class  -> (raw as? Number)?.toDouble() as? T
+            Boolean::class -> when (raw) {
+                is Boolean -> raw as T
+                is String  -> raw.toBooleanStrictOrNull() as? T
+                is Number  -> (raw.toInt() != 0) as T
+                else -> null
+            }
+            else -> null
+        }
+    }
 
     /**
      * Per-event Log of what flows through UniTrack/Snowplow/Firebase. Default ON
@@ -127,8 +228,13 @@ object UniTrack {
         NativeBridge.init(config.apiKey, cfgJson, PLATFORM_ANDROID)
 
         // Attach device/app metadata to every event (model, OS, app version,
-        // network type, root status, …) — collected once here.
-        NativeBridge.setDeviceInfo(DeviceInfo.json(app))
+        // network type, root status, …) — collected once here. Snapshot is
+        // kept on the singleton so providers building their own context
+        // entities (vd Snowplow application_context) read the same source
+        // the wire payload uses, without re-running the platform queries.
+        val deviceJson = DeviceInfo.json(app)
+        NativeBridge.setDeviceInfo(deviceJson)
+        cachedDeviceBag = parseDeviceBag(deviceJson)
 
         // Mark initialized BEFORE installing auto-capture: install() may emit a
         // setScreen for the already-resumed activity (when bootstrap is async),
@@ -197,6 +303,67 @@ object UniTrack {
     fun reset() {
         forEachProvider { it.setUser(null, emptyMap()) }
         if (initialized) NativeBridge.reset()
+    }
+
+    // ── Session API (iOS parity) ───────────────────────────────────────────
+    //
+    // SessionManager in core C++ persists session_id + session_index +
+    // previous_session_id across launches via session.json. These wrappers
+    // expose them so apps don't maintain a duplicate (resetting-to-0)
+    // counter on the binding side.
+
+    /** UUID of the active session. Empty before initialize(). Persists across
+     *  app restarts within the 30-min inactivity timeout. */
+    @JvmStatic
+    fun currentSessionId(): String =
+        if (initialized) NativeBridge.currentSessionId() else ""
+
+    /** Lifetime session counter. 1 on first install, +1 per rotation
+     *  (timeout or manual). Persists across app restarts. Returns 0 before
+     *  initialize(). */
+    @JvmStatic
+    fun sessionIndex(): Long =
+        if (initialized) NativeBridge.sessionIndex() else 0L
+
+    /** UUID of the previous (just-closed) session — empty on the very first
+     *  session after install. Pair with sessionIndex() in session_started
+     *  payloads so backends can chain consecutive sessions. */
+    @JvmStatic
+    fun previousSessionId(): String =
+        if (initialized) NativeBridge.previousSessionId() else ""
+
+    /** Force a session rotation now. Bumps sessionIndex(), mints a new
+     *  currentSessionId(), records the just-closed UUID as previousSessionId().
+     *  Use on logout / switch-account / new-conversation boundaries when the
+     *  timeout-based rotation isn't enough. */
+    @JvmStatic
+    fun rotateSession() {
+        if (initialized) NativeBridge.rotateSession()
+    }
+
+    // Session-stat sidebag — counters the binding tracks so session_ended
+    // payloads can carry screen_count + had_error + had_crash without the
+    // app having to keep its own state. Reset via resetSessionStats() at
+    // the start of each session.
+    @Volatile private var sessionScreenCount: Int = 0
+    @Volatile private var sessionHadError: Boolean = false
+    @Volatile private var sessionHadCrash: Boolean = false
+
+    @JvmStatic fun sessionScreenCount(): Int  = sessionScreenCount
+    @JvmStatic fun sessionHadError(): Boolean = sessionHadError
+    @JvmStatic fun sessionHadCrash(): Boolean = sessionHadCrash
+
+    @JvmStatic fun incrementScreenCount() { sessionScreenCount += 1 }
+    @JvmStatic fun markSessionError()     { sessionHadError = true }
+    @JvmStatic fun markSessionCrash()     { sessionHadCrash = true }
+
+    /** Reset the per-session counters — typically called from the app's own
+     *  session_started handler after a rotation. */
+    @JvmStatic
+    fun resetSessionStats() {
+        sessionScreenCount = 0
+        sessionHadError = false
+        sessionHadCrash = false
     }
 
     // ── W3C distributed tracing ────────────────────────────────────────────

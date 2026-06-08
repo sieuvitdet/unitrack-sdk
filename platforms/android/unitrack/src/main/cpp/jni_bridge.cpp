@@ -234,4 +234,37 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeNewTrace(JNIEnv* env, jobject) {
     return out;
 }
 
+// ── Session API (iOS parity: currentSessionId / sessionIndex / previousSessionId / rotate) ─
+//
+// Core already persists session_id + session_index + previous_session_id
+// across app launches via session.json. These bridges just expose those
+// values to Kotlin so apps don't maintain a duplicate (resetting-to-0)
+// counter on the binding side.
+
+JNIEXPORT jstring JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeCurrentSessionId(
+    JNIEnv* env, jobject, jlong p) {
+    const char* s = ut_current_session_id(ctx_of(p));
+    return env->NewStringUTF(s ? s : "");
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSessionIndex(
+    JNIEnv* /*env*/, jobject, jlong p) {
+    return static_cast<jlong>(ut_current_session_index(ctx_of(p)));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativePreviousSessionId(
+    JNIEnv* env, jobject, jlong p) {
+    const char* s = ut_previous_session_id(ctx_of(p));
+    return env->NewStringUTF(s ? s : "");
+}
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeRotateSession(
+    JNIEnv* /*env*/, jobject, jlong p) {
+    ut_rotate_session(ctx_of(p));
+}
+
 } // extern "C"

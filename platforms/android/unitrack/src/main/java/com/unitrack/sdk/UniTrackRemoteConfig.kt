@@ -24,9 +24,34 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
     val snowplow: JSONObject get() = raw.optJSONObject("snowplow") ?: JSONObject()
     val firebase: JSONObject get() = raw.optJSONObject("firebase") ?: JSONObject()
 
+    /** Arbitrary key/value bag the portal serves to the app at runtime —
+     *  the source of truth for [UniTrack.getRemoteValue]. App reads
+     *  `feature_x`, `experiment_y` here; portal operator edits via the
+     *  Config tab. Falls back to a Firebase RemoteConfig provider if a key
+     *  is absent. */
+    val customValues: JSONObject
+        get() = sdkConfig.optJSONObject("custom_values") ?: JSONObject()
+
     companion object {
         private const val PREFS = "unitrack"
         private const val KEY = "remote_config"
+
+        /** Most recent fetched config, or null before the first successful
+         *  fetch. Updated by [fetch] on success + by [primeLatest] from the
+         *  on-disk cache. The resolver consults this to answer
+         *  [UniTrack.getRemoteValue] without threading apiKey through. */
+        @Volatile
+        @JvmStatic
+        var latest: UniTrackRemoteConfig? = null
+            private set
+
+        /** Prime [latest] from the on-disk cache. Call once at app launch
+         *  (before the async fetch returns) so the very first
+         *  getRemoteValue() query already has portal values to consult. */
+        @JvmStatic
+        fun primeLatest(ctx: Context, apiKey: String) {
+            if (latest == null) latest = cached(ctx, apiKey)
+        }
 
         /**
          * Fetch config in the background; [callback] is always called once with a
@@ -67,6 +92,7 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
                         val json = JSONObject(body)
                         cache(ctx, apiKey, body)
                         result = UniTrackRemoteConfig(json)
+                        latest = result   // process-wide snapshot for getRemoteValue
                     }
                     conn.disconnect()
                 } catch (e: Exception) {
