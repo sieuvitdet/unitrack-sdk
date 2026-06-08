@@ -109,6 +109,22 @@ public final class UniTrack {
         return String(cString: cstr)
     }
 
+    /// Force a session rotation right now. Bumps sessionIndex(), mints a new
+    /// currentSessionId(), stamps the just-closed session as previousSessionId().
+    ///
+    /// Call this from app boundaries the timeout doesn't model:
+    ///   • Logout / switch account
+    ///   • App-level "new conversation" / "new transaction" handoffs
+    ///   • Test code that wants to verify session_index increments without
+    ///     waiting for the 30-min inactivity timeout
+    ///
+    /// After this call, the next session_started event the app fires will
+    /// carry the bumped index + previous session id automatically.
+    public static func rotateSession() {
+        guard let ctx = shared.context else { return }
+        ut_rotate_session(ctx)
+    }
+
     /// When the active session started (monotonic clock-based). Nil before init.
     public static func sessionStartedAt() -> Date? {
         shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }

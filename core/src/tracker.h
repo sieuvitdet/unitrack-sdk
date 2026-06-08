@@ -48,6 +48,16 @@ public:
     // previous_session_id so backend can chain consecutive sessions.
     std::string previous_session_id()   { return session_.previous_session_id(); }
 
+    // Force a session rotation right now — bumps session_index, mints a
+    // new UUID, records the closed session as previous. Apps call this on
+    // logout / switch-account / "new conversation" boundaries when the
+    // timeout-based rotation isn't enough. The reason is stamped on the
+    // next session_end the SDK fires so analytics can tell timeout from
+    // manual rotations apart.
+    void rotate_session(SessionEndReason reason = SessionEndReason::manual_reset) {
+        session_.rotate(reason);
+    }
+
     // Auto-capture entry points.
     void log_tap(const std::string& element_key,
                  const std::string& screen,

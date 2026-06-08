@@ -208,4 +208,14 @@ const char* ut_previous_session_id(ut_context* ctx) {
     return buf.c_str();
 }
 
+// Force-rotate the active session. Bumps session_index, mints a new UUID,
+// stamps the just-closed session as previous_session_id. Bindings call
+// this on logout / switch-account / app-level "new context" boundaries —
+// the timeout-based rotation handles only inactivity. No-op when ctx is
+// null.
+void ut_rotate_session(ut_context* ctx) {
+    if (!ctx || !ctx->tracker) return;
+    ctx->tracker->rotate_session();
+}
+
 } // extern "C"

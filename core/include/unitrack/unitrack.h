@@ -231,6 +231,14 @@ UT_EXPORT int64_t ut_current_session_index(ut_context* ctx);
  * thread-local buffer convention as ut_current_session_id. */
 UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
 
+/* Force a session rotation right now: bumps session_index, mints a new UUID,
+ * records the just-closed session as previous_session_id. Apps call this on
+ * logout / switch-account / app-level "new context" boundaries when the
+ * timeout-based rotation (30 min default) isn't enough. No-op when ctx is
+ * null. The next session_end fired by the SDK carries reason=manual_reset
+ * so analytics can tell timeout vs. manual rotations apart. */
+UT_EXPORT void ut_rotate_session(ut_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif
