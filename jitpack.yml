@@ -5,6 +5,13 @@ jdk:
 # defaults to `./gradlew install` at the root — we redirect to the right place
 # and publish the :unitrack, :unitrack-firebase, :unitrack-snowplow modules to
 # the local Maven repo that JitPack hosts under the resulting tag.
+#
+# Step 1 (fetch_sqlite.sh): the SQLite amalgamation source is gitignored
+# (~10 MB, gets regenerated per upstream release). JitPack clones the tag
+# without those files, so the CMake build fails with
+#   "core/third_party/sqlite3/sqlite3.{c,h} not found"
+# unless we download them first. The script is idempotent + offline-safe.
 install:
+  - bash scripts/fetch_sqlite.sh
   - cd platforms/android
   - ./gradlew :unitrack:publishToMavenLocal :unitrack-firebase:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -x test
