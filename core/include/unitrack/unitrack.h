@@ -246,6 +246,16 @@ UT_EXPORT void ut_rotate_session(ut_context* ctx);
  * showing what's still pending while the device is offline. */
 UT_EXPORT const char* ut_pending_event_counts(ut_context* ctx);
 
+/* Flush-success callback. Registered once per ut_context; fires from the
+ * worker thread after each successful batch upload. counts_json is the
+ * per-event_name breakdown of THAT batch (vd `{"ev_click":3,"ev_result":2}`).
+ * Pointer is owned by the SDK and only valid for the duration of the call —
+ * bindings must copy if they need to keep it. Pass fn=NULL to clear. */
+typedef void (*ut_flush_success_fn)(const char* counts_json, void* userdata);
+UT_EXPORT void ut_set_flush_callback(ut_context* ctx,
+                                     ut_flush_success_fn fn,
+                                     void* userdata);
+
 #ifdef __cplusplus
 }
 #endif

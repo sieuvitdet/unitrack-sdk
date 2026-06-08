@@ -382,6 +382,35 @@ void Tracker::do_flush() {
     if (transport_.send(o.str())) {
         queue_.remove(ids);
         UT_LOGD("Tracker", "flushed " + std::to_string(ids.size()) + " events");
+
+        // Notify the binding so apps can show a "Flushed: 3 ev_click, ..."
+        // toast on real-device offline tests. Tally event_name from the batch
+        // itself (already have it in DequeuedEvent.event.event_name — no need
+        // to re-parse payload). Snapshot the callback under the lock so a
+        // concurrent set_flush_callback can't tear the function/userdata pair.
+        FlushCallback cb;  void* cb_ud;
+        { std::lock_guard<std::mutex> lk(state_mu_); cb = flush_cb_; cb_ud = flush_cb_data_; }
+        if (cb) {
+            std::vector<std::pair<std::string, int>> counts;
+            counts.reserve(8);
+            for (auto& d : batch) {
+                bool found = false;
+                for (auto& p : counts) {
+                    if (p.first == d.event.event_name) { p.second += 1; found = true; break; }
+                }
+                if (!found) counts.emplace_back(d.event.event_name, 1);
+            }
+            std::ostringstream cj;
+            cj << '{';
+            bool cfirst = true;
+            for (auto& p : counts) {
+                if (!cfirst) cj << ',';
+                cfirst = false;
+                cj << '"' << p.first << "\":" << p.second;
+            }
+            cj << '}';
+            cb(cj.str().c_str(), cb_ud);
+        }
     } else {
         // Failed: keep the events, but back off exponentially so a downed
         // server isn't retried every flush interval.

@@ -135,6 +135,16 @@ object NativeBridge {
     fun pendingEventCountsJson(): String =
         if (ctxPtr != 0L) nativePendingEventCounts(ctxPtr) else "{}"
 
+    // Flush-success listener. The JNI side keeps a global ref to this object
+    // and invokes onFlushed(counts_json) from the SDK worker thread. Pass null
+    // to clear. Replacing an existing listener also clears the previous ref.
+    fun interface FlushListener {
+        fun onFlushed(countsJson: String)
+    }
+    fun setFlushListener(listener: FlushListener?) {
+        if (ctxPtr != 0L) nativeSetFlushListener(ctxPtr, listener)
+    }
+
     fun shutdown() {
         if (ctxPtr != 0L) {
             nativeShutdown(ctxPtr)
@@ -175,4 +185,8 @@ object NativeBridge {
     // Offline-queue counts grouped by event_name. Returns JSON object like
     // {"ev_click":3,"ev_result":2}. Empty queue → "{}".
     private external fun nativePendingEventCounts(ctx: Long): String
+    // Flush-success listener. JNI side keeps a single global ref to the
+    // FlushListener object; pass null to clear. Fires from the SDK worker
+    // thread — Kotlin handler must hop to Main before touching UI.
+    private external fun nativeSetFlushListener(ctx: Long, listener: FlushListener?)
 }

@@ -228,4 +228,13 @@ const char* ut_pending_event_counts(ut_context* ctx) {
     return buf.c_str();
 }
 
+// Register a flush-success callback. The C function-pointer signature matches
+// Tracker::FlushCallback so no shim is needed — straight forward into the
+// C++ method. Pass fn=NULL to clear.
+void ut_set_flush_callback(ut_context* ctx, ut_flush_success_fn fn, void* userdata) {
+    if (!ctx || !ctx->tracker) return;
+    ctx->tracker->set_flush_callback(
+        reinterpret_cast<unitrack::Tracker::FlushCallback>(fn), userdata);
+}
+
 } // extern "C"

@@ -82,6 +82,12 @@ public final class UniTrack {
     private var sessionHadCrashSnapshot: Bool = false
     private var sessionTimeoutMsValue: Int = 1_800_000
 
+    // App-supplied closure fired on every successful batch flush. Stored on
+    // the singleton because the C callback bridge needs a stable pointer; we
+    // hand the singleton to ut_set_flush_callback as `userdata` and read this
+    // back inside the thunk. nil when no handler is set.
+    fileprivate var flushSuccessHandler: (([String: Int]) -> Void)?
+
     // MARK: - Session helpers (used by AppLifecycleObserver + app code)
 
     /// Current session id (UUID v4). Empty before initialize().
@@ -142,6 +148,37 @@ public final class UniTrack {
             return [:]
         }
         return obj
+    }
+
+    /// Fires after each successful batch upload with the per-event_name
+    /// breakdown of that batch (vd `["ev_click": 3, "ev_result": 2]`).
+    /// Apps use this to pop a toast during real-device offline testing
+    /// (airplane mode → tap around → mạng lại → toast).
+    ///
+    /// The handler is invoked on a background worker thread — hop to main
+    /// before touching UIKit. Pass `nil` to clear. Replacing a previously
+    /// set handler is allowed; only the latest survives.
+    public static func onFlushCompleted(_ handler: (([String: Int]) -> Void)?) {
+        shared.flushSuccessHandler = handler
+        guard let ctx = shared.context else { return }
+        if handler == nil {
+            ut_set_flush_callback(ctx, nil, nil)
+            return
+        }
+        // userdata = shared instance (immortal singleton) — safe to pass as an
+        // unretained pointer. The thunk reads `flushSuccessHandler` off it,
+        // so we don't need to capture the closure inside a Box ourselves.
+        let unmanaged = Unmanaged.passUnretained(shared).toOpaque()
+        ut_set_flush_callback(ctx, { (cjson, ud) in
+            guard let cjson = cjson, let ud = ud else { return }
+            let s = String(cString: cjson)
+            let owner = Unmanaged<UniTrack>.fromOpaque(ud).takeUnretainedValue()
+            guard let h = owner.flushSuccessHandler,
+                  let data = s.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
+            else { return }
+            h(obj)
+        }, unmanaged)
     }
 
     /// When the active session started (monotonic clock-based). Nil before init.

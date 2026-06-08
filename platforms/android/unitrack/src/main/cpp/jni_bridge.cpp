@@ -274,4 +274,65 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativePendingEventCounts(
     return env->NewStringUTF(s ? s : "{}");
 }
 
+// ─── flush-success callback ─────────────────────────────────────────────────
+// One JVM-side listener is stored as a global ref. The C callback runs on the
+// SDK worker thread, attaches the current native thread to the JVM (Android
+// worker threads aren't auto-attached), then calls the listener's onFlushed.
+// Pass listener=null to clear.
+
+namespace {
+
+static jobject     g_flush_listener   = nullptr;   // global ref to Kotlin lambda holder
+static jmethodID   g_flush_listener_m = nullptr;   // FlushListener.onFlushed(String)
+static JavaVM*     g_vm_for_flush     = nullptr;
+
+extern "C" void unitrack_flush_thunk(const char* counts_json, void* /*ud*/) {
+    if (!g_vm_for_flush || !g_flush_listener || !g_flush_listener_m) return;
+    JNIEnv* env = nullptr;
+    bool detach = false;
+    jint st = g_vm_for_flush->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (st == JNI_EDETACHED) {
+        if (g_vm_for_flush->AttachCurrentThread(&env, nullptr) != 0) return;
+        detach = true;
+    } else if (st != JNI_OK || !env) {
+        return;
+    }
+    jstring js = env->NewStringUTF(counts_json ? counts_json : "{}");
+    env->CallVoidMethod(g_flush_listener, g_flush_listener_m, js);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    env->DeleteLocalRef(js);
+    if (detach) g_vm_for_flush->DetachCurrentThread();
+}
+
+} // namespace
+
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetFlushListener(
+    JNIEnv* env, jobject, jlong p, jobject listener) {
+    if (g_flush_listener) {
+        env->DeleteGlobalRef(g_flush_listener);
+        g_flush_listener   = nullptr;
+        g_flush_listener_m = nullptr;
+    }
+    ut_context* ctx = ctx_of(p);
+    if (!ctx) return;
+
+    if (!listener) {
+        ut_set_flush_callback(ctx, nullptr, nullptr);
+        return;
+    }
+
+    env->GetJavaVM(&g_vm_for_flush);
+    g_flush_listener = env->NewGlobalRef(listener);
+    jclass cls = env->GetObjectClass(g_flush_listener);
+    g_flush_listener_m = env->GetMethodID(cls, "onFlushed", "(Ljava/lang/String;)V");
+    env->DeleteLocalRef(cls);
+    if (!g_flush_listener_m) {
+        env->DeleteGlobalRef(g_flush_listener);
+        g_flush_listener = nullptr;
+        return;
+    }
+    ut_set_flush_callback(ctx, &unitrack_flush_thunk, nullptr);
+}
+
 } // extern "C"

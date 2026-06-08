@@ -84,6 +84,19 @@ public:
     // a JSON object string: {"ev_click":3,"ev_result":2}. Empty queue → "{}".
     std::string pending_event_counts_json();
 
+    // Flush-success callback. Fires once per do_flush() that lands a batch
+    // server-side; payload is the per-event_name breakdown of THAT batch
+    // (vd `{"ev_click":3,"ev_result":2}`). Apps wire this to a UIToast so a
+    // real-device airplane-mode test shows "Flushed 5 ev_click..." the moment
+    // network comes back. Fires on the worker thread — wrappers must hop to
+    // main before touching UI. Pass fn=nullptr to clear.
+    using FlushCallback = void(*)(const char* counts_json, void* userdata);
+    void set_flush_callback(FlushCallback fn, void* userdata) {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        flush_cb_      = fn;
+        flush_cb_data_ = userdata;
+    }
+
     void set_enabled(bool e) { enabled_.store(e); }
     bool is_enabled() const  { return enabled_.load(); }
 
@@ -129,6 +142,13 @@ private:
     long long        init_time_ms_ = 0;   // when the tracker initialized (for crash_on_launch)
     std::string      started_session_;    // last session id we emitted session_start for (dedupe)
     std::string      recovered_crash_json_; // popped via pop_recovered_crash() by binding
+
+    // Flush-success notification. Set via set_flush_callback(); fired from the
+    // worker thread inside do_flush() after a successful upload. Read under
+    // state_mu_ then released before calling so the callback can't deadlock
+    // against further track() calls.
+    FlushCallback    flush_cb_      = nullptr;
+    void*            flush_cb_data_ = nullptr;
 
     // Window after init within which a crash counts as a "launch crash".
     static constexpr long long kLaunchCrashWindowMs = 5000;

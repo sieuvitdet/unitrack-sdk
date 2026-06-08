@@ -349,6 +349,28 @@ object UniTrack {
     fun pendingEventCounts(): Map<String, Int> {
         if (!initialized) return emptyMap()
         val json = NativeBridge.pendingEventCountsJson()
+        return parseCountsJson(json)
+    }
+
+    /** Fires after each successful batch upload with the per-event_name
+     *  breakdown of that batch (`{"ev_click": 3, "ev_result": 2}`). Apps
+     *  use this to pop a toast during real-device offline testing.
+     *
+     *  Handler runs on the SDK worker thread — hop to Main before touching
+     *  UI. Pass `null` to clear. */
+    @JvmStatic
+    fun onFlushCompleted(handler: ((Map<String, Int>) -> Unit)?) {
+        if (!initialized) return
+        if (handler == null) {
+            NativeBridge.setFlushListener(null)
+            return
+        }
+        NativeBridge.setFlushListener(NativeBridge.FlushListener { json ->
+            handler(parseCountsJson(json))
+        })
+    }
+
+    private fun parseCountsJson(json: String): Map<String, Int> {
         if (json.isBlank() || json == "{}") return emptyMap()
         return try {
             val obj = JSONObject(json)
