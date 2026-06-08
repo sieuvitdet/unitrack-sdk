@@ -38,29 +38,19 @@ import SnowplowTracker
     @objc var urlEndpoint: URL? { inner.urlEndpoint }
 
     @objc func sendRequests(_ requests: [Request]) -> [RequestResult] {
-        // Log every batch we're about to send. Each request typically carries
-        // 1-50 event payloads (depends on emitter.bufferOption). We dump the
-        // payload as JSON so the integrator can copy it straight into a
-        // Snowplow Mini Iglu validator if the collector rejects it.
-        for (i, req) in requests.enumerated() {
-            let body = Self.payloadJSON(req.payload)
-            let url = inner.urlEndpoint?.absoluteString ?? "(no endpoint)"
-            UniTrack.log("[UniTrackSnowplow→net] POST %@ batch=%d/%d events=%d body=%@",
-                         url, i + 1, requests.count, req.emitterEventIds.count, body)
-        }
-
+        // Body of every batch was logged here previously — useful for
+        // first-time wiring, noise after that (the same JSON is already in
+        // the "─── Snowplow Tracking ───" envelope UniTrack logs at the
+        // convention layer). Keep only the wire outcome so 400/-1 failures
+        // still surface immediately.
         let results = inner.sendRequests(requests)
 
-        // Log the outcome of each request: status code (200 / 400 / 500),
-        // the store ids the collector accepted, and the oversize flag (set
-        // when 1 event alone exceeds the Snowplow payload size cap).
         for (i, result) in results.enumerated() {
             let status = result.statusCode ?? -1
             let outcome = result.isSuccessful ? "OK" : "FAIL"
-            UniTrack.log("[UniTrackSnowplow→net] %@ %d batch=%d/%d store_ids=%@ oversize=%@",
+            UniTrack.log("[UniTrackSnowplow→net] %@ %d batch=%d/%d events=%d",
                          outcome, status, i + 1, results.count,
-                         String(describing: result.storeIds),
-                         result.isOversize ? "true" : "false")
+                         requests.indices.contains(i) ? requests[i].emitterEventIds.count : 0)
         }
         return results
     }

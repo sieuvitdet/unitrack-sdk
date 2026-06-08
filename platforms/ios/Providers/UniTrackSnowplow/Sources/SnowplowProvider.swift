@@ -181,25 +181,16 @@ public final class SnowplowProvider: AnalyticsProvider {
         //
         // Apps that NEED a specific Snowplow auto event mirrored should add
         // their own per-schema plugin via the SnowplowTracker SDK directly.
-        let pluginVendorAllowlist = self.igluVendor ?? ""
+        // Plugin kept registered (empty body) so future team needs that want
+        // a per-schema afterTrack hook can extend it without re-creating the
+        // tracker. We deliberately don't log auto-tracked Snowplow internal
+        // events (screen_end, application_background, install, …) because:
+        //   • The "─── Snowplow Tracking ───" envelope already prints the
+        //     business events the integrator owns.
+        //   • Snowplow internals are noise the team doesn't act on.
         let plugin = PluginConfiguration(identifier: "UniTrackForwarder")
-            .afterTrack { inspectable in
-                let schema = inspectable.schema ?? "(no schema)"
-                let payload = inspectable.payload
-                UniTrack.log("[UniTrackSnowplow] auto-tracked schema=%@ payload=%@",
-                             schema,
-                             String(describing: payload))
-                // Skip mirror for Snowplow internal events — only mirror
-                // events from the team's own iglu vendor so portal queries
-                // match the convention names.
-                if !pluginVendorAllowlist.isEmpty,
-                   !schema.contains("/" + pluginVendorAllowlist + "/") {
-                    return
-                }
-                // (Reserved hook — currently no team event reaches here
-                // because every team event already flows through
-                // SnowplowProvider.track(). Kept as a stub so future custom
-                // tracker calls that bypass the provider still get mirrored.)
+            .afterTrack { _ in
+                // No-op. See comment above.
             }
 
         tracker = Snowplow.createTracker(namespace: namespace,
