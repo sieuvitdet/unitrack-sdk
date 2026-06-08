@@ -148,6 +148,15 @@ public final class SnowplowProvider: AnalyticsProvider {
             .installAutotracking(options.installAutotracking)
             .deepLinkContext(options.deepLinkContext)
             .userAnonymisation(options.userAnonymisation)
+            // Mute the Snowplow tracker's internal Logger so DEBUG builds
+            // don't spam "Connection error: -" + every retry log line into
+            // the Xcode console. Without this, the Snowplow Logger setter
+            // auto-flips .off → .error whenever DEBUG is defined (see
+            // snowplow Logger.swift), which becomes noise once the
+            // integrator has confirmed the collector is reachable. Keep
+            // UniTrack.log lines (which are gated by UniTrack.verboseLogging)
+            // as the single source of console output.
+            .logLevel(.off)
 
         // Plugin: hook every event the Snowplow tracker emits (including the
         // auto-tracked ones — application_foreground/background, screen views,
