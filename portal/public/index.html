@@ -151,6 +151,20 @@
   </div>
 </div>
 
+<!-- Config (remote) drawer — opens from the header ⚙ Config button. Wider
+     than the event drawer because the config form is dense; defaults to
+     75vw with a 1100px cap. Body is populated each open by mounting the
+     SAME nodes renderConfig() already builds (move, not clone — so the
+     existing save handlers keep their references). -->
+<div class="drawer" id="cfgDrawer" style="width:min(1100px,75vw)">
+  <div class="dh">
+    <span style="font-size:14px;font-weight:600">⚙ Config (remote)</span>
+    <span class="mono muted" id="cfgDrawerSub" style="font-size:11px"></span>
+    <button id="cfgDrawerClose" title="Đóng (Esc)">×</button>
+  </div>
+  <div class="db" id="cfgDrawerBody"></div>
+</div>
+
 <dialog id="projDlg">
   <div class="dlg-h">Tạo dự án mới<button onclick="projDlg.close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
   <div class="dlg-b">
@@ -184,9 +198,26 @@
 
 <script>
 const BASE = location.pathname.replace(/\/index\.html$/,'').replace(/\/$/,'');
+// Identity cache helpers — declared early so api() (line below) can call
+// clearMeCache on a 401 even before the boot() definition further down.
+const ME_CACHE_KEY = 'unitrack.me.v1';
+function readMeCache(){
+  try{
+    const raw = localStorage.getItem(ME_CACHE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (!v || !v.email) return null;
+    return v;
+  }catch(_){ return null; }
+}
+function writeMeCache(v){
+  try{ localStorage.setItem(ME_CACHE_KEY, JSON.stringify(v)); }catch(_){}
+}
+function clearMeCache(){ try{ localStorage.removeItem(ME_CACHE_KEY); }catch(_){} }
+
 async function api(p,o){
   const r=await fetch(BASE+p,o);
-  if(r.status===401){ me=null; renderAuth('login'); throw new Error('Phiên hết hạn'); }
+  if(r.status===401){ me=null; clearMeCache(); renderAuth('login'); throw new Error('Phiên hết hạn'); }
   const ct=r.headers.get('content-type')||'';
   const body=ct.includes('json')?await r.json().catch(()=>({})):await r.text();
   if(!r.ok) throw new Error((body&&body.error)||('HTTP '+r.status));
@@ -423,6 +454,7 @@ async function renderProject(){
       </div>
       <div class="row">
         <span class="keybox" title="API key">${esc(p.api_key)}</span>
+        <button class="btn ghost sm" id="cfgDrawerBtn" title="Mở Config (remote) — Snowplow / Firebase / W3C / Tên màn">⚙ Config</button>
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
       </div>
     </div>
@@ -456,6 +488,39 @@ async function renderProject(){
       <div id="tabBody"></div>
     </div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>go({tab:t.dataset.tab}));
+
+  // ⚙ Config drawer (header button). Mounts the SAME renderConfig() form
+  // into the right-side drawer so operators can edit Snowplow / Firebase /
+  // W3C / Tên màn without scrolling down to the tab. The drawer body uses
+  // a stable selector (#cfgDrawerBody) and renderConfig accepts a mountSel
+  // param so its handlers (cfSave, cfImport, smAdd, screen-labels…) still
+  // reference the form's IDs unchanged.
+  const cfgBtn   = document.getElementById('cfgDrawerBtn');
+  const cfgDrw   = document.getElementById('cfgDrawer');
+  const cfgSub   = document.getElementById('cfgDrawerSub');
+  const cfgClose = document.getElementById('cfgDrawerClose');
+  if (cfgBtn && cfgDrw && cfgClose) {
+    cfgBtn.onclick = async () => {
+      if (cfgSub) cfgSub.textContent = p.name;
+      // Render BEFORE opening so the form is already painted by the time
+      // the slide-in transition lands — looks instant, no half-built UI.
+      try { await renderConfig(pid, '#cfgDrawerBody'); }
+      catch (e) { $('#cfgDrawerBody').innerHTML =
+        `<div class="muted" style="padding:16px">Không tải được config: ${esc(e.message||e)}</div>`; }
+      cfgDrw.classList.add('open');
+      $('#scrim').classList.add('open');
+    };
+    const closeCfg = () => { cfgDrw.classList.remove('open'); $('#scrim').classList.remove('open'); };
+    cfgClose.onclick = closeCfg;
+    // ESC closes the drawer too. Bound on each render so it stays scoped
+    // to this project page; no leak across page transitions.
+    document.addEventListener('keydown', function escHandler(ev){
+      if (ev.key === 'Escape' && cfgDrw.classList.contains('open')) closeCfg();
+    });
+    // Clicking the scrim closes whichever drawer is open — the existing
+    // event-detail drawer already wires this; we piggy-back the same path.
+    $('#scrim').addEventListener('click', closeCfg);
+  }
 
   // Crash card → open the crash report dialog. Only wire when there's
   // something to show (the card only renders the cursor:pointer styling
@@ -832,14 +897,22 @@ function previewSnowplowPayload(eventName, props, ctx) {
   };
 }
 
-async function renderConfig(pid){
+async function renderConfig(pid, mountSel){
+  // Default mount = the tab body inside the project page. Pass another
+  // selector (vd #cfgDrawerBody) to render the SAME form into the right
+  // drawer triggered by the ⚙ Config header button. Either way the IDs
+  // inside the form are stable so every $('#cf...') handler below works
+  // unchanged — only ONE Config form can be alive at a time anyway.
+  mountSel = mountSel || '#tabBody';
+  const mount = $(mountSel);
+  if (!mount) return;
   const c = await api(`/api/projects/${pid}/config`);
   const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{}), tr=c.tracing||{};
   const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
   // Pull existing overrides so the override UI starts populated. Block-level
   // helper: returns the override object for `flavor` or {}.
   const ovGet = (block, flavor) => (block && block.flavor_overrides && block.flavor_overrides[flavor]) || {};
-  $('#tabBody').innerHTML = `
+  mount.innerHTML = `
     <div style="padding:16px;max-width:760px">
       <div class="muted" style="font-size:12px;margin-bottom:14px">
         App kéo cấu hình này về lúc khởi tạo (qua <span class="mono">GET /config</span>).
@@ -2049,7 +2122,10 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       });
     } catch (e) { toast('Lưu providers thất bại: ' + e.message, 'err'); }
 
-    toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
+    toast('Đã lưu config (v'+r.version+')');
+    // Re-render into whichever mount we're using (tab body OR drawer body)
+    // so the version line + form state refresh in place.
+    renderConfig(pid, mountSel);
   };
 
   // ── Export: download the whole config + sp_event_maps as a portable .json.
@@ -2109,7 +2185,7 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       const sections = (r.imported && r.imported.sections) || [];
       const spCount = (r.imported && r.imported.sp_event_maps) || 0;
       toast(`Đã import (v${r.version}): ${sections.length} mục + ${spCount} sp_event_map`);
-      renderConfig(pid);
+      renderConfig(pid, mountSel);
     } catch (e) {
       toast('Import lỗi: ' + (e && e.message || e), 'err');
     }
@@ -5314,15 +5390,57 @@ $('#scrim').onclick=()=>$('#dClose').click();
 setInterval(()=>{ if(me&&route.name==='project'&&route.tab==='logs'&&!$('#drawer').classList.contains('open')) renderLogs(route.pid); },5000);
 
 let me=null;
+// Identity cache helpers (readMeCache/writeMeCache/clearMeCache) are
+// declared at the top of the file so api() can use them on a 401 before
+// boot() runs.
+
+function renderSkeleton(){
+  // 200ms holding pattern while /auth/me resolves. Matches the post-login
+  // dashboard layout (nav strip + hero) so the eye doesn't jump when the
+  // real content swaps in.
+  $('#view').innerHTML = `
+    <div class="ut-skel" style="padding:24px;max-width:1100px;margin:0 auto">
+      <div style="height:32px;width:260px;background:var(--panel2);border-radius:6px;margin-bottom:18px"></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px">
+        ${Array(4).fill('<div style="height:84px;background:var(--panel2);border-radius:8px"></div>').join('')}
+      </div>
+      <div style="height:280px;background:var(--panel2);border-radius:8px"></div>
+    </div>
+    <style>.ut-skel{animation:utPulse 1.1s ease-in-out infinite}@keyframes utPulse{0%,100%{opacity:.55}50%{opacity:.9}}</style>`;
+}
+
 async function boot(){
-  // Show login form immediately — no blank screen while waiting for /auth/me
-  const isSignup=/[?&]signup=1/.test(location.search);
-  renderAuth(isSignup?'signup':'login');
-  // Then check if already logged in — if yes, replace with dashboard
+  const isSignup = /[?&]signup=1/.test(location.search);
+  const cached = readMeCache();
+
+  if (cached && !isSignup){
+    // Optimistic: render the authed shell using cached identity. The view
+    // itself is rendered by go() / hashToRoute() below — same path the live
+    // session takes — so the first paint already looks like the dashboard.
+    me = cached;
+    onAuthed();
+  } else {
+    // No cache (or explicit ?signup=1) — show the login form right away.
+    renderAuth(isSignup ? 'signup' : 'login');
+  }
+
+  // Always revalidate in the background. The server is source of truth: if
+  // the cookie is gone or the user was deleted, drop back to login.
   try{
-    const r=await fetch(BASE+'/auth/me');
-    if(r.ok){ me=await r.json(); onAuthed(); }
-  }catch(e){}
+    const r = await fetch(BASE+'/auth/me');
+    if (r.ok) {
+      const fresh = await r.json();
+      me = fresh; writeMeCache(fresh);
+      // If we showed the login form (no cache), now upgrade to the dashboard.
+      if (!cached) onAuthed();
+    } else if (cached) {
+      // Cache was stale → clear + bounce to login.
+      clearMeCache(); me = null; renderAuth('login');
+    }
+  } catch (_) {
+    // Offline / server unreachable: keep the optimistic render if we had a
+    // cache, otherwise the login form is already on screen.
+  }
 }
 function onAuthed(){
   $('#nav').hidden=false;
@@ -5342,7 +5460,7 @@ function onAuthed(){
 }
 $('#logout').onclick=async()=>{
   try{ await fetch(BASE+'/auth/logout',{method:'POST'}); }catch(e){}
-  me=null;
+  me=null; clearMeCache();
   renderAuth('login');
 };
 
@@ -5375,7 +5493,7 @@ function bindAuthForm(mode){
     const btn=$('#aSubmit'); if(btn) btn.disabled=true;
     const r=await fetch(`${BASE}/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const d=await r.json().catch(()=>({}));
-    if(r.ok){ me=d; onAuthed(); }
+    if(r.ok){ me=d; writeMeCache(d); onAuthed(); }
     else{
       const errEl=$('#aErr'); if(errEl) errEl.textContent={invalid_credentials:'Sai email hoặc mật khẩu',email_taken:'Email đã tồn tại',weak_password:'Mật khẩu tối thiểu 6 ký tự',invalid_email:'Email không hợp lệ'}[d.error]||'Lỗi, thử lại';
       if(btn) btn.disabled=false;
