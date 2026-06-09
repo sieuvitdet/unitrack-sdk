@@ -1,16 +1,58 @@
 {
   "name": "@unitrack/firebase",
   "version": "1.0.0",
-  "description": "Firebase Analytics provider for UniTrack React Native.",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "description": "Firebase provider for @unitrack/react-native. Forwards UniTrack events to Firebase Analytics, plus optional helpers for Messaging (FCM token + push tracking), Crashlytics (non-fatal errors), and Remote Config.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "react-native",
+    "analytics",
+    "firebase",
+    "tracking",
+    "telemetry",
+    "unitrack"
+  ],
   "license": "MIT",
+  "author": "UniTrack",
+  "homepage": "https://github.com/sieuvitdet/unitrack-sdk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sieuvitdet/unitrack-sdk.git",
+    "directory": "platforms/react-native-firebase"
+  },
+  "bugs": {
+    "url": "https://github.com/sieuvitdet/unitrack-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
-    "@unitrack/react-native": "*",
+    "@unitrack/react-native": ">=1.0.0",
     "@react-native-firebase/app": ">=18.0.0",
-    "@react-native-firebase/analytics": ">=18.0.0"
+    "@react-native-firebase/analytics": ">=18.0.0",
+    "@react-native-firebase/messaging": ">=18.0.0",
+    "@react-native-firebase/crashlytics": ">=18.0.0",
+    "@react-native-firebase/remote-config": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-native-firebase/messaging":     { "optional": true },
+    "@react-native-firebase/crashlytics":   { "optional": true },
+    "@react-native-firebase/remote-config": { "optional": true }
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
   }
 }

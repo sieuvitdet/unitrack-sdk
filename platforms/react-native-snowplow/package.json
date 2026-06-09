@@ -1,25 +1,46 @@
 {
   "name": "@unitrack/snowplow",
   "version": "1.0.0",
-  "description": "Snowplow provider for UniTrack React Native — forwards events to a Snowplow collector.",
+  "description": "Snowplow provider for @unitrack/react-native. Forwards UniTrack events to a Snowplow collector with built-in convention layer, auto-attached user_context and application_context entities, and per-event Iglu schema resolution.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "react-native",
+    "analytics",
+    "snowplow",
+    "tracking",
+    "telemetry",
+    "unitrack"
+  ],
+  "license": "MIT",
+  "author": "UniTrack",
+  "homepage": "https://github.com/sieuvitdet/unitrack-sdk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sieuvitdet/unitrack-sdk.git",
+    "directory": "platforms/react-native-snowplow"
+  },
+  "bugs": {
+    "url": "https://github.com/sieuvitdet/unitrack-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@snowplow/react-native-tracker": ">=0.2.0",
-    "@unitrack/react-native": "*"
-  },
-  "peerDependenciesMeta": {
-    "@unitrack/react-native": {
-      "optional": false
-    },
-    "@snowplow/react-native-tracker": {
-      "optional": false
-    }
+    "@unitrack/react-native": ">=1.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.42",
