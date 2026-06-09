@@ -29,3 +29,13 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^3.0.0
+
+# Local dev override — pub.dev IGNORES dependency_overrides at publish time,
+# so the published package still pins `unitrack: ^1.0.0`. This block only
+# lets `flutter pub get` resolve while unitrack 1.0.0 isn't on pub.dev yet
+# (chicken-and-egg: provider depends on main; main publishes first; until
+# then this override points pub get at the sibling folder).
+# Remove or keep — won't affect downstream apps.
+dependency_overrides:
+  unitrack:
+    path: ../
