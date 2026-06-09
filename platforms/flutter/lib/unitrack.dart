@@ -223,6 +223,24 @@ class UniTrack {
             }
           }
           return null;
+
+        case 'onFlushCompleted':
+          // Native worker thread just landed a batch upload. Args:
+          // { counts: { 'ev_click': 3, 'ev_result': 2 } }. Republish on the
+          // broadcast stream so every onFlushCompleted() subscriber sees it.
+          final args = call.arguments;
+          final raw = (args is Map) ? args['counts'] : null;
+          if (raw is Map && _flushCompletedCtrl.hasListener) {
+            final m = <String, int>{};
+            raw.forEach((k, v) {
+              final ks = k?.toString();
+              if (ks == null || ks.isEmpty) return;
+              if (v is int) m[ks] = v;
+              else if (v is num) m[ks] = v.toInt();
+            });
+            _flushCompletedCtrl.add(m);
+          }
+          return null;
       }
       return null;
     });
@@ -489,6 +507,169 @@ class UniTrack {
 
   Future<void> setEnabled(bool enabled) =>
       _channel.invokeMethod('setEnabled', {'enabled': enabled});
+
+  // ─── Session API parity with iOS Swift / Android Kotlin ───────────────────
+  //
+  // The core (C++) owns session_id rotation + persists session_index across
+  // launches via session.json. These helpers expose the same SessionManager
+  // state to Flutter apps so they don't keep a duplicate (resetting-on-cold-
+  // start) counter on the binding side.
+
+  /// UUID of the active session — empty before init.
+  Future<String> currentSessionId() async {
+    final v = await _channel.invokeMethod<String>('currentSessionId');
+    return v ?? '';
+  }
+
+  /// Lifetime session counter (persists across launches). 1 on first install,
+  /// +1 per timeout-driven rotation. Pair with [currentSessionId] when emitting
+  /// session_started events so the counter doesn't reset every cold start.
+  Future<int> sessionIndex() async {
+    final v = await _channel.invokeMethod('sessionIndex');
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  /// UUID of the session that just closed; empty on the very first session
+  /// after install. Stamp on session_started events so the backend can chain
+  /// consecutive sessions for the same user.
+  Future<String> previousSessionId() async {
+    final v = await _channel.invokeMethod<String>('previousSessionId');
+    return v ?? '';
+  }
+
+  /// Force-rotate the active session now. Bumps [sessionIndex], mints a new
+  /// [currentSessionId], records the just-closed UUID as [previousSessionId].
+  /// Apps call on logout / switch-account / "new conversation" boundaries
+  /// when the inactivity timeout (default 30 min) isn't enough.
+  Future<void> rotateSession() => _channel.invokeMethod('rotateSession');
+
+  /// Snapshot of events still sitting in the SQLite offline queue, grouped
+  /// by raw `event_name`. Used by debug overlays / toasts during airplane-
+  /// mode testing: `Saved 7 ev_screen_view, 3 ev_click`. Returns an empty
+  /// map before init or when the queue is empty.
+  Future<Map<String, int>> pendingEventCounts() async {
+    final raw = await _channel.invokeMethod('pendingEventCounts');
+    if (raw is! Map) return const <String, int>{};
+    final out = <String, int>{};
+    raw.forEach((k, v) {
+      final ks = k?.toString();
+      if (ks == null || ks.isEmpty) return;
+      if (v is int) out[ks] = v;
+      else if (v is num) out[ks] = v.toInt();
+    });
+    return out;
+  }
+
+  // Broadcast stream of per-event_name flush breakdowns. Each emission =
+  // ONE successful batch upload from the native worker thread (bridged
+  // through MethodChannel into _installNativeCallbackHandler). onListen /
+  // onCancel toggle the native callback so the worker thread doesn't post
+  // events nobody is listening for.
+  late final StreamController<Map<String, int>> _flushCompletedCtrl =
+      StreamController<Map<String, int>>.broadcast(
+        onListen: () {
+          _flushCallbackEnabled = true;
+          _channel.invokeMethod('setFlushCallbackEnabled', {'enabled': true})
+              .catchError((_) {});
+        },
+        onCancel: () {
+          // Broadcast controllers fire onCancel after the LAST subscriber
+          // cancels. Flip the native flag back off so the SDK stops posting.
+          _flushCallbackEnabled = false;
+          _channel.invokeMethod('setFlushCallbackEnabled', {'enabled': false})
+              .catchError((_) {});
+        },
+      );
+  bool _flushCallbackEnabled = false;
+
+  /// Fires after each successful batch upload with the per-event_name
+  /// breakdown of THAT batch (vd `{'ev_click': 3, 'ev_result': 2}`).
+  /// Backed by a broadcast stream so multiple listeners can attach
+  /// (debug toast + in-app dashboard).
+  ///
+  /// Returns a [StreamSubscription]; cancel it when you're done so the
+  /// native worker stops posting if no other listener is around.
+  StreamSubscription<Map<String, int>> onFlushCompleted(
+          void Function(Map<String, int> counts) handler) =>
+      _flushCompletedCtrl.stream.listen(handler);
+
+  /// Raw stream form — useful for `StreamBuilder` integration. Same data as
+  /// [onFlushCompleted]; both share the underlying broadcast controller.
+  Stream<Map<String, int>> get flushCompletedStream =>
+      _flushCompletedCtrl.stream;
+
+  /// Device / app metadata bag captured at init (platform, app_version,
+  /// network_*, device_*). Same dict the native Snowplow provider uses to
+  /// build its `application_context` entity. Empty before init.
+  Future<Map<String, Object?>> applicationContext() async {
+    final raw = await _channel.invokeMethod('applicationContext');
+    if (raw is! Map) return const <String, Object?>{};
+    return raw.map((k, v) => MapEntry(k?.toString() ?? '', v as Object?));
+  }
+
+  /// Resolve a runtime value in this order:
+  ///   1. Portal `sdk_config.custom_values[key]` (operator-edited)
+  ///   2. Any registered remote-value provider (Firebase Remote Config)
+  ///   3. [defaultValue]
+  ///
+  /// `T` may be `String`, `int`, `double`, or `bool`. Any other type falls
+  /// back to [defaultValue]. The type hint sent to native side routes to the
+  /// correctly-typed Kotlin / Swift getter so coercion happens once on the
+  /// platform side, not in Dart.
+  Future<T> getRemoteValue<T>(String key, {required T defaultValue}) async {
+    String hint;
+    if (T == bool) {
+      hint = 'bool';
+    } else if (T == int) {
+      hint = 'int';
+    } else if (T == double) {
+      hint = 'double';
+    } else if (T == String) {
+      hint = 'string';
+    } else {
+      return defaultValue;
+    }
+    try {
+      final raw = await _channel.invokeMethod('getRemoteValue',
+          {'key': key, 'type': hint});
+      if (raw == null) return defaultValue;
+      // Coerce — the platform codec already encoded with the right type, but
+      // numbers sometimes arrive as `num` and we want strict T.
+      if (T == int && raw is num) return raw.toInt() as T;
+      if (T == double && raw is num) return raw.toDouble() as T;
+      if (raw is T) return raw;
+      return defaultValue;
+    } catch (_) {
+      return defaultValue;
+    }
+  }
+
+  // ─── Session-stat sidebag ─────────────────────────────────────────────────
+  //
+  // Counters the binding maintains so session_ended payloads carry
+  // screen_count / had_error / had_crash without the app keeping its own
+  // state. Reset via resetSessionStats() at the start of each session.
+
+  Future<int> sessionScreenCount() async {
+    final v = await _channel.invokeMethod('sessionScreenCount');
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+  Future<bool> sessionHadError() async =>
+      (await _channel.invokeMethod<bool>('sessionHadError')) ?? false;
+  Future<bool> sessionHadCrash() async =>
+      (await _channel.invokeMethod<bool>('sessionHadCrash')) ?? false;
+  Future<void> incrementScreenCount() =>
+      _channel.invokeMethod('incrementScreenCount');
+  Future<void> markSessionError() =>
+      _channel.invokeMethod('markSessionError');
+  Future<void> markSessionCrash() =>
+      _channel.invokeMethod('markSessionCrash');
+  Future<void> resetSessionStats() =>
+      _channel.invokeMethod('resetSessionStats');
 
   /// Install global HTTP auto-capture: every request/error is tracked, with the
   /// button + screen that triggered it (mirrored from [UniTrackTapObserver]).

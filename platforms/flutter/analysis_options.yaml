@@ -1,0 +1,13 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - example/**
+    - ios/Native/**
+
+linter:
+  rules:
+    # Tolerated — this SDK builds dynamic event payloads from app input;
+    # `Object?` and unchecked maps are part of the public contract.
+    avoid_dynamic_calls: false
+    public_member_api_docs: false

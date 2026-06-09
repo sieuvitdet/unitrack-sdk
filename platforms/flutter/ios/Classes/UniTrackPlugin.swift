@@ -88,6 +88,70 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
             UniTrack.setEnabled(args["enabled"] as? Bool ?? true)
             result(nil)
 
+        // ── Session API parity with iOS Swift / Android Kotlin ─────────────
+        case "currentSessionId":
+            result(UniTrack.currentSessionId())
+        case "sessionIndex":
+            // Swift returns Int; standard codec encodes it as Dart int.
+            result(UniTrack.sessionIndex())
+        case "previousSessionId":
+            result(UniTrack.previousSessionId())
+        case "rotateSession":
+            UniTrack.rotateSession(); result(nil)
+
+        // Offline queue snapshot by event_name. UniTrack.pendingEventCounts
+        // returns [String: Int] which the standard codec encodes as a Dart
+        // Map<String,int>.
+        case "pendingEventCounts":
+            result(UniTrack.pendingEventCounts())
+
+        // Subscribe / unsubscribe the flush-success callback. Dart toggles
+        // this when its onFlushCompleted listener is set / cleared.
+        case "setFlushCallbackEnabled":
+            let enabled = (args["enabled"] as? Bool) ?? false
+            if enabled {
+                UniTrack.onFlushCompleted { [weak self] counts in
+                    // Hop to main: FlutterMethodChannel.invokeMethod is not
+                    // safe off the platform thread.
+                    DispatchQueue.main.async {
+                        self?.channel?.invokeMethod("onFlushCompleted",
+                                                    arguments: ["counts": counts])
+                    }
+                }
+            } else {
+                UniTrack.onFlushCompleted(nil)
+            }
+            result(nil)
+
+        // Device / app metadata bag — same dict the native Snowplow provider
+        // builds its application_context entity from. Empty before init.
+        case "applicationContext":
+            result(UniTrack.applicationContext())
+
+        // Remote config resolver. Routes to the typed getter on the Swift
+        // side based on a hint from Dart; the resolved value is returned as
+        // the matching codec type so Dart's generic getRemoteValue<T> reads
+        // it back without manual cast.
+        case "getRemoteValue":
+            let key  = (args["key"] as? String) ?? ""
+            let kind = (args["type"] as? String) ?? "string"
+            switch kind {
+            case "bool":   result(UniTrack.getRemoteValue(key, default: false))
+            case "int":    result(UniTrack.getRemoteValue(key, default: 0))
+            case "double": result(UniTrack.getRemoteValue(key, default: 0.0))
+            default:       result(UniTrack.getRemoteValue(key, default: ""))
+            }
+
+        // Session-stat sidebag mirrors Android. Same names so the Dart facade
+        // is identical across both platforms.
+        case "sessionScreenCount":   result(UniTrack.sessionScreenCount())
+        case "sessionHadError":      result(UniTrack.sessionHadError())
+        case "sessionHadCrash":      result(UniTrack.sessionHadCrash())
+        case "incrementScreenCount": UniTrack.incrementScreenCount(); result(nil)
+        case "markSessionError":     UniTrack.markSessionError();     result(nil)
+        case "markSessionCrash":     UniTrack.markSessionCrash();     result(nil)
+        case "resetSessionStats":    UniTrack.resetSessionStats();    result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }

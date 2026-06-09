@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.version          = '1.0.0'
   s.summary          = 'UniTrack — universal mobile analytics SDK for Flutter.'
   s.description      = 'Auto-capture screens, taps, network, crashes, OOM, JSON errors.'
-  s.homepage         = 'https://github.com/unitrack/sdk'
+  s.homepage         = 'https://github.com/sieuvitdet/unitrack-sdk'
   s.license          = { :type => 'MIT' }
   s.author           = 'UniTrack'
   s.source           = { :path => '.' }
