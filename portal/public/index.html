@@ -906,7 +906,13 @@ async function renderConfig(pid, mountSel){
   mountSel = mountSel || '#tabBody';
   const mount = $(mountSel);
   if (!mount) return;
-  const c = await api(`/api/projects/${pid}/config`);
+  // Pull both blobs in parallel: /config = versioned SDK config; the project
+  // row itself carries api_key + sp_forward_url which the Portal mirror
+  // hint + Forward URL input below need to read.
+  const [c, p] = await Promise.all([
+    api(`/api/projects/${pid}/config`),
+    api(`/api/projects/${pid}`),
+  ]);
   const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{}), tr=c.tracing||{};
   const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
   // Pull existing overrides so the override UI starts populated. Block-level
