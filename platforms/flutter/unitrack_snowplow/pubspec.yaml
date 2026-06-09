@@ -1,7 +1,18 @@
 name: unitrack_snowplow
-description: Snowplow analytics provider for UniTrack — forwards UniTrack events to a Snowplow collector.
+description: >-
+  Snowplow provider for UniTrack. Forwards UniTrack events to a Snowplow
+  collector with built-in convention layer, auto-attached user_context and
+  application_context entities, and per-event Iglu schema resolution.
 version: 1.0.0
-publish_to: none
+homepage: https://github.com/sieuvitdet/unitrack-sdk
+repository: https://github.com/sieuvitdet/unitrack-sdk
+issue_tracker: https://github.com/sieuvitdet/unitrack-sdk/issues
+topics:
+  - analytics
+  - snowplow
+  - tracking
+  - telemetry
+  - mobile
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -10,11 +21,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # The UniTrack core (provides the AnalyticsProvider interface).
-  unitrack:
-    path: ../
-  # The real Snowplow tracker SDK — same major as MobiX uses.
-  snowplow_tracker: ^0.7.1
+  # UniTrack core (provides AnalyticsProvider interface + UniTrack.track facade).
+  unitrack: ^1.0.0
+  # Snowplow Flutter tracker — used to package + forward events to the
+  # configured collector. Wide range to keep the host app's choice flexible.
+  snowplow_tracker: '>=0.7.0 <2.0.0'
 
 dev_dependencies:
   flutter_lints: ^3.0.0

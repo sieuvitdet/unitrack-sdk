@@ -1,47 +1,86 @@
 # unitrack_snowplow
 
-Snowplow provider for [UniTrack](../). Forwards **every** UniTrack event
-(taps, screens, network, crash, notifications, manual `track()`) to a Snowplow
-collector. The core `unitrack` package has no Snowplow dependency — add this
-package only when you want Snowplow forwarding.
+Snowplow provider for [UniTrack](https://pub.dev/packages/unitrack). Forwards
+every UniTrack event to a Snowplow collector with the SDK's built-in convention
+layer, auto-attached `user_context` + `application_context` entities, and
+per-event Iglu schema resolution.
 
 ## Install
 
 ```yaml
 dependencies:
-  unitrack:
-    path: ../platforms/flutter
-  unitrack_snowplow:
-    path: ../platforms/flutter/unitrack_snowplow
+  unitrack: ^1.0.0
+  unitrack_snowplow: ^1.0.0
 ```
 
-## Use
-
-Register the provider **before** `initialize()`:
+## Wire-up
 
 ```dart
 import 'package:unitrack/unitrack.dart';
 import 'package:unitrack_snowplow/unitrack_snowplow.dart';
 
-UniTrack.instance.addProvider(SnowplowProvider(
-  endpoint: 'https://your-collector.example.com',
-  appId: '701',
-  // Optional custom user-context entity attached to every event:
-  userContext: {'username': 'duc', 'epcode': 'FTEL123'},
-  userContextSchema: 'iglu:vn.fpt.ftel.snowplow/user_context/jsonschema/1-0-0',
-  // Optional: map UniTrack event names to self-describing schemas. Events not
-  // listed here are sent as Snowplow Structured events (category 'unitrack').
-  schemas: {
-    'add_to_cart': 'iglu:com.acme/add_to_cart/jsonschema/1-0-0',
-  },
-));
-
-await UniTrack.instance.initialize(apiKey);
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  UniTrack.instance.addProvider(SnowplowProvider(
+    endpoint: 'https://collector.your-app.com',
+    appId: 'mobile-app',
+    namespace: 'YourApp',
+    igluVendor: 'com.your-app',          // optional — falls back per-event
+    defaultVersion: '1-0-0',
+  ));
+  await UniTrack.instance.initialize('utk_your_api_key');
+  runApp(const MyApp());
+}
 ```
 
-- Events **with** a `schemas` entry → self-describing events.
-- Events **without** → Structured events (`category='unitrack'`, `action=name`).
-- `identify()` → `tracker.setUserId`; `setScreen()` → Snowplow `ScreenView`.
+`addProvider` BEFORE `initialize()` so the provider is up before the first event.
 
-Mirrors the Snowplow setup used in MobiX (namespace, POST, base64, platform/
-session/screen contexts).
+## What it does
+
+For every UniTrack event the provider:
+
+1. Resolves the right Iglu schema — checks `eventNames` overrides, then falls
+   back to `igluVendor/<event_kind>/jsonschema/<defaultVersion>`.
+2. Attaches `user_context` + `application_context` as Snowplow entities so the
+   collector receives the same device/app metadata UniTrack core stamps on the
+   wire payload.
+3. Routes screen events (`screen_viewed` / `screen_exited` /
+   `screen_load_completed`) to the same `screen_view` kind, with `event_action`
+   stamped so sibling events under that schema stay distinguishable.
+
+## Convention helpers
+
+Use these when you want a typed shape that matches a known Iglu schema:
+
+```dart
+sp.trackingClickEvent(elementKey: 'cta_buy', screen: 'CheckoutScreen');
+
+sp.trackingResultEvent(
+  action: 'payment_charge',
+  status: 'success',
+  durationMs: 842,
+);
+
+sp.trackingScreenView(screenName: 'HomeScreen');
+sp.trackingCrash(message: 'NullPointerException', stack: trace);
+sp.trackingAPI(url: '/v1/orders', method: 'POST', status: 200, durationMs: 320);
+sp.trackingSession(action: 'session_started');
+```
+
+## Portal mirror
+
+Pair with a UniTrack portal to see what's going to Snowplow side-by-side with
+other providers:
+
+```dart
+SnowplowProvider(
+  endpoint: '...',
+  appId: '...',
+  portalEndpoint: 'https://your-portal.com/event-tracking/v1/events',
+  portalApiKey:   'utk_your_api_key',
+);
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
