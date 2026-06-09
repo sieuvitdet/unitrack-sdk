@@ -10,8 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  unitrack:
-    path: ../../
+  unitrack: ^1.0.0
   unitrack_snowplow:
     path: ../
 
@@ -19,6 +18,14 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+
+# Local-only: pull both packages from sibling folders so example builds
+# before they're published. Pub.dev ignores dependency_overrides when
+# publishing the parent (unitrack_snowplow), so consumers see the hosted
+# spec ^1.0.0.
+dependency_overrides:
+  unitrack:
+    path: ../../
 
 flutter:
   uses-material-design: true
