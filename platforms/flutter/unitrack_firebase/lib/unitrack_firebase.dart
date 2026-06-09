@@ -20,6 +20,11 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:unitrack/unitrack.dart';
 
+// Re-export the helper façades so apps only need a single import.
+export 'firebase_messaging_helper.dart';
+export 'firebase_crashlytics_helper.dart';
+export 'firebase_remote_config_helper.dart';
+
 class FirebaseProvider extends AnalyticsProvider {
   /// [portalEndpoint] + [portalApiKey]: optional. When both are set, every event
   /// forwarded to Firebase is ALSO sent as a copy to the UniTrack portal tagged
