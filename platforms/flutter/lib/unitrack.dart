@@ -305,12 +305,6 @@ class UniTrack {
     return _channel.invokeMethod('reset');
   }
 
-  // Last screen the app explicitly identified via setScreen() — used as a
-  // fallback so a click event whose own props lack `screen` can still carry
-  // it. Apps using auto_route / nested navigators where the route observer
-  // can't resolve the page class set this manually from initState.
-  String? _lastScreen;
-
   /// Apply W3C distributed-tracing settings (from remote config or app code).
   /// Cheap — the HTTP interceptor reads this snapshot per request.
   ///
@@ -354,7 +348,6 @@ class UniTrack {
   }
 
   Future<void> setScreen(String name) {
-    _lastScreen = name.isEmpty ? null : name;
     if (verboseLogging) log('[UniTrack] setScreen="$name"');
     _forEachProvider((p) => p.setScreen(name));
     return _channel.invokeMethod('setScreen', {'name': name});
@@ -570,19 +563,16 @@ class UniTrack {
   late final StreamController<Map<String, int>> _flushCompletedCtrl =
       StreamController<Map<String, int>>.broadcast(
         onListen: () {
-          _flushCallbackEnabled = true;
           _channel.invokeMethod('setFlushCallbackEnabled', {'enabled': true})
               .catchError((_) {});
         },
         onCancel: () {
           // Broadcast controllers fire onCancel after the LAST subscriber
           // cancels. Flip the native flag back off so the SDK stops posting.
-          _flushCallbackEnabled = false;
           _channel.invokeMethod('setFlushCallbackEnabled', {'enabled': false})
               .catchError((_) {});
         },
       );
-  bool _flushCallbackEnabled = false;
 
   /// Fires after each successful batch upload with the per-event_name
   /// breakdown of THAT batch (vd `{'ev_click': 3, 'ev_result': 2}`).

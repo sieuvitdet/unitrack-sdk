@@ -11,3 +11,6 @@ linter:
     # `Object?` and unchecked maps are part of the public contract.
     avoid_dynamic_calls: false
     public_member_api_docs: false
+    # Single-line if/else without braces is fine for the dispatch tables
+    # this SDK uses (auto-capture filters, coercion fall-throughs).
+    curly_braces_in_flow_control_structures: false
