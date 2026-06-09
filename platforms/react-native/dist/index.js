@@ -48,6 +48,10 @@ class UniTrackClass {
         // UniTrackRemoteConfig.applyConventions(cfg) so the SDK is in sync with
         // the portal without an app rebuild.
         this.eventNames = {};
+        // Lazy EventEmitter — created on the first onFlushCompleted subscription
+        // so apps that never use it pay no setup cost.
+        this.flushEmitter = null;
+        this.flushSubscribers = 0;
     }
     /** Register a provider to also receive every event. Call BEFORE initialize();
      *  if called afterwards, the provider is initialized immediately. */
@@ -164,6 +168,100 @@ class UniTrackClass {
     }
     flush() { return native.flush(); }
     setEnabled(e) { return native.setEnabled(e); }
+    // ─── Session API parity (iOS / Android / Flutter) ──────────────────────
+    //
+    // The native core owns session_id rotation + persists session_index across
+    // launches via session.json. Apps call these instead of keeping their own
+    // (resetting-on-cold-start) counter.
+    /** UUID of the active session — empty before init. */
+    currentSessionId() { return native.currentSessionId(); }
+    /** Lifetime session counter (persists across launches). 1 on first
+     *  install, +1 per timeout-driven rotation. */
+    sessionIndex() { return native.sessionIndex(); }
+    /** UUID of the session that just closed; empty on the first session after
+     *  install. Pair with [currentSessionId] when emitting session_started. */
+    previousSessionId() { return native.previousSessionId(); }
+    /** Force a session rotation now. Bumps sessionIndex, mints a new UUID,
+     *  records the just-closed UUID as previousSessionId. Use on logout /
+     *  switch-account / new-context boundaries when the inactivity timeout
+     *  isn't enough. */
+    rotateSession() { return native.rotateSession(); }
+    // ─── Offline queue introspection ───────────────────────────────────────
+    /** Snapshot of events still sitting in the SQLite offline queue, grouped
+     *  by raw event_name. Used by debug toasts during airplane-mode testing:
+     *  `Saved 7 ev_screen_view, 3 ev_click`. Empty before init or queue empty. */
+    pendingEventCounts() {
+        return native.pendingEventCounts();
+    }
+    /** Fires after each successful batch upload with the per-event_name
+     *  breakdown of THAT batch (vd `{ev_click: 3, ev_result: 2}`). Returns
+     *  an [EmitterSubscription]; call `.remove()` when you're done so the
+     *  native worker stops posting if no other listener remains. */
+    onFlushCompleted(handler) {
+        if (!this.flushEmitter) {
+            this.flushEmitter = new react_native_1.NativeEventEmitter(react_native_1.NativeModules.UniTrack);
+        }
+        if (this.flushSubscribers === 0) {
+            native.setFlushCallbackEnabled(true).catch(() => { });
+        }
+        this.flushSubscribers += 1;
+        const sub = this.flushEmitter.addListener('onFlushCompleted', (e) => {
+            var _a;
+            handler((_a = e === null || e === void 0 ? void 0 : e.counts) !== null && _a !== void 0 ? _a : {});
+        });
+        // Wrap .remove() so we can toggle the native flag off when the last
+        // subscriber goes away.
+        const origRemove = sub.remove.bind(sub);
+        sub.remove = () => {
+            origRemove();
+            this.flushSubscribers = Math.max(0, this.flushSubscribers - 1);
+            if (this.flushSubscribers === 0) {
+                native.setFlushCallbackEnabled(false).catch(() => { });
+            }
+        };
+        return sub;
+    }
+    // ─── Application context + remote values ───────────────────────────────
+    /** Device/app metadata bag captured at init (platform, app_version,
+     *  network_*, device_*). Same dict the native Snowplow provider uses to
+     *  build its `application_context` entity. Empty before init. */
+    applicationContext() {
+        return native.applicationContext();
+    }
+    /** Resolve a runtime value. Resolution order:
+     *    1. Portal `sdk_config.custom_values[key]`
+     *    2. Any registered remote-value provider (Firebase RC)
+     *    3. [defaultValue]
+     *
+     *  T may be `string | number | boolean`. Coercion happens on the native
+     *  side based on the type of [defaultValue]. */
+    async getRemoteValue(key, defaultValue) {
+        let hint;
+        if (typeof defaultValue === 'boolean')
+            hint = 'bool';
+        else if (typeof defaultValue === 'number') {
+            hint = Number.isInteger(defaultValue) ? 'int' : 'double';
+        }
+        else
+            hint = 'string';
+        try {
+            const raw = await native.getRemoteValue(key, hint);
+            if (raw == null)
+                return defaultValue;
+            return raw;
+        }
+        catch {
+            return defaultValue;
+        }
+    }
+    // ─── Session-stat sidebag ──────────────────────────────────────────────
+    sessionScreenCount() { return native.sessionScreenCount(); }
+    sessionHadError() { return native.sessionHadError(); }
+    sessionHadCrash() { return native.sessionHadCrash(); }
+    incrementScreenCount() { return native.incrementScreenCount(); }
+    markSessionError() { return native.markSessionError(); }
+    markSessionCrash() { return native.markSessionCrash(); }
+    resetSessionStats() { return native.resetSessionStats(); }
     // --- semantic event helpers (Phase 3) ----------------------------------
     /** Notification received/opened/dismissed.
      *  state: 'foreground'|'background'|'silent'

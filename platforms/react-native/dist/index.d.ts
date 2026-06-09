@@ -1,3 +1,4 @@
+import { type EmitterSubscription } from 'react-native';
 import { type UniTrackTraceIds, type UniTrackTracingConfig } from './traceContext';
 export interface UniTrackConfig {
     endpoint?: string;
@@ -53,6 +54,49 @@ declare class UniTrackClass {
     setScreen(name: string): Promise<void>;
     flush(): Promise<void>;
     setEnabled(e: boolean): Promise<void>;
+    /** UUID of the active session — empty before init. */
+    currentSessionId(): Promise<string>;
+    /** Lifetime session counter (persists across launches). 1 on first
+     *  install, +1 per timeout-driven rotation. */
+    sessionIndex(): Promise<number>;
+    /** UUID of the session that just closed; empty on the first session after
+     *  install. Pair with [currentSessionId] when emitting session_started. */
+    previousSessionId(): Promise<string>;
+    /** Force a session rotation now. Bumps sessionIndex, mints a new UUID,
+     *  records the just-closed UUID as previousSessionId. Use on logout /
+     *  switch-account / new-context boundaries when the inactivity timeout
+     *  isn't enough. */
+    rotateSession(): Promise<void>;
+    /** Snapshot of events still sitting in the SQLite offline queue, grouped
+     *  by raw event_name. Used by debug toasts during airplane-mode testing:
+     *  `Saved 7 ev_screen_view, 3 ev_click`. Empty before init or queue empty. */
+    pendingEventCounts(): Promise<Record<string, number>>;
+    private flushEmitter;
+    private flushSubscribers;
+    /** Fires after each successful batch upload with the per-event_name
+     *  breakdown of THAT batch (vd `{ev_click: 3, ev_result: 2}`). Returns
+     *  an [EmitterSubscription]; call `.remove()` when you're done so the
+     *  native worker stops posting if no other listener remains. */
+    onFlushCompleted(handler: (counts: Record<string, number>) => void): EmitterSubscription;
+    /** Device/app metadata bag captured at init (platform, app_version,
+     *  network_*, device_*). Same dict the native Snowplow provider uses to
+     *  build its `application_context` entity. Empty before init. */
+    applicationContext(): Promise<Record<string, unknown>>;
+    /** Resolve a runtime value. Resolution order:
+     *    1. Portal `sdk_config.custom_values[key]`
+     *    2. Any registered remote-value provider (Firebase RC)
+     *    3. [defaultValue]
+     *
+     *  T may be `string | number | boolean`. Coercion happens on the native
+     *  side based on the type of [defaultValue]. */
+    getRemoteValue<T extends string | number | boolean>(key: string, defaultValue: T): Promise<T>;
+    sessionScreenCount(): Promise<number>;
+    sessionHadError(): Promise<boolean>;
+    sessionHadCrash(): Promise<boolean>;
+    incrementScreenCount(): Promise<void>;
+    markSessionError(): Promise<void>;
+    markSessionCrash(): Promise<void>;
+    resetSessionStats(): Promise<void>;
     /** Notification received/opened/dismissed.
      *  state: 'foreground'|'background'|'silent'
      *  action: 'received'|'opened'|'dismissed' (default 'received')

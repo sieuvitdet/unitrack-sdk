@@ -19,7 +19,18 @@ android {
     kotlinOptions { jvmTarget = '17' }
 }
 
+// JitPack repo required for the UniTrack Android SDK dep below — host apps
+// also need this in their settings.gradle (mirror what the docs tell them).
+repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
 dependencies {
     implementation 'com.facebook.react:react-native:+'
-    implementation 'io.unitrack:sdk:1.0.0'
+    // UniTrack Android SDK — published to JitPack from the same monorepo.
+    // Pinned to the tag that ships the matching API surface; bump together
+    // with the npm package version.
+    implementation 'com.github.sieuvitdet:unitrack-sdk:0.3.3'
 }

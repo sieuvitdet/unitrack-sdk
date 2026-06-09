@@ -5,7 +5,7 @@
 // configured on the native side; React Navigation hooks add JS-level
 // screen tracking on top.
 
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, Platform, NativeEventEmitter, type EmitterSubscription } from 'react-native';
 import { tapState } from './tapState';
 import {
   tracingState, newTrace, traceparentHeader, shouldInjectTrace, hostOf,
@@ -26,6 +26,29 @@ interface NativeAPI {
   setScreen(name: string): Promise<void>;
   flush(): Promise<void>;
   setEnabled(enabled: boolean): Promise<void>;
+
+  // Session API parity (added with the offline + session APIs in 1.1).
+  currentSessionId(): Promise<string>;
+  sessionIndex(): Promise<number>;
+  previousSessionId(): Promise<string>;
+  rotateSession(): Promise<void>;
+
+  // Offline queue introspection + flush callback toggle.
+  pendingEventCounts(): Promise<Record<string, number>>;
+  setFlushCallbackEnabled(enabled: boolean): Promise<void>;
+
+  // Application context + typed remote-config resolver.
+  applicationContext(): Promise<Record<string, unknown>>;
+  getRemoteValue(key: string, type: 'string' | 'bool' | 'int' | 'long' | 'double'): Promise<unknown>;
+
+  // Session-stat sidebag.
+  sessionScreenCount(): Promise<number>;
+  sessionHadError(): Promise<boolean>;
+  sessionHadCrash(): Promise<boolean>;
+  incrementScreenCount(): Promise<void>;
+  markSessionError(): Promise<void>;
+  markSessionCrash(): Promise<void>;
+  resetSessionStats(): Promise<void>;
 }
 
 const LINK_HINT =
@@ -205,6 +228,117 @@ class UniTrackClass {
   }
   flush()                 { return native.flush(); }
   setEnabled(e: boolean)  { return native.setEnabled(e); }
+
+  // ─── Session API parity (iOS / Android / Flutter) ──────────────────────
+  //
+  // The native core owns session_id rotation + persists session_index across
+  // launches via session.json. Apps call these instead of keeping their own
+  // (resetting-on-cold-start) counter.
+
+  /** UUID of the active session — empty before init. */
+  currentSessionId(): Promise<string>  { return native.currentSessionId(); }
+
+  /** Lifetime session counter (persists across launches). 1 on first
+   *  install, +1 per timeout-driven rotation. */
+  sessionIndex(): Promise<number>      { return native.sessionIndex(); }
+
+  /** UUID of the session that just closed; empty on the first session after
+   *  install. Pair with [currentSessionId] when emitting session_started. */
+  previousSessionId(): Promise<string> { return native.previousSessionId(); }
+
+  /** Force a session rotation now. Bumps sessionIndex, mints a new UUID,
+   *  records the just-closed UUID as previousSessionId. Use on logout /
+   *  switch-account / new-context boundaries when the inactivity timeout
+   *  isn't enough. */
+  rotateSession(): Promise<void>       { return native.rotateSession(); }
+
+  // ─── Offline queue introspection ───────────────────────────────────────
+
+  /** Snapshot of events still sitting in the SQLite offline queue, grouped
+   *  by raw event_name. Used by debug toasts during airplane-mode testing:
+   *  `Saved 7 ev_screen_view, 3 ev_click`. Empty before init or queue empty. */
+  pendingEventCounts(): Promise<Record<string, number>> {
+    return native.pendingEventCounts();
+  }
+
+  // Lazy EventEmitter — created on the first onFlushCompleted subscription
+  // so apps that never use it pay no setup cost.
+  private flushEmitter: NativeEventEmitter | null = null;
+  private flushSubscribers = 0;
+
+  /** Fires after each successful batch upload with the per-event_name
+   *  breakdown of THAT batch (vd `{ev_click: 3, ev_result: 2}`). Returns
+   *  an [EmitterSubscription]; call `.remove()` when you're done so the
+   *  native worker stops posting if no other listener remains. */
+  onFlushCompleted(
+    handler: (counts: Record<string, number>) => void,
+  ): EmitterSubscription {
+    if (!this.flushEmitter) {
+      this.flushEmitter = new NativeEventEmitter(NativeModules.UniTrack);
+    }
+    if (this.flushSubscribers === 0) {
+      native.setFlushCallbackEnabled(true).catch(() => {});
+    }
+    this.flushSubscribers += 1;
+    const sub = this.flushEmitter.addListener('onFlushCompleted', (e: { counts?: Record<string, number> }) => {
+      handler(e?.counts ?? {});
+    });
+    // Wrap .remove() so we can toggle the native flag off when the last
+    // subscriber goes away.
+    const origRemove = sub.remove.bind(sub);
+    sub.remove = () => {
+      origRemove();
+      this.flushSubscribers = Math.max(0, this.flushSubscribers - 1);
+      if (this.flushSubscribers === 0) {
+        native.setFlushCallbackEnabled(false).catch(() => {});
+      }
+    };
+    return sub;
+  }
+
+  // ─── Application context + remote values ───────────────────────────────
+
+  /** Device/app metadata bag captured at init (platform, app_version,
+   *  network_*, device_*). Same dict the native Snowplow provider uses to
+   *  build its `application_context` entity. Empty before init. */
+  applicationContext(): Promise<Record<string, unknown>> {
+    return native.applicationContext();
+  }
+
+  /** Resolve a runtime value. Resolution order:
+   *    1. Portal `sdk_config.custom_values[key]`
+   *    2. Any registered remote-value provider (Firebase RC)
+   *    3. [defaultValue]
+   *
+   *  T may be `string | number | boolean`. Coercion happens on the native
+   *  side based on the type of [defaultValue]. */
+  async getRemoteValue<T extends string | number | boolean>(
+    key: string,
+    defaultValue: T,
+  ): Promise<T> {
+    let hint: 'string' | 'bool' | 'int' | 'double';
+    if (typeof defaultValue === 'boolean') hint = 'bool';
+    else if (typeof defaultValue === 'number') {
+      hint = Number.isInteger(defaultValue) ? 'int' : 'double';
+    } else hint = 'string';
+    try {
+      const raw = await native.getRemoteValue(key, hint);
+      if (raw == null) return defaultValue;
+      return raw as T;
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  // ─── Session-stat sidebag ──────────────────────────────────────────────
+
+  sessionScreenCount(): Promise<number>  { return native.sessionScreenCount(); }
+  sessionHadError(): Promise<boolean>    { return native.sessionHadError(); }
+  sessionHadCrash(): Promise<boolean>    { return native.sessionHadCrash(); }
+  incrementScreenCount(): Promise<void>  { return native.incrementScreenCount(); }
+  markSessionError(): Promise<void>      { return native.markSessionError(); }
+  markSessionCrash(): Promise<void>      { return native.markSessionCrash(); }
+  resetSessionStats(): Promise<void>     { return native.resetSessionStats(); }
 
   // --- semantic event helpers (Phase 3) ----------------------------------
   /** Notification received/opened/dismissed.

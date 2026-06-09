@@ -1,86 +1,91 @@
-// RNUniTrack.m — React Native iOS native module bridge.
+// RNUniTrack.m — Objective-C interface declarations only.
 //
-// Forwards JS calls to the iOS UniTrack Swift SDK linked alongside.
+// The real implementation lives in RNUniTrack.swift. We keep this thin
+// declaration file because RCT_EXTERN_MODULE / RCT_EXTERN_METHOD are the
+// only way React Native discovers Swift modules from its bridge.
+// Without this, RN can't find any of the `@objc` methods in the Swift class.
 
 #import <React/RCTBridgeModule.h>
-@import UniTrack;
+#import <React/RCTEventEmitter.h>
 
-@interface RNUniTrack : NSObject <RCTBridgeModule>
-@end
+@interface RCT_EXTERN_MODULE(UniTrack, RCTEventEmitter)
 
-@implementation RNUniTrack
++ (BOOL)requiresMainQueueSetup;
 
-RCT_EXPORT_MODULE(UniTrack);
-
-+ (BOOL)requiresMainQueueSetup { return NO; }
-
-static NSDictionary *parseJson(NSString *json) {
-    if (!json || json.length == 0) return @{};
-    NSError *e = nil;
-    id obj = [NSJSONSerialization
-              JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding]
-              options:0 error:&e];
-    return [obj isKindOfClass:[NSDictionary class]] ? obj : @{};
-}
-
-RCT_EXPORT_METHOD(initialize:(NSString *)apiKey
+// ── Core ──────────────────────────────────────────────────────────────────
+RCT_EXTERN_METHOD(initialize:(NSString *)apiKey
                   config:(NSString *)configJson
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    NSDictionary *c = parseJson(configJson);
-    UniTrackConfig *cfg = [[UniTrackConfig alloc] init];
-    if (c[@"endpoint"])        cfg.endpoint        = c[@"endpoint"];
-    if (c[@"batchSize"])       cfg.batchSize       = [c[@"batchSize"] intValue];
-    if (c[@"flushIntervalMs"]) cfg.flushIntervalMs = [c[@"flushIntervalMs"] intValue];
-    if (c[@"samplingRate"])    cfg.samplingRate    = [c[@"samplingRate"] doubleValue];
-    if (c[@"autoCapture"])     cfg.autoCapture     = [c[@"autoCapture"] boolValue];
-    if (c[@"journeyCapture"])   cfg.journeyCapture   = [c[@"journeyCapture"] boolValue];
-    if (c[@"sessionTimeoutMs"]) cfg.sessionTimeoutMs = [c[@"sessionTimeoutMs"] intValue];
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-    [UniTrack initializeWithApiKey:apiKey config:cfg];
-    resolve(nil);
-}
-
-RCT_EXPORT_METHOD(identify:(NSString *)userId
+RCT_EXTERN_METHOD(identify:(NSString *)userId
                   traits:(NSString *)traitsJson
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack identifyWithUserId:userId traits:parseJson(traitsJson)];
-    resolve(nil);
-}
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXPORT_METHOD(reset:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack reset];
-    resolve(nil);
-}
+RCT_EXTERN_METHOD(reset:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXPORT_METHOD(track:(NSString *)event
+RCT_EXTERN_METHOD(track:(NSString *)event
                   props:(NSString *)propsJson
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack track:event properties:parseJson(propsJson)];
-    resolve(nil);
-}
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXPORT_METHOD(setScreen:(NSString *)name
+RCT_EXTERN_METHOD(setScreen:(NSString *)name
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack setScreen:name];
-    resolve(nil);
-}
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXPORT_METHOD(flush:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack flush];
-    resolve(nil);
-}
+RCT_EXTERN_METHOD(flush:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXPORT_METHOD(setEnabled:(BOOL)enabled
+RCT_EXTERN_METHOD(setEnabled:(BOOL)enabled
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    [UniTrack setEnabled:enabled];
-    resolve(nil);
-}
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// ── Session API parity ────────────────────────────────────────────────────
+RCT_EXTERN_METHOD(currentSessionId:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(sessionIndex:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(previousSessionId:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(rotateSession:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// ── Offline queue + flush callback ────────────────────────────────────────
+RCT_EXTERN_METHOD(pendingEventCounts:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(setFlushCallbackEnabled:(BOOL)enabled
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// ── Application context + remote values ───────────────────────────────────
+RCT_EXTERN_METHOD(applicationContext:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getRemoteValue:(NSString *)key
+                  type:(NSString *)type
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// ── Session stat sidebag ──────────────────────────────────────────────────
+RCT_EXTERN_METHOD(sessionScreenCount:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(sessionHadError:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(sessionHadCrash:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(incrementScreenCount:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(markSessionError:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(markSessionCrash:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(resetSessionStats:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
