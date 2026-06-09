@@ -43,7 +43,7 @@ class UniTrackFirebaseCrashlytics {
       for (final entry in context.entries) {
         final v = entry.value;
         if (v is String || v is num || v is bool) {
-          await FirebaseCrashlytics.instance.setCustomKey(entry.key, v);
+          await FirebaseCrashlytics.instance.setCustomKey(entry.key, v as Object);
         } else if (v != null) {
           await FirebaseCrashlytics.instance.setCustomKey(entry.key, v.toString());
         }
