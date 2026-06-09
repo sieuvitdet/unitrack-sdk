@@ -493,7 +493,7 @@ async function renderProject(){
   // into the right-side drawer so operators can edit Snowplow / Firebase /
   // W3C / Tên màn without scrolling down to the tab. The drawer body uses
   // a stable selector (#cfgDrawerBody) and renderConfig accepts a mountSel
-  // param so its handlers (cfSave, cfImport, smAdd, screen-labels…) still
+  // param so its handlers (cfSave, cfImport…) still
   // reference the form's IDs unchanged.
   const cfgBtn   = document.getElementById('cfgDrawerBtn');
   const cfgDrw   = document.getElementById('cfgDrawer');
@@ -544,23 +544,6 @@ async function renderProject(){
   else if(route.tab==='agent') renderAgent(pid);
   else if(route.tab==='config') renderConfig(pid);
   else renderSessions(pid);   // default tab = Sessions
-}
-
-async function renderSpMaps(pid){
-  let maps=[]; try{ maps=await api(`/api/projects/${pid}/sp-maps`); }catch(_){}
-  const tb=$('#spMapRows'); if(!tb)return;
-  tb.innerHTML = maps.length ? maps.map(m=>`
-    <tr>
-      <td class="mono">${esc(m.event_name)}</td>
-      <td><span class="pill">${esc(m.mode)}</span></td>
-      <td class="mono muted" style="word-break:break-all">${esc(m.schema)||'—'}</td>
-      <td>${m.forward?'<span style="color:var(--accent2)">✓ on</span>':'<span class="muted">off</span>'}</td>
-      <td><button class="btn ghost sm smDel" data-n="${esc(m.event_name)}">×</button></td>
-    </tr>`).join('') : '<tr><td colspan="5" class="muted" style="padding:10px">Chưa có map. Event UniTrack sẽ không tự forward sang Snowplow.</td></tr>';
-  tb.querySelectorAll('.smDel').forEach(b=>b.onclick=async()=>{
-    await fetch(`${BASE}/api/projects/${pid}/sp-maps/${encodeURIComponent(b.dataset.n)}`,{method:'DELETE'});
-    toast('Đã xoá map'); renderSpMaps(pid);
-  });
 }
 
 // ── Report charts on the project overview ─────────────────────────────────
@@ -1392,39 +1375,6 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       <textarea id="cfTrHosts" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
       ${flavorOverrideHtml('Tr', tr)}
 
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px">🗺 Map event → Snowplow schema</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Khi Snowplow thêm loại event mới, thêm map ở đây để portal đóng gói đúng
-        schema rồi forward — KHÔNG cần build lại app. Event đã có schema chuẩn
-        (app tự bắn) thì để <i>forward = off</i> (portal chỉ log).
-      </div>
-      <table style="margin-bottom:10px"><thead><tr>
-        <th>Event name (thô)</th><th>Mode</th><th>Schema (iglu)</th><th>Forward</th><th></th>
-      </tr></thead><tbody id="spMapRows"></tbody></table>
-      <div class="row" style="gap:6px;flex-wrap:wrap">
-        <input id="smName" placeholder="event_name (vd: check)" style="flex:1;min-width:120px"/>
-        <select id="smMode"><option value="self_describing">self-describing</option><option value="structured">structured</option></select>
-        <input id="smSchema" placeholder="iglu:vendor/event_check/jsonschema/1-0-0" style="flex:2;min-width:200px"/>
-        <label class="row" style="gap:4px;font-size:12px"><input type="checkbox" id="smFwd" checked> forward</label>
-        <button class="btn sm" id="smAdd">+ Thêm map</button>
-      </div>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px">🏷 Tên màn (screen label map)</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:8px">
-        JSON dạng <span class="mono">{"HomeScreen":"Trang chủ"}</span>. Portal sẽ
-        hiển thị <b>ClassName — Nhãn</b> ở Log / Sessions / Heatmap và cho phép
-        tìm theo cả hai.
-      </div>
-      <textarea id="cfScreenLabels" style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11.5px"
-        placeholder='{"HomeViewController":"Trang chủ","CameraPairingVC":"Pair camera"}'></textarea>
-      <div class="muted" style="font-size:10.5px;margin-top:4px">Lưu ngay khi bấm nút bên dưới — không cần Lưu config tổng.</div>
-      <div class="row" style="gap:8px;margin-top:6px">
-        <button class="btn sm" id="cfScreenLabelsSave" type="button">💾 Lưu tên màn</button>
-        <span id="cfScreenLabelsErr" class="muted" style="font-size:11px;color:var(--danger)"></span>
-      </div>
-
       <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="cfSave">Lưu config</button>
         <button class="btn" id="cfExport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬇︎ Export JSON</button>
@@ -1915,50 +1865,6 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
     }
   }
 
-  // ── Schema map table (sp-maps) ── moved from the old Providers panel.
-  // Renders into #spMapRows declared inside the Snowplow section above.
-  renderSpMaps(pid);
-  $('#smAdd').onclick = async () => {
-    const name = $('#smName').value.trim();
-    if (!name) { toast('Nhập event name', 'err'); return; }
-    const mode = $('#smMode').value, schema = $('#smSchema').value.trim();
-    if (mode === 'self_describing' && !schema) { toast('Self-describing cần schema iglu', 'err'); return; }
-    try {
-      await api(`/api/projects/${pid}/sp-maps`, { method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ event_name:name, mode, schema, forward:$('#smFwd').checked }) });
-      $('#smName').value=''; $('#smSchema').value='';
-      toast('Đã lưu map'); renderSpMaps(pid);
-    } catch (e) { toast('Lưu map thất bại: ' + e.message, 'err'); }
-  };
-
-  // ── Screen labels (moved out of the old 🏷 Tên màn dialog) ── separate
-  // endpoint /screen-labels because labels live in projects.screen_labels,
-  // not the versioned /config blob. Independent save button so editing the
-  // textarea doesn't force a full config-save round-trip.
-  (async () => {
-    try {
-      const r = await api(`/api/projects/${pid}/screen-labels`);
-      $('#cfScreenLabels').value = JSON.stringify(r.labels || {}, null, 2);
-    } catch (_) { $('#cfScreenLabels').value = '{}'; }
-  })();
-  $('#cfScreenLabelsSave').onclick = async () => {
-    const errEl = $('#cfScreenLabelsErr');
-    errEl.textContent = '';
-    let map;
-    try {
-      map = JSON.parse($('#cfScreenLabels').value || '{}');
-      if (typeof map !== 'object' || Array.isArray(map)) throw new Error('phải là object JSON');
-    } catch (e) { errEl.textContent = 'JSON không hợp lệ: ' + e.message; return; }
-    try {
-      const r = await api(`/api/projects/${pid}/screen-labels`,
-        { method:'PUT', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ labels:map }) });
-      _screenLabels = (r && r.labels) || {};
-      toast('Đã lưu tên màn');
-    } catch (e) { errEl.textContent = 'Lưu thất bại: ' + (e.message || e); }
-  };
-
   $('#cfSave').onclick=async()=>{
     // Build the base block then attach flavor_overrides if any flavor box has
     // content. The server treats flavor_overrides as opaque JSON and only
@@ -2195,48 +2101,6 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
     } catch (e) {
       toast('Import lỗi: ' + (e && e.message || e), 'err');
     }
-  };
-}
-
-// Import / edit the screen-label map (class name → Vietnamese). Accepts a JSON
-// object pasted in; saved per-project on the backend and applied everywhere.
-async function openScreenLabelsDialog(pid){
-  closeAllUtilDialogs();
-  const cur = JSON.stringify(_screenLabels||{}, null, 2);
-  const dlg = document.createElement('dialog'); dlg.className='ut-util-dlg';
-  dlg.style.cssText='width:560px;max-width:92vw;z-index:100';
-  dlg.innerHTML = `
-    <div class="dlg-h">🏷 Map tên màn (JSON)
-      <button class="lbl-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-    <div class="dlg-b">
-      <div class="muted" style="font-size:12px;margin-bottom:8px">Dán JSON dạng <code>{"HomeScreen":"Trang chủ", ...}</code>. Portal sẽ hiển thị <b>ClassName - Nhãn</b> và cho phép tìm theo cả hai.</div>
-      <textarea id="lblJson" style="width:100%;height:300px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:monospace;font-size:12px;white-space:pre">${esc(cur)}</textarea>
-      <div id="lblErr" style="color:var(--danger);font-size:12px;margin-top:6px;min-height:16px"></div>
-      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px">
-        <button class="btn ghost sm lbl-close">Hủy</button>
-        <button class="btn sm" id="lblSave">Lưu</button>
-      </div>
-    </div>`;
-  document.body.appendChild(dlg);
-  try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
-  const kill = ()=>{ try{ dlg.close(); }catch(_){}; dlg.remove(); };
-  dlg.querySelectorAll('.lbl-close').forEach(b=>b.onclick=kill);
-  dlg.querySelector('#lblSave').onclick = async ()=>{
-    const errEl = dlg.querySelector('#lblErr');
-    let map;
-    try {
-      map = JSON.parse(dlg.querySelector('#lblJson').value || '{}');
-      if(typeof map!=='object' || Array.isArray(map)) throw new Error('phải là một object JSON');
-    } catch(e){ errEl.textContent = 'JSON không hợp lệ: '+e.message; return; }
-    try {
-      const r = await api(`/api/projects/${pid}/screen-labels`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({labels:map})});
-      _screenLabels = (r && r.labels) || {};
-      kill();
-      // Refresh whatever view is open so the new labels show up.
-      if(document.getElementById('ideOverlay') && document.getElementById('ideOverlay').style.display!=='none' && _ideState){
-        openSessionIDE(_ideState.pid, _ideState.sid);
-      } else { render(); }
-    } catch(e){ errEl.textContent = 'Lưu thất bại: '+(e.message||e); }
   };
 }
 
