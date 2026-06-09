@@ -423,42 +423,7 @@ async function renderProject(){
       </div>
       <div class="row">
         <span class="keybox" title="API key">${esc(p.api_key)}</span>
-        <button class="btn ghost sm" id="provBtn" title="Bật/forward Snowplow & Firebase">⚙ Providers</button>
-        <button class="btn ghost sm" onclick="openScreenLabelsDialog(${pid})" title="Import map tên màn (JSON)">🏷 Tên màn</button>
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
-      </div>
-    </div>
-    <div class="panel" id="provPanel" style="display:none;padding:16px;margin-bottom:16px">
-      <b>Providers — forward & xem log đa nguồn</b>
-      <div class="muted" style="font-size:12px;margin:6px 0 12px">
-        Khi bật, portal hiển thị log từ provider tương ứng (nhãn màu trong bảng Log).
-      </div>
-      <label class="row" style="gap:8px"><input type="checkbox" id="provSnow"> Snowplow</label>
-      <div id="snowCfg" style="margin:6px 0 12px 24px">
-        <div class="muted" style="font-size:12px">Snowplow collector endpoint của bạn (trỏ tracker tới đây):</div>
-        <div class="keybox mono" style="display:block;margin:4px 0">${location.origin}${BASE}/sp/${esc(p.api_key)}</div>
-        <div class="muted" style="font-size:12px;margin-top:6px">Forward tới collector THẬT (để trống = chỉ thu ở portal):</div>
-        <input id="spForward" placeholder="https://collector-that.cua-ban.com" style="width:100%;margin-top:4px" value="${esc(p.sp_forward_url||'')}"/>
-      </div>
-      <label class="row" style="gap:8px"><input type="checkbox" id="provFire"> Firebase <span class="muted" style="font-size:12px">(SDK gửi bản sao về portal)</span></label>
-      <div class="row" style="margin-top:12px"><button class="btn sm" id="provSave">Lưu</button></div>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <b>Map event → Snowplow schema</b>
-      <div class="muted" style="font-size:12px;margin:6px 0 10px">
-        Khi Snowplow thêm loại event mới, thêm map ở đây để portal đóng gói đúng
-        schema rồi forward — KHÔNG cần build lại app. Event đã có schema chuẩn (app
-        tự bắn) thì để <i>forward = off</i> (portal chỉ log).
-      </div>
-      <table style="margin-bottom:10px"><thead><tr>
-        <th>Event name (thô)</th><th>Mode</th><th>Schema (iglu)</th><th>Forward</th><th></th>
-      </tr></thead><tbody id="spMapRows"></tbody></table>
-      <div class="row" style="gap:6px;flex-wrap:wrap">
-        <input id="smName" placeholder="event_name (vd: check)" style="flex:1;min-width:120px"/>
-        <select id="smMode"><option value="self_describing">self-describing</option><option value="structured">structured</option></select>
-        <input id="smSchema" placeholder="iglu:vendor/event_check/jsonschema/1-0-0" style="flex:2;min-width:200px"/>
-        <label class="row" style="gap:4px;font-size:12px"><input type="checkbox" id="smFwd" checked> forward</label>
-        <button class="btn sm" id="smAdd">+ Thêm map</button>
       </div>
     </div>
     <div class="cards">
@@ -491,18 +456,6 @@ async function renderProject(){
       <div id="tabBody"></div>
     </div>`;
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>go({tab:t.dataset.tab}));
-  // Providers settings panel.
-  const provs=(()=>{ try{return JSON.parse(p.providers||'[]');}catch(_){return [];} })();
-  $('#provSnow').checked=provs.includes('snowplow');
-  $('#provFire').checked=provs.includes('firebase');
-  $('#provBtn').onclick=()=>{ const el=$('#provPanel'); el.style.display=el.style.display==='none'?'block':'none'; };
-  $('#provSave').onclick=async()=>{
-    const list=[]; if($('#provSnow').checked)list.push('snowplow'); if($('#provFire').checked)list.push('firebase');
-    await api(`/api/projects/${pid}/providers`,{method:'PUT',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({providers:list, sp_forward_url:$('#spForward').value.trim()})});
-    toast('Đã lưu cấu hình providers');
-  };
-  renderSpMaps(pid);
 
   // Crash card → open the crash report dialog. Only wire when there's
   // something to show (the card only renders the cursor:pointer styling
@@ -521,17 +474,6 @@ async function renderProject(){
   // Async — never blocks the project page render. The series endpoint has
   // its own ETag so revisits are cheap (304 + browser cache).
   renderStatsCharts(pid).catch(() => {});
-  $('#smAdd').onclick=async()=>{
-    const name=$('#smName').value.trim(); if(!name){toast('Nhập event name','err');return;}
-    const mode=$('#smMode').value, schema=$('#smSchema').value.trim();
-    if(mode==='self_describing' && !schema){toast('Self-describing cần schema iglu','err');return;}
-    try{
-      await api(`/api/projects/${pid}/sp-maps`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({event_name:name,mode,schema,forward:$('#smFwd').checked})});
-      $('#smName').value='';$('#smSchema').value='';
-      toast('Đã lưu map'); renderSpMaps(pid);
-    }catch(e){toast('Lưu map thất bại: '+e.message,'err');}
-  };
   if(route.tab==='logs') renderLogs(pid);
   else if(route.tab==='wireframe') renderWireframe(pid);
   else if(route.tab==='agent') renderAgent(pid);
@@ -988,6 +930,20 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
         <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
       </div>
 
+      <!-- Portal forward: trỏ tracker app vào portal collector → portal ingest
+           log → forward sang collector THẬT. sp_forward_url + providers nằm ở
+           bảng projects nên endpoint riêng (/providers), không thuộc /config. -->
+      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">
+          🔁 Portal mirror <span class="muted" style="font-weight:400">— trỏ tracker app vào portal, portal forward sang collector thật</span>
+        </div>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">Portal collector URL (gán vào <span class="mono">snowplow.endpoint</span> nếu muốn portal thấy log):</div>
+        <div class="keybox mono" style="display:block;margin:0 0 8px">${location.origin}${BASE}/sp/${esc(p.api_key)}</div>
+        <label style="font-size:11.5px">Forward tới collector thật (trống = portal chỉ thu, không bắn tiếp)</label>
+        <input id="cfSpForward" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
+               placeholder="https://collector-that.cua-ban.com" value="${esc(p.sp_forward_url||'')}"/>
+      </div>
+
       <!-- Per-platform override — SDK trên iOS pick {endpoint, appId} từ
            snowplow.ios nếu non-empty, fallback các value chung ở trên.
            Same cho Android. Mỗi platform thêm 4 sub-row flavor (dev/staging/
@@ -1356,6 +1312,39 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       <label style="margin-top:8px">Allowlist hosts (1 dòng / pattern; <span class="mono">*.suffix.com</span> hỗ trợ wildcard)</label>
       <textarea id="cfTrHosts" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
       ${flavorOverrideHtml('Tr', tr)}
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 8px;font-size:14px">🗺 Map event → Snowplow schema</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">
+        Khi Snowplow thêm loại event mới, thêm map ở đây để portal đóng gói đúng
+        schema rồi forward — KHÔNG cần build lại app. Event đã có schema chuẩn
+        (app tự bắn) thì để <i>forward = off</i> (portal chỉ log).
+      </div>
+      <table style="margin-bottom:10px"><thead><tr>
+        <th>Event name (thô)</th><th>Mode</th><th>Schema (iglu)</th><th>Forward</th><th></th>
+      </tr></thead><tbody id="spMapRows"></tbody></table>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <input id="smName" placeholder="event_name (vd: check)" style="flex:1;min-width:120px"/>
+        <select id="smMode"><option value="self_describing">self-describing</option><option value="structured">structured</option></select>
+        <input id="smSchema" placeholder="iglu:vendor/event_check/jsonschema/1-0-0" style="flex:2;min-width:200px"/>
+        <label class="row" style="gap:4px;font-size:12px"><input type="checkbox" id="smFwd" checked> forward</label>
+        <button class="btn sm" id="smAdd">+ Thêm map</button>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 8px;font-size:14px">🏷 Tên màn (screen label map)</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">
+        JSON dạng <span class="mono">{"HomeScreen":"Trang chủ"}</span>. Portal sẽ
+        hiển thị <b>ClassName — Nhãn</b> ở Log / Sessions / Heatmap và cho phép
+        tìm theo cả hai.
+      </div>
+      <textarea id="cfScreenLabels" style="width:100%;height:140px;font-family:ui-monospace,monospace;font-size:11.5px"
+        placeholder='{"HomeViewController":"Trang chủ","CameraPairingVC":"Pair camera"}'></textarea>
+      <div class="muted" style="font-size:10.5px;margin-top:4px">Lưu ngay khi bấm nút bên dưới — không cần Lưu config tổng.</div>
+      <div class="row" style="gap:8px;margin-top:6px">
+        <button class="btn sm" id="cfScreenLabelsSave" type="button">💾 Lưu tên màn</button>
+        <span id="cfScreenLabelsErr" class="muted" style="font-size:11px;color:var(--danger)"></span>
+      </div>
 
       <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="cfSave">Lưu config</button>
@@ -1847,6 +1836,50 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
     }
   }
 
+  // ── Schema map table (sp-maps) ── moved from the old Providers panel.
+  // Renders into #spMapRows declared inside the Snowplow section above.
+  renderSpMaps(pid);
+  $('#smAdd').onclick = async () => {
+    const name = $('#smName').value.trim();
+    if (!name) { toast('Nhập event name', 'err'); return; }
+    const mode = $('#smMode').value, schema = $('#smSchema').value.trim();
+    if (mode === 'self_describing' && !schema) { toast('Self-describing cần schema iglu', 'err'); return; }
+    try {
+      await api(`/api/projects/${pid}/sp-maps`, { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ event_name:name, mode, schema, forward:$('#smFwd').checked }) });
+      $('#smName').value=''; $('#smSchema').value='';
+      toast('Đã lưu map'); renderSpMaps(pid);
+    } catch (e) { toast('Lưu map thất bại: ' + e.message, 'err'); }
+  };
+
+  // ── Screen labels (moved out of the old 🏷 Tên màn dialog) ── separate
+  // endpoint /screen-labels because labels live in projects.screen_labels,
+  // not the versioned /config blob. Independent save button so editing the
+  // textarea doesn't force a full config-save round-trip.
+  (async () => {
+    try {
+      const r = await api(`/api/projects/${pid}/screen-labels`);
+      $('#cfScreenLabels').value = JSON.stringify(r.labels || {}, null, 2);
+    } catch (_) { $('#cfScreenLabels').value = '{}'; }
+  })();
+  $('#cfScreenLabelsSave').onclick = async () => {
+    const errEl = $('#cfScreenLabelsErr');
+    errEl.textContent = '';
+    let map;
+    try {
+      map = JSON.parse($('#cfScreenLabels').value || '{}');
+      if (typeof map !== 'object' || Array.isArray(map)) throw new Error('phải là object JSON');
+    } catch (e) { errEl.textContent = 'JSON không hợp lệ: ' + e.message; return; }
+    try {
+      const r = await api(`/api/projects/${pid}/screen-labels`,
+        { method:'PUT', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ labels:map }) });
+      _screenLabels = (r && r.labels) || {};
+      toast('Đã lưu tên màn');
+    } catch (e) { errEl.textContent = 'Lưu thất bại: ' + (e.message || e); }
+  };
+
   $('#cfSave').onclick=async()=>{
     // Build the base block then attach flavor_overrides if any flavor box has
     // content. The server treats flavor_overrides as opaque JSON and only
@@ -2000,6 +2033,22 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       snowplow, firebase, tracing,
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+    // Also persist providers[] + sp_forward_url (separate endpoint because the
+    // projects table owns those columns, not the versioned /config blob).
+    // Derive providers from the Snowplow/Firebase enable toggles already on
+    // this form so operators see one consolidated Save button — no separate
+    // ⚙ Providers dialog anymore.
+    const provList = [];
+    if (snowplow.enabled) provList.push('snowplow');
+    if (firebase.enabled) provList.push('firebase');
+    try {
+      await api(`/api/projects/${pid}/providers`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providers: provList, sp_forward_url: $('#cfSpForward').value.trim() }),
+      });
+    } catch (e) { toast('Lưu providers thất bại: ' + e.message, 'err'); }
+
     toast('Đã lưu config (v'+r.version+')'); renderConfig(pid);
   };
 
