@@ -35,6 +35,18 @@ object UniTrack {
     // uses, without re-running platform queries.
     internal var cachedDeviceBag: Map<String, Any?> = emptyMap()
 
+    // Last screen seen by setScreen(), used so the binding can fan out a
+    // matching screen_exited/screen_viewed pair into providers (Snowplow,
+    // Firebase) in lockstep with what the C++ core enqueues into its HTTP
+    // queue. Both paths read the same screen_start/end_event wire names so
+    // the portal log + the Snowplow collector see identical transitions.
+    private val screenLock = Any()
+    private var lastScreen: String? = null
+    private var lastScreenAtMs: Long = 0L
+    private var screenStartEventName: String = "screen_view"
+    private var screenEndEventName:   String = "screen_view"
+    private var screenLifecycleEnabled: Boolean = true
+
     /** Device/app metadata bag captured at init (platform, app_version,
      *  network_*, device_*). SnowplowProvider attaches this as the
      *  `application_context` entity. Empty before initialize(). */
@@ -221,6 +233,14 @@ object UniTrack {
         if (config.screenLoadEvent.isNotEmpty()) {
             screenLoadEventName = config.screenLoadEvent
         }
+        // Cache wire-event names for the screen-boundary fan-out done in
+        // setScreen() so providers receive screen_viewed / screen_exited
+        // under whatever taxonomy the portal set — matching what the core
+        // fires into the HTTP queue. journeyCapture=false disables both
+        // arms (core skips lifecycle events; binding skips provider fan-out).
+        screenStartEventName = config.screenStartEvent.ifEmpty { "screen_view" }
+        screenEndEventName   = config.screenEndEvent.ifEmpty   { "screen_view" }
+        screenLifecycleEnabled = config.journeyCapture
 
         // Load native lib + open core context.
         NativeBridge.load()
@@ -482,7 +502,67 @@ object UniTrack {
     @JvmStatic
     fun setScreen(name: String) {
         forEachProvider { it.setScreen(name) }
+        // Snapshot previous screen + transition timestamp on the binding side
+        // so the boundary fan-out below can build matching screen_exited /
+        // screen_viewed payloads for providers. The C++ core does its own
+        // boundary work inside NativeBridge.setScreen — these two paths stay
+        // in lockstep so the portal queue + Snowplow collector see identical
+        // transitions (same field shape, same wire names from portal config).
+        val now = System.currentTimeMillis()
+        var previous: String?
+        var dwellMs = 0L
+        synchronized(screenLock) {
+            previous = lastScreen
+            if (previous == name) previous = null   // dedupe like the core
+            val prev = previous
+            if (prev != null && prev.isNotEmpty() && lastScreenAtMs > 0L) {
+                dwellMs = now - lastScreenAtMs
+            }
+            lastScreen     = name
+            lastScreenAtMs = now
+        }
         if (initialized) NativeBridge.setScreen(name)
+
+        // Fan-out boundary events to providers. Match the field names the
+        // core emits (screen / screen_name / dwell_ms / foreground_sec /
+        // from / from_screen / previous_screen_name / is_exit_screen) so
+        // schema-aligned consumers see one canonical payload regardless of
+        // which path delivered the event.
+        if (screenLifecycleEnabled) {
+            val prev = previous
+            if (prev != null && prev.isNotEmpty()) {
+                val foregroundSec = ((dwellMs + 500L) / 1000L).toInt()
+                val endPayload: Map<String, Any?> = mapOf(
+                    "screen"          to prev,
+                    "screen_name"     to prev,
+                    "dwell_ms"        to dwellMs,
+                    "foreground_sec"  to foregroundSec,
+                    "is_exit_screen"  to false,
+                )
+                forEachProvider { it.track(screenEndEventName, endPayload) }
+            }
+        }
+        // screen_view (legacy back-compat) — kept so older portal consumers
+        // and the Snowplow native ScreenView setScreen call stay mutually
+        // consistent in case the app wires non-default providers.
+        val viewPayload: Map<String, Any?> = mapOf(
+            "screen"      to name,
+            "screen_name" to name,
+        )
+        forEachProvider { it.track("screen_view", viewPayload) }
+        if (screenLifecycleEnabled) {
+            val startPayload = mutableMapOf<String, Any?>(
+                "screen"      to name,
+                "screen_name" to name,
+            )
+            val prev = previous
+            if (prev != null && prev.isNotEmpty()) {
+                startPayload["from"]                 = prev
+                startPayload["from_screen"]          = prev
+                startPayload["previous_screen_name"] = prev
+            }
+            forEachProvider { it.track(screenStartEventName, startPayload) }
+        }
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------

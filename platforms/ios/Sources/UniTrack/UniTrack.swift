@@ -88,6 +88,24 @@ public final class UniTrack {
     // back inside the thunk. nil when no handler is set.
     fileprivate var flushSuccessHandler: (([String: Int]) -> Void)?
 
+    // Last screen passed to setScreen, used so the binding can fan out a
+    // matching screen_exited/screen_viewed pair into providers (Snowplow,
+    // Firebase). The C++ core fires the same boundary events into its HTTP
+    // queue independently — these two paths intentionally stay in lockstep
+    // so the portal log + the Snowplow collector see the same transitions.
+    private let lastScreenLock = NSLock()
+    private var lastScreen: String?
+    private var lastScreenAt: Date?
+
+    // Wire-event names for the screen boundary pair, sourced from
+    // Config.screenStartEvent / screenEndEvent (typically set from portal
+    // sdk_config.screen_start_event / screen_end_event). Default to the
+    // legacy "screen_view" so an app that never sets them keeps the old
+    // behaviour. Updated inside initialize().
+    private var screenStartEventName: String = "screen_view"
+    private var screenEndEventName:   String = "screen_view"
+    private var screenLifecycleEnabled: Bool = true
+
     // MARK: - Session helpers (used by AppLifecycleObserver + app code)
 
     /// Current session id (UUID v4). Empty before initialize().
@@ -400,8 +418,65 @@ public final class UniTrack {
         // confirms the boundary path was even reached on the C++ side.
         UniTrack.log("[UniTrack] setScreen → name=%@ (calls core ut_set_screen which fires screen_start/screen_view/screen_end)", name)
         forEachProvider { $0.setScreen(name) }
+        // Snapshot previous screen + transition timestamp on the binding side
+        // so the boundary fan-out below can build matching screen_exited /
+        // screen_viewed payloads for providers. The C++ core does its own
+        // boundary work inside ut_set_screen — these two paths are kept in
+        // lockstep so portal queue + Snowplow collector see identical
+        // transitions (same field shape, same wire names from portal config).
+        let now = Date()
+        var previous: String?
+        var dwellMs: Int = 0
+        shared.lastScreenLock.lock()
+        previous = shared.lastScreen
+        if previous == name { previous = nil } // dedupe like the core does
+        if let prev = previous, !prev.isEmpty,
+           let lastAt = shared.lastScreenAt {
+            dwellMs = Int(now.timeIntervalSince(lastAt) * 1000.0)
+        }
+        shared.lastScreen   = name
+        shared.lastScreenAt = now
+        shared.lastScreenLock.unlock()
+
         guard let ctx = shared.context else { return }
         ut_set_screen(ctx, name)
+
+        // Fan-out boundary events to providers. Match the field names the
+        // core emits (screen / screen_name / dwell_ms / foreground_sec /
+        // from / from_screen / previous_screen_name / is_exit_screen) so
+        // Snowplow's schema-aligned consumers see one canonical payload
+        // regardless of which path delivered the event.
+        if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+            let foregroundSec = (dwellMs + 500) / 1000
+            let endPayload: [String: Any] = [
+                "screen":          prev,
+                "screen_name":     prev,
+                "dwell_ms":        dwellMs,
+                "foreground_sec":  foregroundSec,
+                "is_exit_screen":  false,
+            ]
+            forEachProvider { $0.track(shared.screenEndEventName, endPayload) }
+        }
+        // screen_view (legacy back-compat) — kept so older portal consumers
+        // and the Snowplow native ScreenView call (above via setScreen) stay
+        // mutually consistent.
+        let viewPayload: [String: Any] = [
+            "screen":      name,
+            "screen_name": name,
+        ]
+        forEachProvider { $0.track("screen_view", viewPayload) }
+        if shared.screenLifecycleEnabled {
+            var startPayload: [String: Any] = [
+                "screen":      name,
+                "screen_name": name,
+            ]
+            if let prev = previous, !prev.isEmpty {
+                startPayload["from"]                 = prev
+                startPayload["from_screen"]          = prev
+                startPayload["previous_screen_name"] = prev
+            }
+            forEachProvider { $0.track(shared.screenStartEventName, startPayload) }
+        }
     }
 
     public static func flush() {
@@ -501,6 +576,14 @@ public final class UniTrack {
         if !config.screenLoadEvent.isEmpty {
             UniTrack.screenLoadEventName = config.screenLoadEvent
         }
+        // Cache wire-event names for the screen-boundary fan-out done in
+        // setScreen() so the Snowplow / Firebase providers see screen_viewed /
+        // screen_exited under whatever taxonomy the portal set, matching what
+        // the core fires into the HTTP queue. journeyCapture=false disables
+        // both arms (core skips lifecycle events; binding skips fan-out).
+        screenStartEventName = config.screenStartEvent ?? "screen_view"
+        screenEndEventName   = config.screenEndEvent   ?? "screen_view"
+        screenLifecycleEnabled = config.journeyCapture
 
         let cfgJson = UniTrack.buildConfigJson(config)
         context = ut_init(apiKey, cfgJson, UT_PLATFORM_IOS)
