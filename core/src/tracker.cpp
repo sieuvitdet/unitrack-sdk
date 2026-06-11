@@ -164,16 +164,39 @@ void Tracker::set_screen(const std::string& screen_name) {
     // then screen_view (back-compat), then screen_start for the new screen.
     // Event names for start/end are configurable so teams can map them onto
     // their own taxonomy. The whole pair is gated by config_.screen_lifecycle.
+    //
+    // Payload contract matches the team Snowplow schema (vn.fpt.ftel.snowplow
+    // /screen_view/jsonschema/1-0-0):
+    //   end  → screen, screen_name (duplicate for schema field name),
+    //          foreground_sec (= dwell_ms / 1000, rounded), dwell_ms (legacy),
+    //          is_exit_screen (false here — session-level exit detection lives
+    //          in the binding layer that owns lifecycle signals)
+    //   view → screen, screen_name
+    //   start→ screen, screen_name, from (legacy), from_screen, previous_screen_name
+    // The duplicates keep older portal consumers reading the legacy field names
+    // alive while the team Snowplow side reads the schema-aligned ones.
     if (config_.screen_lifecycle && !previous.empty()) {
+        long long foreground_sec = (dwell_ms + 500) / 1000;  // round to nearest second
         track(config_.screen_end_event,
-              "{\"screen\":\"" + previous + "\",\"dwell_ms\":" +
-              std::to_string(dwell_ms) + "}");
+              "{\"screen\":\"" + previous +
+              "\",\"screen_name\":\"" + previous +
+              "\",\"foreground_sec\":" + std::to_string(foreground_sec) +
+              ",\"dwell_ms\":" + std::to_string(dwell_ms) +
+              ",\"is_exit_screen\":false}");
     }
-    track("screen_view", "{\"screen\":\"" + screen_name + "\"}");
+    track("screen_view",
+          "{\"screen\":\"" + screen_name +
+          "\",\"screen_name\":\"" + screen_name + "\"}");
     if (config_.screen_lifecycle) {
-        track(config_.screen_start_event,
-              "{\"screen\":\"" + screen_name +
-              (previous.empty() ? "\"" : "\",\"from\":\"" + previous + "\"") + "}");
+        std::string start_payload = "{\"screen\":\"" + screen_name +
+                                    "\",\"screen_name\":\"" + screen_name + "\"";
+        if (!previous.empty()) {
+            start_payload += ",\"from\":\"" + previous + "\"";
+            start_payload += ",\"from_screen\":\"" + previous + "\"";
+            start_payload += ",\"previous_screen_name\":\"" + previous + "\"";
+        }
+        start_payload += "}";
+        track(config_.screen_start_event, start_payload);
     }
 }
 
