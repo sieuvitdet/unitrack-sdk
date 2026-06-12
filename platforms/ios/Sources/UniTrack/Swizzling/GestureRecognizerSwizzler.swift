@@ -83,13 +83,14 @@ private extension UIGestureRecognizer {
             }
             if v is UIImageView { return "img:\(NSStringFromClass(type(of: v)))" }
         }
-        // Last resort: pick the first registered target+action pair so the
-        // backend at least sees which handler fires. UIKit doesn't expose
-        // _targets publicly, so we peek via KVC against the private ivar.
-        // Falls back gracefully when the runtime layout changes.
-        let actionName = ut_firstActionName() ?? "tap"
+        // No public API on UIGestureRecognizer to read the target/action list
+        // back out, and the private `_targets` peek crashed at runtime
+        // ("UIGestureRecognizerTarget is not key value coding-compliant for
+        // the key action"). Fall back to ViewClass + recognizer kind so the
+        // operator still sees what was tapped, just without the selector hint.
         let viewCls = view.map { String(describing: type(of: $0)) } ?? "UIView"
-        return "\(viewCls)#\(actionName)"
+        let recCls  = String(describing: type(of: self))
+        return "\(viewCls)#\(recCls)"
     }
 
     func ut_ownerScreenName() -> String {
@@ -100,24 +101,5 @@ private extension UIGestureRecognizer {
             r = next
         }
         return ""
-    }
-
-    /// Best-effort peek at the recognizer's first target+action pair via the
-    /// private `_targets` ivar. Returns nil when the layout differs (newer iOS
-    /// versions, or when no target is attached). Wrapped in a guarded
-    /// value(forKey:) so a missing key doesn't crash — we just lose the hint.
-    func ut_firstActionName() -> String? {
-        // Private API surface — keep it minimal + guard everything.
-        let key = "_targets"
-        guard responds(to: NSSelectorFromString(key)) ||
-              class_getInstanceVariable(type(of: self), key) != nil else { return nil }
-        let raw: Any? = (try? value(forKey: key))
-        guard let arr = raw as? [Any], let first = arr.first else { return nil }
-        // _UIGestureRecognizerTarget has `_action` (SEL) + `_target` (id).
-        // value(forKey:"action") gets the selector wrapped as NSValue/string.
-        if let s = (first as? NSObject)?.value(forKey: "action") {
-            return String(describing: s)
-        }
-        return nil
     }
 }
