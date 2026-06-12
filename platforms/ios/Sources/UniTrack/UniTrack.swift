@@ -614,7 +614,17 @@ public final class UniTrack {
 
         if config.autoCapture {
             if config.trackScreens         { ViewControllerSwizzler.install() }
-            if config.trackTaps            { ControlSwizzler.install() }
+            if config.trackTaps            {
+                ControlSwizzler.install()
+                // Many screens use UITapGestureRecognizer on a plain UIView
+                // instead of a UIControl (custom card, image, label). Those
+                // never go through UIApplication.sendAction so ControlSwizzler
+                // misses them. GestureRecognizerSwizzler closes the gap by
+                // swizzling UIGestureRecognizer.setState — only tap recognizers
+                // reaching .recognized fire a click event, so pan/pinch/swipe
+                // recognizers stay silent.
+                GestureRecognizerSwizzler.install()
+            }
             if config.trackNetwork {
                 UniTrackURLProtocol.install()
                 // Don't capture the SDK's own uploads (avoids a feedback loop:
