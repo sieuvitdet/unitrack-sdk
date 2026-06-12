@@ -28,3 +28,15 @@ public protocol AnalyticsProvider: AnyObject {
     /// The current screen changed.
     func setScreen(_ name: String)
 }
+
+/// Alias for `AnalyticsProvider`. Use this when integrating UniTrack into an
+/// app that already declares a top-level `protocol AnalyticsProvider` of its
+/// own (vd FPT Life's FLifeTracker layer) — Swift can't disambiguate
+/// `UniTrack.AnalyticsProvider` because the module name `UniTrack` collides
+/// with the SDK facade `class UniTrack`. Conform to this typealias instead:
+///
+///     final class MyFirebaseProvider: UniTrackAnalyticsProvider { ... }
+///
+/// Identical semantics — same 4 methods, same dispatch. Existing code that
+/// already conforms to `AnalyticsProvider` keeps working unchanged.
+public typealias UniTrackAnalyticsProvider = AnalyticsProvider
