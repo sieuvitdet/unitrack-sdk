@@ -614,6 +614,11 @@ public final class UniTrack {
 
         if config.autoCapture {
             if config.trackScreens         { ViewControllerSwizzler.install() }
+            // Auto-instrument every WKWebView: swizzle init to inject a
+            // tracking JS + script message handler. Every web view (in-app
+            // browser, third-party SDK shell) starts emitting click +
+            // navigate events to UniTrack without per-call wiring.
+            UniTrackWebView.install()
             if config.trackTaps            {
                 ControlSwizzler.install()
                 // Many screens use UITapGestureRecognizer on a plain UIView
