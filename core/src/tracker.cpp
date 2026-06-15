@@ -101,10 +101,12 @@ Event Tracker::build_event(const std::string& name, const std::string& props_jso
     // aggregate by session_index / dedupe via first_event_id, matching the
     // shape Snowplow's tracker auto-attaches as a context entity.
     SessionStamp ss = session_.stamp_for_event(e.event_id);
-    e.session_id           = ss.id;
-    e.session_index        = ss.index;
-    e.previous_session_id  = ss.previous_id;
-    e.first_event_id       = ss.first_event_id;
+    e.session_id            = ss.id;
+    e.session_index         = ss.index;
+    e.previous_session_id   = ss.previous_id;
+    e.first_event_id        = ss.first_event_id;
+    e.tracking_id           = ss.tracking_id;
+    e.previous_tracking_id  = ss.previous_tracking_id;
 
     std::lock_guard<std::mutex> lock(state_mu_);
     e.user_id          = user_id_;

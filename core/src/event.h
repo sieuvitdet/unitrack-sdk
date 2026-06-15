@@ -19,6 +19,13 @@ struct Event {
     int64_t     session_index = 0;     // 1-based, lifetime counter (persists across launches)
     std::string previous_session_id;   // empty for the very first session
     std::string first_event_id;        // event_id of the first event in this session
+    // tracking_id (UUID v4) is minted 1:1 with session_id at every rotation
+    // and stamped on every outgoing event — both the Portal /v1/events feed
+    // and the Snowplow mirror. Portal stores user → session_id → tracking_id
+    // so QA can copy the tracking_id and ask the Snowplow data team to pull
+    // the full event timeline for that session.
+    std::string tracking_id;
+    std::string previous_tracking_id;  // empty for the very first session
     std::string user_id;        // empty if anonymous
     std::string screen;
     std::string properties_json; // raw JSON object string, may be "{}"

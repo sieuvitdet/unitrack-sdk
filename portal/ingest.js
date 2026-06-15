@@ -31,6 +31,15 @@ function isValid(e) {
 function normalize(e, projectId, ip, provider) {
   const props = e.properties ?? {};
   const device = e.device ?? props.device ?? null;
+  // tracking_id (UUID 1:1 với session_id, SDK 0.3.31/0.3.7+) đi top-level
+  // trong event JSON. Đẩy vào properties để buildSessionRow trong agent.js
+  // đọc ra qua props.tracking_id (đã wire sẵn) — không cần thêm cột events.
+  if (e.tracking_id && !props.tracking_id) {
+    props.tracking_id = e.tracking_id;
+  }
+  if (e.previous_tracking_id && !props.previous_tracking_id) {
+    props.previous_tracking_id = e.previous_tracking_id;
+  }
   return {
     project_id:  projectId,
     event_id:    String(e.event_id),
