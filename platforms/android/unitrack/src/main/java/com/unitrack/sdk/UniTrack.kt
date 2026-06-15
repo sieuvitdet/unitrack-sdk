@@ -267,6 +267,34 @@ object UniTrack {
         providers.removeAll { it === provider }
     }
 
+    /** Hot-reload the screen-lifecycle wire-event names without forcing the
+     *  host to call UniTrack.initialize again (which is no-op after the
+     *  first call). The provider fan-out path reads these caches AT FIRE
+     *  TIME, so post-refresh events land under the new names on Snowplow /
+     *  Firebase. The C++ core's own copies (HTTP queue) keep cold-start
+     *  values — fully resetting the core mid-flight risks dropping events.
+     *
+     *  Pass null for any field to keep its current value. Empty string ""
+     *  resets to the default ("screen_view" / "screen_load_completed").
+     *  Mirrors iOS UniTrack.applyHotConfig(...). */
+    @JvmStatic
+    @JvmOverloads
+    fun applyHotConfig(screenStartEvent: String? = null,
+                       screenEndEvent:   String? = null,
+                       screenLoadEvent:  String? = null) {
+        screenStartEvent?.let {
+            screenStartEventName = it.ifEmpty { "screen_view" }
+        }
+        screenEndEvent?.let {
+            screenEndEventName = it.ifEmpty { "screen_view" }
+        }
+        screenLoadEvent?.let {
+            screenLoadEventName = it.ifEmpty { "screen_load_completed" }
+        }
+        android.util.Log.i("UniTrack",
+            "hot-config screen events → start=$screenStartEventName end=$screenEndEventName load=$screenLoadEventName")
+    }
+
     // Run [action] against every provider, isolating failures so one bad
     // provider never breaks the main pipeline.
     private inline fun forEachProvider(action: (AnalyticsProvider) -> Unit) {

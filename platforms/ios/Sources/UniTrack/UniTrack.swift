@@ -381,6 +381,36 @@ public final class UniTrack {
         shared.providers.removeAll()
     }
 
+    /// Hot-reload the screen-lifecycle wire-event names (screenStartEvent,
+    /// screenEndEvent, screenLoadEvent). UniTrack.initialize() is guarded
+    /// `!isInitialized`, so when realtime config changes these wire names
+    /// the binding-layer caches stay frozen unless we override them here.
+    /// The C++ core's own copies (used by the HTTP queue) keep the cold-
+    /// start values — fully resetting the core mid-flight risks dropping
+    /// queued events, which the operator rarely wants. The provider
+    /// fan-out path (Snowplow/Firebase) reads these caches AT FIRE TIME,
+    /// so post-refresh events land under the new names on the providers.
+    ///
+    /// Pass nil for any field to keep its current value. Empty string ""
+    /// resets to the default ("screen_view" / "screen_load_completed").
+    public static func applyHotConfig(screenStartEvent: String? = nil,
+                                      screenEndEvent:   String? = nil,
+                                      screenLoadEvent:  String? = nil) {
+        if let v = screenStartEvent {
+            shared.screenStartEventName = v.isEmpty ? "screen_view" : v
+        }
+        if let v = screenEndEvent {
+            shared.screenEndEventName   = v.isEmpty ? "screen_view" : v
+        }
+        if let v = screenLoadEvent {
+            UniTrack.screenLoadEventName = v.isEmpty ? "screen_load_completed" : v
+        }
+        UniTrack.log("[UniTrack] hot-config screen events → start=%@ end=%@ load=%@",
+                     shared.screenStartEventName,
+                     shared.screenEndEventName,
+                     UniTrack.screenLoadEventName)
+    }
+
     /// Remove a single registered provider by identity. Useful when only one
     /// provider needs re-creating (vd just Firebase changed). Compares with
     /// ObjectIdentifier so an app can hold the original instance handle and
