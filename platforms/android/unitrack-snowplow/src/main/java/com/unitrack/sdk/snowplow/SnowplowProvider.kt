@@ -105,6 +105,19 @@ class SnowplowProvider(
     fun setEventNames(map: Map<String, String>) { eventNames = map }
     fun setEntities(map: Map<String, String>)   { entities = map }
 
+    /** Tear down the underlying Snowplow tracker so a re-init (vd portal
+     *  pushed a new endpoint) doesn't leak the old tracker. Without this,
+     *  Snowplow's Android SDK keeps the tracker registered in its namespace
+     *  registry and every event fans out to BOTH the old endpoint AND the
+     *  new one. Host calls this on the OLD provider before re-adding a
+     *  fresh SnowplowProvider via UniTrack.addProvider. Mirrors iOS
+     *  SnowplowProvider.tearDown(). */
+    fun tearDown() {
+        val t = tracker ?: return
+        try { com.snowplowanalytics.snowplow.Snowplow.removeTracker(t) } catch (_: Throwable) {}
+        tracker = null
+    }
+
     // ── AnalyticsProvider protocol ───────────────────────────────────────
 
     override fun setUser(userId: String?, traits: Map<String, Any?>) {

@@ -371,6 +371,24 @@ public final class UniTrack {
         }
     }
 
+    /// Drop every registered provider. Call this before re-adding providers
+    /// when the host re-reads portal config (vd flavor switch, SSE-driven
+    /// realtime refresh). Without it, a re-init would leave the OLD
+    /// SnowplowProvider/FirebaseProvider in the fan-out list alongside the
+    /// new one and every event would land twice — once at the old endpoint,
+    /// once at the new one.
+    public static func removeAllProviders() {
+        shared.providers.removeAll()
+    }
+
+    /// Remove a single registered provider by identity. Useful when only one
+    /// provider needs re-creating (vd just Firebase changed). Compares with
+    /// ObjectIdentifier so an app can hold the original instance handle and
+    /// pass it back without an Equatable conformance on the protocol.
+    public static func removeProvider(_ provider: AnalyticsProvider) {
+        shared.providers.removeAll { ObjectIdentifier($0) == ObjectIdentifier(provider) }
+    }
+
     // Run a closure against every provider, isolating failures so one bad
     // provider never breaks the main pipeline.
     private static func forEachProvider(_ action: (AnalyticsProvider) -> Void) {

@@ -215,6 +215,22 @@ public final class SnowplowProvider: AnalyticsProvider {
     public func setEventNames(_ map: [String: String])  { eventNames = map }
     public func setEntities(_ map: [String: String])    { entities = map }
 
+    /// Tear down the underlying Snowplow tracker so a re-init (vd portal
+    /// pushed a new endpoint) doesn't leak the old tracker. Without this,
+    /// the SnowplowTracker SDK keeps the tracker registered under its
+    /// namespace and every event fans out to BOTH the old endpoint AND the
+    /// new one. Host calls this on the old provider before adding the new
+    /// one via UniTrack.addProvider(SnowplowProvider(...)).
+    public func tearDown() {
+        // Snowplow.remove(tracker:) unregisters the controller from the
+        // SnowplowTracker SDK's internal namespace registry; without this
+        // step a subsequent createTracker with the same namespace simply
+        // returns a fresh controller while the old upload queue keeps
+        // draining to the old endpoint.
+        if let t = tracker { _ = Snowplow.remove(tracker: t) }
+        tracker = nil
+    }
+
     // MARK: - Provider protocol
 
     public func setUser(_ userId: String?, _ traits: [String: Any]) {

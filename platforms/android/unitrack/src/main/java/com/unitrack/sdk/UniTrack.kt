@@ -250,6 +250,23 @@ object UniTrack {
         appRef?.let { provider.initialize(it) }  // already initialized → bring up now
     }
 
+    /** Drop every registered provider. Call before re-adding providers when
+     *  the host re-reads portal config (vd flavor switch, SSE-driven realtime
+     *  refresh). Without it, a re-init would leave the OLD SnowplowProvider /
+     *  FirebaseProvider in the fan-out list alongside the new one and every
+     *  event would land twice — once at the old endpoint, once at the new
+     *  one. Mirrors iOS UniTrack.removeAllProviders(). */
+    @JvmStatic
+    fun removeAllProviders() {
+        providers.clear()
+    }
+
+    /** Remove a single registered provider by identity. */
+    @JvmStatic
+    fun removeProvider(provider: AnalyticsProvider) {
+        providers.removeAll { it === provider }
+    }
+
     // Run [action] against every provider, isolating failures so one bad
     // provider never breaks the main pipeline.
     private inline fun forEachProvider(action: (AnalyticsProvider) -> Unit) {
