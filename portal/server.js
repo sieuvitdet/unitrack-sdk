@@ -19,6 +19,7 @@ const { DB_PATH } = require('./db');
 const { handleIngest } = require('./ingest');
 const { handleSnowplow } = require('./snowplow');
 const { handleConfig } = require('./config');
+const { handleConfigStream } = require('./config_stream');
 const apiRouter = require('./api');
 const { buildAuthRouter, requireAuth } = require('./auth');
 const scheduler = require('./agent_scheduler');
@@ -53,6 +54,11 @@ router.post('/sp/:apiKey/com.snowplowanalytics.snowplow/tp2', handleSnowplow);
 // Remote config fetch — open, authenticated by the per-project api_key. The app
 // calls this at startup to get its tracking config (endpoint, providers, …).
 router.get('/config', handleConfig);
+// SSE stream for realtime config changes — the SDK opens this connection in
+// foreground and the portal pushes a `config_changed` event whenever a PUT
+// to /projects/:id/config bumps the version. Auth = same per-project api_key
+// the regular /config GET uses.
+router.get('/config/stream', handleConfigStream);
 router.get('/healthz', (_req, res) => res.type('text').send('ok'));
 router.use('/auth', buildAuthRouter(BASE_PATH));  // signup/login/logout/me
 router.use('/api', requireAuth, apiRouter);       // login required (admin gated inside)

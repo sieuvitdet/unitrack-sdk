@@ -106,6 +106,16 @@ public final class UniTrack {
     private var screenEndEventName:   String = "screen_view"
     private var screenLifecycleEnabled: Bool = true
 
+    // App-supplied closure invoked once each time the app comes back to
+    // foreground AND the throttle window has elapsed (default 5 min). Used by
+    // the app integration layer (vd FSDKTracking) to re-fetch portal remote
+    // config without baking the fetch URL/api_key into the SDK core. The
+    // SDK itself stays scoped to "track events"; what to refresh on
+    // foreground is a host decision.
+    fileprivate var appForegroundHandler: (() -> Void)?
+    fileprivate var foregroundThrottleSec: TimeInterval = 5 * 60
+    fileprivate var lastForegroundCallback: Date?
+
     // MARK: - Session helpers (used by AppLifecycleObserver + app code)
 
     /// Current session id (UUID v4). Empty before initialize().
@@ -197,6 +207,38 @@ public final class UniTrack {
             else { return }
             h(obj)
         }, unmanaged)
+    }
+
+    /// Register a closure invoked when the app comes back to foreground.
+    /// Used by host integrations to refresh portal remote config (or any other
+    /// startup-bound resource) without baking the fetch into the SDK core.
+    ///
+    /// Throttled by `throttleSeconds` (default 5 min) so a user that taps in
+    /// and out of the app every 30 seconds doesn't trigger N config fetches.
+    /// The first foreground after `initialize()` does NOT fire (cold start
+    /// already fetched). Subsequent didBecomeActive events trigger only when
+    /// at least `throttleSeconds` have passed since the previous callback.
+    ///
+    /// Pass `handler = nil` to clear. Set on the main thread.
+    public static func onAppForeground(throttleSeconds: TimeInterval = 5 * 60,
+                                       _ handler: (() -> Void)?) {
+        shared.appForegroundHandler   = handler
+        shared.foregroundThrottleSec  = throttleSeconds
+        shared.lastForegroundCallback = Date()   // seed so the cold-start foreground doesn't fire
+    }
+
+    /// Internal hook called by AppLifecycleObserver from the didBecomeActive
+    /// notification. Public so the observer can reach it from another file in
+    /// the same module — apps don't need to call this.
+    public static func _fireForegroundIfThrottleElapsed() {
+        guard let handler = shared.appForegroundHandler else { return }
+        let now = Date()
+        if let last = shared.lastForegroundCallback,
+           now.timeIntervalSince(last) < shared.foregroundThrottleSec {
+            return
+        }
+        shared.lastForegroundCallback = now
+        handler()
     }
 
     /// When the active session started (monotonic clock-based). Nil before init.

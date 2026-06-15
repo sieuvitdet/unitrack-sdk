@@ -8,6 +8,7 @@ const { buildWorkbook } = require('./export');
 const { namingIssues, isValidName, healthScore } = require('./scoring');
 const { requireAdmin } = require('./auth');
 const { configForProject, saveConfig } = require('./config');
+const { publishConfigChanged } = require('./config_stream');
 const { reconstructSessions, computeFlows, computeFlowGraph, runCycle,
         DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT } = require('./agent');
 const { deliver } = require('./deliver');
@@ -130,7 +131,12 @@ router.get('/projects/:id/config', ownProject, (req, res) => {
 });
 
 router.put('/projects/:id/config', ownProject, (req, res) => {
-  const version = saveConfig(Number(req.params.id), req.body || {});
+  const pid = Number(req.params.id);
+  const version = saveConfig(pid, req.body || {});
+  // Push the new version to every SDK currently watching this project's SSE
+  // stream so foreground apps refresh without waiting for their throttled
+  // poll. Fire-and-forget — broadcast doesn't await any client write.
+  publishConfigChanged(pid, version);
   res.json({ ...configForProject(req.project), version });
 });
 
