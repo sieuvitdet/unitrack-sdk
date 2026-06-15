@@ -265,6 +265,15 @@ public final class SnowplowProvider: AnalyticsProvider {
         // distinguishable downstream without parsing data fields.
         var enriched = properties
         if enriched["event_action"] == nil { enriched["event_action"] = name }
+        // Always stamp session_id + tracking_id directly into the event data.
+        // tracking_id is the 1:1 UUID Portal maps user → session → trackingId;
+        // operator pivots from a Portal lookup back to Snowplow by copying it
+        // to the data team. Done at the property level (not just core_action
+        // entity) so apps that haven't registered core_action still ship it.
+        let sid = UniTrack.currentSessionId()
+        let tid = UniTrack.currentTrackingId()
+        if enriched["session_id"]  == nil && !sid.isEmpty { enriched["session_id"]  = sid }
+        if enriched["tracking_id"] == nil && !tid.isEmpty { enriched["tracking_id"] = tid }
         trackSelfDescribing(schema: schema, eventName: resolvedName,
                             data: enriched, extraContexts: nil,
                             skipGlobalContexts: false)
@@ -392,6 +401,14 @@ public final class SnowplowProvider: AnalyticsProvider {
                 ]
                 if let screen = screen, !screen.isEmpty       { data["screen"]      = screen }
                 if let key    = elementKey, !key.isEmpty      { data["element_key"] = key }
+                // Stamp session_id + tracking_id onto every event. tracking_id
+                // is the 1:1 UUID Portal maps user → session → trackingId; the
+                // operator pivots from a Portal lookup back to Snowplow by
+                // copying this id to the data team.
+                let sid = UniTrack.currentSessionId()
+                let tid = UniTrack.currentTrackingId()
+                if !sid.isEmpty { data["session_id"]  = sid }
+                if !tid.isEmpty { data["tracking_id"] = tid }
                 out.append(SelfDescribingJson(schema: coreSchema, andData: data))
             }
             // application_context — built from the device/app bag UniTrack

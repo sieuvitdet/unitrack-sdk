@@ -143,6 +143,25 @@ public final class UniTrack {
         return String(cString: cstr)
     }
 
+    /// tracking_id — UUID minted 1:1 with currentSessionId(). A fresh UUID is
+    /// generated on every rotation (cold start, timeout, manual rotateSession),
+    /// persisted alongside the session id, and stamped on every Snowplow
+    /// payload so Portal's mapping (user → session_id → tracking_id) can
+    /// pivot a lookup back to the full Snowplow event timeline.
+    public static func currentTrackingId() -> String {
+        guard let ctx = shared.context else { return "" }
+        guard let cstr = ut_current_tracking_id(ctx) else { return "" }
+        return String(cString: cstr)
+    }
+
+    /// tracking_id of the previous (just-closed) session — empty on the very
+    /// first session after install.
+    public static func previousTrackingId() -> String {
+        guard let ctx = shared.context else { return "" }
+        guard let cstr = ut_previous_tracking_id(ctx) else { return "" }
+        return String(cString: cstr)
+    }
+
     /// Force a session rotation right now. Bumps sessionIndex(), mints a new
     /// currentSessionId(), stamps the just-closed session as previousSessionId().
     ///

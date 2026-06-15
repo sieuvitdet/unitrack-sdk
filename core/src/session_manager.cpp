@@ -10,6 +10,7 @@ SessionManager::SessionManager() {
     // First session of the process — no previous session to close.
     // load_from() may overwrite these if a persisted state exists & is fresh.
     session_id_       = generate_uuid();
+    tracking_id_      = generate_uuid();
     started_at_ms_    = current_time_ms();
     last_activity_ms_ = started_at_ms_;
 }
@@ -63,6 +64,8 @@ void SessionManager::load_from(const std::string& path) {
 
     std::string saved_id     = read_str_field(blob, "session_id");
     std::string saved_prev   = read_str_field(blob, "previous_session_id");
+    std::string saved_tid    = read_str_field(blob, "tracking_id");
+    std::string saved_prev_tid = read_str_field(blob, "previous_tracking_id");
     int64_t saved_idx        = read_int_field(blob, "session_index");
     int64_t saved_started    = read_int_field(blob, "started_at_ms");
     int64_t saved_last_act   = read_int_field(blob, "last_activity_ms");
@@ -78,15 +81,22 @@ void SessionManager::load_from(const std::string& path) {
     // window. Otherwise treat the gap as a fresh launch and bump the index.
     if (now - saved_last_act <= timeout_ms_) {
         session_id_       = saved_id;
+        // Resumed session — reuse persisted tracking_id (1:1 with session_id).
+        // Fall back to the fresh ctor uuid for legacy state files that didn't
+        // persist a tracking_id yet.
+        if (!saved_tid.empty()) tracking_id_ = saved_tid;
         started_at_ms_    = saved_started ? saved_started : now;
         last_activity_ms_ = saved_last_act;
         session_index_    = saved_idx;
         // No previous_id for a resumed session — we didn't actually rotate.
         prev_id_.clear();
+        prev_tracking_id_.clear();
     } else {
         // Gap exceeded timeout → roll forward. The newly generated session_id_
-        // in the ctor stays; record the prior id as previous + bump index.
+        // + tracking_id_ in the ctor stay; record the prior pair as previous +
+        // bump index.
         prev_id_         = saved_id;
+        prev_tracking_id_ = saved_tid;
         prev_started_ms_ = saved_started;
         prev_ended_ms_   = saved_last_act;
         prev_reason_     = SessionEndReason::timeout;
@@ -100,10 +110,12 @@ void SessionManager::save_locked() {
     if (persist_path_.empty()) return;
     std::ostringstream out;
     out << "{\"session_id\":\""          << session_id_           << "\","
+        << "\"tracking_id\":\""          << tracking_id_          << "\","
         << "\"session_index\":"          << session_index_        << ","
         << "\"started_at_ms\":"          << started_at_ms_        << ","
         << "\"last_activity_ms\":"       << last_activity_ms_     << ","
-        << "\"previous_session_id\":\""  << prev_id_              << "\"}";
+        << "\"previous_session_id\":\""  << prev_id_              << "\","
+        << "\"previous_tracking_id\":\"" << prev_tracking_id_     << "\"}";
     // Write atomically: dump to .tmp then rename. Survives a kill mid-write.
     std::string tmp = persist_path_ + ".tmp";
     {
@@ -122,6 +134,7 @@ void SessionManager::rotate_locked(SessionEndReason reason) {
     // we only emit one boundary, attributing it to the latest reason.
     if (!pending_boundary_) {
         prev_id_         = session_id_;
+        prev_tracking_id_ = tracking_id_;
         prev_started_ms_ = started_at_ms_;
     }
     prev_ended_ms_    = now;
@@ -129,6 +142,7 @@ void SessionManager::rotate_locked(SessionEndReason reason) {
     pending_boundary_ = true;
 
     session_id_       = generate_uuid();
+    tracking_id_      = generate_uuid();
     started_at_ms_    = now;
     last_activity_ms_ = now;
     session_index_   += 1;
@@ -161,6 +175,24 @@ std::string SessionManager::previous_session_id() {
     return prev_id_;
 }
 
+std::string SessionManager::current_tracking_id() {
+    std::lock_guard<std::mutex> lock(mu_);
+    int64_t now = current_time_ms();
+    // Tracking id is 1:1 with session_id, so a timeout rotation must roll
+    // both. Mirror the read-side rotation in current_session_id() to keep
+    // hot-path callers consistent.
+    if (now - last_activity_ms_ > timeout_ms_) {
+        rotate_locked(SessionEndReason::timeout);
+    }
+    last_activity_ms_ = now;
+    return tracking_id_;
+}
+
+std::string SessionManager::previous_tracking_id() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return prev_tracking_id_;
+}
+
 SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     std::lock_guard<std::mutex> lock(mu_);
     int64_t now = current_time_ms();
@@ -175,10 +207,12 @@ SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
         save_locked();  // remember across launches
     }
     SessionStamp s;
-    s.id              = session_id_;
-    s.index           = session_index_;
-    s.previous_id     = prev_id_;
-    s.first_event_id  = first_event_id_;
+    s.id                  = session_id_;
+    s.tracking_id         = tracking_id_;
+    s.index               = session_index_;
+    s.previous_id         = prev_id_;
+    s.previous_tracking_id = prev_tracking_id_;
+    s.first_event_id      = first_event_id_;
     return s;
 }
 
@@ -192,14 +226,16 @@ SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
 
     SessionResolution r;
     r.id            = session_id_;
+    r.tracking_id   = tracking_id_;
     r.started_at_ms = started_at_ms_;
     r.index         = session_index_;
     r.rotated       = pending_boundary_;
     if (pending_boundary_) {
-        r.prev_id         = prev_id_;
-        r.prev_started_ms = prev_started_ms_;
-        r.prev_ended_ms   = prev_ended_ms_;
-        r.prev_reason     = prev_reason_;
+        r.prev_id          = prev_id_;
+        r.prev_tracking_id = prev_tracking_id_;
+        r.prev_started_ms  = prev_started_ms_;
+        r.prev_ended_ms    = prev_ended_ms_;
+        r.prev_reason      = prev_reason_;
         // Consume the pending boundary — it is now the caller's job to emit it.
         pending_boundary_ = false;
         prev_reason_      = SessionEndReason::none;

@@ -138,10 +138,19 @@ class SnowplowProvider(
         val kind = kindForRawEvent(name) ?: name
         val resolved = eventName(kind, defaultEventNameFor(kind, name))
         val schema = schemaFor(resolved) ?: return
-        // Stamp event_action so events sharing a parent schema stay
-        // distinguishable downstream without parsing data fields.
-        val enriched = if (properties.containsKey("event_action")) properties
-                       else properties + ("event_action" to name)
+        // Stamp event_action + session_id + tracking_id so every event Snowplow
+        // receives carries the Portal mapping keys at the property level (not
+        // just inside core_action), letting apps without core_action registered
+        // still ship them. tracking_id is 1:1 with session_id — Portal stores
+        // user → session_id → tracking_id and the data team queries Snowplow by
+        // tracking_id to return the full pipeline.
+        val sid = com.unitrack.sdk.UniTrack.currentSessionId()
+        val tid = com.unitrack.sdk.UniTrack.currentTrackingId()
+        val enriched = properties.toMutableMap().apply {
+            if (!containsKey("event_action")) put("event_action", name)
+            if (!containsKey("session_id")  && sid.isNotEmpty()) put("session_id", sid)
+            if (!containsKey("tracking_id") && tid.isNotEmpty()) put("tracking_id", tid)
+        }
         trackSelfDescribingInternal(schema, resolved, enriched, null, false)
     }
 
@@ -244,6 +253,14 @@ class SnowplowProvider(
                 )
                 if (!screen.isNullOrEmpty())     data["screen"]      = screen
                 if (!elementKey.isNullOrEmpty()) data["element_key"] = elementKey
+                // Stamp session_id + tracking_id onto every event. tracking_id
+                // is the 1:1 UUID Portal maps user → session → trackingId; the
+                // operator pivots from a Portal lookup back to Snowplow by
+                // copying this id to the data team.
+                val sid = com.unitrack.sdk.UniTrack.currentSessionId()
+                val tid = com.unitrack.sdk.UniTrack.currentTrackingId()
+                if (sid.isNotEmpty()) data["session_id"]  = sid
+                if (tid.isNotEmpty()) data["tracking_id"] = tid
                 out.add(SelfDescribingJson(coreSchema, data.mapValues { it.value ?: "" }))
             }
             // application_context — built from the device/app bag UniTrack

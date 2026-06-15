@@ -19,10 +19,12 @@ enum class SessionEndReason {
 // the Tracker uses this to emit session_end(prev) + session_start(current).
 struct SessionResolution {
     std::string id;            // current (possibly new) session id
+    std::string tracking_id;   // current tracking id (1:1 with session id)
     int64_t     started_at_ms; // when the current session started
     int64_t     index;         // 1-based session counter (lifetime, persisted)
     bool        rotated;       // true if this call started a new session
     std::string      prev_id;        // closed session id (valid when rotated)
+    std::string      prev_tracking_id; // closed tracking id (valid when rotated)
     int64_t          prev_started_ms; // closed session start (valid when rotated)
     int64_t          prev_ended_ms;   // closed session end   (valid when rotated)
     SessionEndReason prev_reason;     // why the previous session closed
@@ -33,8 +35,10 @@ struct SessionResolution {
 // Mirrors Snowplow iglu:.../client_session/jsonschema/1-0-2 (subset).
 struct SessionStamp {
     std::string id;
+    std::string tracking_id;       // 1:1 with id — minted on every rotation
     int64_t     index = 0;
     std::string previous_id;
+    std::string previous_tracking_id;
     std::string first_event_id;
 };
 
@@ -60,6 +64,14 @@ public:
     int64_t     current_session_index();
     std::string previous_session_id();
 
+    // Tracking id: a UUID minted alongside session_id on every rotation. It is
+    // 1:1 with session_id but lives only in our domain — Portal stores the
+    // user → session_id → tracking_id map and stamps the tracking_id on
+    // outgoing Snowplow events so operators can pivot from a Portal lookup to
+    // the full event timeline in Snowplow.
+    std::string current_tracking_id();
+    std::string previous_tracking_id();
+
     // Stamp for the current event: id, index, previous_id, first_event_id.
     // Pass the event_id of the event being built — if this is the first
     // event in the session it is recorded so subsequent events can quote it.
@@ -81,6 +93,7 @@ public:
 private:
     std::mutex     mu_;
     std::string    session_id_;
+    std::string    tracking_id_;
     int64_t        started_at_ms_    = 0;
     int64_t        last_activity_ms_ = 0;
     int64_t        timeout_ms_       = 30 * 60 * 1000;  // 30 min default
@@ -97,6 +110,7 @@ private:
     // surface a clean session_end/start pair on the next lifecycle resolve.
     bool             pending_boundary_ = false;
     std::string      prev_id_;
+    std::string      prev_tracking_id_;
     int64_t          prev_started_ms_ = 0;
     int64_t          prev_ended_ms_   = 0;
     SessionEndReason prev_reason_     = SessionEndReason::none;
