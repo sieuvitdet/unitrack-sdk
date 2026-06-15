@@ -183,6 +183,45 @@ object UniTrack {
             try { l.onTransition(true) }
             catch (e: Throwable) { android.util.Log.w("UniTrack", "lifecycle listener: ${e.message}") }
         }
+        fireForegroundIfThrottleElapsed()
+    }
+
+    // App-supplied closure invoked once each time the app comes back to
+    // foreground AND the throttle window has elapsed (default 5 min). Used by
+    // the app integration layer (vd FSDKTracking) to re-fetch portal remote
+    // config without baking the fetch URL/api_key into the SDK core. iOS
+    // parity — UniTrack.onAppForeground { ... }.
+    @Volatile private var appForegroundHandler: (() -> Unit)? = null
+    @Volatile private var foregroundThrottleMs: Long = 5L * 60L * 1000L
+    @Volatile private var lastForegroundCallbackAt: Long = 0L
+
+    /**
+     * Register a closure invoked when the app comes back to foreground. Used
+     * by host integrations to refresh portal remote config (or any other
+     * startup-bound resource) without baking the fetch into the SDK core.
+     *
+     * Throttled by `throttleMs` (default 5 min). The first foreground after
+     * `initialize()` does NOT fire (cold start already fetched). Subsequent
+     * onActivityStarted 0→1 transitions trigger only when at least
+     * `throttleMs` have passed since the previous callback.
+     *
+     * Pass `handler = null` to clear.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun onAppForeground(throttleMs: Long = 5L * 60L * 1000L, handler: (() -> Unit)?) {
+        appForegroundHandler = handler
+        foregroundThrottleMs = throttleMs
+        lastForegroundCallbackAt = System.currentTimeMillis()  // seed so cold start doesn't fire
+    }
+
+    private fun fireForegroundIfThrottleElapsed() {
+        val handler = appForegroundHandler ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastForegroundCallbackAt < foregroundThrottleMs) return
+        lastForegroundCallbackAt = now
+        try { handler() }
+        catch (e: Throwable) { android.util.Log.w("UniTrack", "onAppForeground handler: ${e.message}") }
     }
 
     @JvmStatic
