@@ -168,6 +168,13 @@ function defaults(project) {
       allowlist_hosts: [],
       sampled: true,
     },
+    // Custom HTTP backends — Kibana / ELK / FPT internal endpoint. Portal là
+    // source of truth: SDK reconciles registered HttpProviders against this
+    // list on every fetch. App code does NOT call addHttpProvider any more.
+    // Format strings: "json_single" | "json_lines" | "json_array" | "elastic_bulk".
+    // Header VALUES support ${ENV_FOO} placeholders the SDK resolves from
+    // ProcessInfo (iOS) / System.getenv (Android), so secrets stay outside DB.
+    http_providers: [],
   };
 }
 
@@ -181,20 +188,25 @@ function configForProject(project, flavor = null) {
   const def = defaults(project);
   const resolved = resolveFlavor(flavor);
   const blocks = {
-    sdk_config: parse(row.sdk_config, def.sdk_config),
-    snowplow:   parse(row.snowplow,   def.snowplow),
-    firebase:   parse(row.firebase,   def.firebase),
-    tracing:    parse(row.tracing,    def.tracing),
+    sdk_config:     parse(row.sdk_config,     def.sdk_config),
+    snowplow:       parse(row.snowplow,       def.snowplow),
+    firebase:       parse(row.firebase,       def.firebase),
+    tracing:        parse(row.tracing,        def.tracing),
+    http_providers: parse(row.http_providers, def.http_providers),
   };
   // For the app-facing call (resolved flavor set), strip flavor_overrides from
   // every block + apply the matching override. For the editor call (no flavor),
   // hand back the raw blocks so the UI can render the overrides as fields.
   const out = resolved
     ? {
-        sdk_config: mergeFlavor(blocks.sdk_config, resolved),
-        snowplow:   mergeFlavor(blocks.snowplow,   resolved),
-        firebase:   mergeFlavor(blocks.firebase,   resolved),
-        tracing:    mergeFlavor(blocks.tracing,    resolved),
+        sdk_config:     mergeFlavor(blocks.sdk_config, resolved),
+        snowplow:       mergeFlavor(blocks.snowplow,   resolved),
+        firebase:       mergeFlavor(blocks.firebase,   resolved),
+        tracing:        mergeFlavor(blocks.tracing,    resolved),
+        // Arrays don't carry flavor_overrides (it'd be 4× duplication of the
+        // whole list). Hand them back as-is — operators flip enabled per
+        // provider if they need per-flavor toggling.
+        http_providers: blocks.http_providers,
       }
     : blocks;
   return {
@@ -210,24 +222,26 @@ function configForProject(project, flavor = null) {
 function saveConfig(projectId, body) {
   const cur = getRow.get(projectId);
   const next = {
-    endpoint:   body.endpoint   !== undefined ? body.endpoint                : (cur && cur.endpoint),
-    sdk_config: body.sdk_config !== undefined ? JSON.stringify(body.sdk_config) : (cur && cur.sdk_config),
-    snowplow:   body.snowplow   !== undefined ? JSON.stringify(body.snowplow)   : (cur && cur.snowplow),
-    firebase:   body.firebase   !== undefined ? JSON.stringify(body.firebase)   : (cur && cur.firebase),
-    tracing:    body.tracing    !== undefined ? JSON.stringify(body.tracing)    : (cur && cur.tracing),
+    endpoint:       body.endpoint       !== undefined ? body.endpoint                       : (cur && cur.endpoint),
+    sdk_config:     body.sdk_config     !== undefined ? JSON.stringify(body.sdk_config)     : (cur && cur.sdk_config),
+    snowplow:       body.snowplow       !== undefined ? JSON.stringify(body.snowplow)       : (cur && cur.snowplow),
+    firebase:       body.firebase       !== undefined ? JSON.stringify(body.firebase)       : (cur && cur.firebase),
+    tracing:        body.tracing        !== undefined ? JSON.stringify(body.tracing)        : (cur && cur.tracing),
+    http_providers: body.http_providers !== undefined ? JSON.stringify(body.http_providers) : (cur && cur.http_providers),
   };
   const version = (cur ? cur.version : 0) + 1;
   db.prepare(`
-    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, tracing, version, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO project_config (project_id, endpoint, sdk_config, snowplow, firebase, tracing, http_providers, version, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id) DO UPDATE SET
       endpoint = excluded.endpoint, sdk_config = excluded.sdk_config,
       snowplow = excluded.snowplow, firebase = excluded.firebase,
-      tracing = excluded.tracing,
+      tracing = excluded.tracing, http_providers = excluded.http_providers,
       version = excluded.version, updated_at = excluded.updated_at
   `).run(projectId, next.endpoint ?? null, next.sdk_config ?? null, next.snowplow ?? null,
          next.firebase ?? null,
-         next.tracing ?? null, version, Date.now());
+         next.tracing ?? null, next.http_providers ?? null,
+         version, Date.now());
   return version;
 }
 

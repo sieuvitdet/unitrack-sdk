@@ -159,11 +159,12 @@ router.get('/projects/:id/config/export', ownProject, (req, res) => {
     exported_at: Date.now(),
     exported_from: { project_id: req.project.id, name: req.project.name },
     config: {
-      endpoint:   cfg.endpoint || null,
-      sdk_config: cfg.sdk_config || {},
-      snowplow:   cfg.snowplow || {},
-      firebase:   cfg.firebase || {},
-      tracing:    cfg.tracing || {},
+      endpoint:       cfg.endpoint || null,
+      sdk_config:     cfg.sdk_config || {},
+      snowplow:       cfg.snowplow || {},
+      firebase:       cfg.firebase || {},
+      tracing:        cfg.tracing || {},
+      http_providers: cfg.http_providers || [],
     },
     sp_event_maps: spMaps,
   };
@@ -194,11 +195,12 @@ router.post('/projects/:id/config/import', ownProject, (req, res) => {
   // Pass each section through saveConfig only if the bundle actually has it
   // — otherwise the existing value stays. JSON-stringify happens inside.
   const patch = {};
-  if (c.endpoint   !== undefined) patch.endpoint   = c.endpoint;
-  if (c.sdk_config !== undefined) patch.sdk_config = c.sdk_config;
-  if (c.snowplow   !== undefined) patch.snowplow   = c.snowplow;
-  if (c.firebase   !== undefined) patch.firebase   = c.firebase;
-  if (c.tracing    !== undefined) patch.tracing    = c.tracing;
+  if (c.endpoint       !== undefined) patch.endpoint       = c.endpoint;
+  if (c.sdk_config     !== undefined) patch.sdk_config     = c.sdk_config;
+  if (c.snowplow       !== undefined) patch.snowplow       = c.snowplow;
+  if (c.firebase       !== undefined) patch.firebase       = c.firebase;
+  if (c.tracing        !== undefined) patch.tracing        = c.tracing;
+  if (c.http_providers !== undefined) patch.http_providers = c.http_providers;
   const version = saveConfig(Number(req.params.id), patch);
 
   // sp_event_maps: clear + repopulate. These are small and the natural mental

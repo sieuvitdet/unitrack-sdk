@@ -182,6 +182,7 @@ db.exec(`
     snowplow       TEXT,                  -- JSON: {enabled, endpoint, appId, userContext, userContextSchema, options, schemas}
     firebase       TEXT,                  -- JSON: {enabled, options:{apiKey,appId,projectId,gcmSenderId,bundleId,storageBucket}, superProperties, userProperties}
     tracing        TEXT,                  -- JSON: {enabled, header_name, allowlist_hosts:[...], sampled}
+    http_providers TEXT,                  -- JSON: [{id, enabled, endpoint, format, headers, batch_size, flush_interval_ms}, ...]
     version        INTEGER NOT NULL DEFAULT 1,
     updated_at     INTEGER NOT NULL
   );
@@ -240,6 +241,9 @@ ensureColumn('projects', 'providers', 'TEXT');
 // in the portal (Sessions/wireframe) and searchable in the IDE.
 ensureColumn('projects', 'screen_labels', 'TEXT');
 ensureColumn('project_config', 'tracing', 'TEXT');
+// http_providers (Phase 6) — JSON array of custom HTTP backends (Kibana / ELK
+// / FPT internal). Portal là source of truth; SDK reconcile mỗi lần fetch.
+ensureColumn('project_config', 'http_providers', 'TEXT');
 // tracking_id (1:1 với session_id) — SDK 0.3.31/0.3.7+ stamp lên mọi event.
 // QA dùng để query Snowplow ra full event timeline cho 1 session cụ thể.
 ensureColumn('app_sessions', 'tracking_id', 'TEXT');

@@ -1293,6 +1293,7 @@ async function renderConfig(pid, mountSel){
     api(`/api/projects/${pid}`),
   ]);
   const s = c.sdk_config||{}, sp=c.snowplow||{}, fb=c.firebase||{}, fbo=(fb.options||{}), tr=c.tracing||{};
+  const hp = Array.isArray(c.http_providers) ? c.http_providers : [];
   const kvText = (obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}=${v}`).join('\n');
   // Pull existing overrides so the override UI starts populated. Block-level
   // helper: returns the override object for `flavor` or {}.
@@ -1704,7 +1705,7 @@ async function renderConfig(pid, mountSel){
           <b>Chưa tích hợp Firebase:</b> mở guide tương ứng platform → làm theo các bước (có code mẫu, nút copy, hình minh hoạ).
         </div>
       </div>
-      <!-- Hidden inputs cho cfSave: Firebase config + W3C — tạm ẩn UI nhưng giữ giá trị cũ -->
+      <!-- Hidden inputs cho cfSave: Firebase config cũ — vẫn giữ để không vỡ schema -->
       <input type="hidden" id="cfFbApp"    value="${esc(fbo.appId||'')}"/>
       <input type="hidden" id="cfFbSender" value="${esc(fbo.gcmSenderId||'')}"/>
       <input type="hidden" id="cfFbKey"    value="${esc(fbo.apiKey||'')}"/>
@@ -1713,10 +1714,52 @@ async function renderConfig(pid, mountSel){
       <textarea id="cfFbSuper" style="display:none">${esc(kvText(fb.superProperties))}</textarea>
       <textarea id="cfFbUser"  style="display:none">${esc(kvText(fb.userProperties))}</textarea>
 
-      <input type="hidden" id="cfTrOn"      data-checked="${tr.enabled?'1':''}" value="${tr.enabled?'on':''}"/>
-      <input type="hidden" id="cfTrHdr"     value="${esc(tr.header_name||'traceparent')}"/>
-      <input type="hidden" id="cfTrSampled" data-checked="${tr.sampled!==false?'1':''}" value="${tr.sampled!==false?'on':''}"/>
-      <textarea id="cfTrHosts" style="display:none">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
+      <!-- ═════════ Custom HTTP Providers (Phase 6) ═════════ -->
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 4px;font-size:14px">🔌 Custom HTTP Providers</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.5">
+        Gắn UniTrack lên Kibana / ELK / API nội bộ FPT. SDK tự gửi event,
+        retry khi mất mạng. App <b>không cần code</b> — Portal là nguồn duy nhất.
+        Headers chứa secret có thể viết kiểu <span class="mono">\${ENV_KIBANA_KEY}</span>,
+        SDK đọc từ env vars lúc chạy.
+      </div>
+      <div id="cfHpList"></div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <button class="btn ghost sm" id="cfHpAdd" type="button">+ Thêm provider</button>
+      </div>
+      <textarea id="cfHpData" style="display:none">${esc(JSON.stringify(hp))}</textarea>
+
+      <!-- ═════════ W3C Trace Context ═════════ -->
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <h3 style="margin:0 0 4px;font-size:14px">
+        <label class="row" style="gap:6px;display:inline-flex">
+          <input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}>
+          W3C Trace Context
+        </label>
+      </h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.5">
+        Bật để SDK gắn header <span class="mono">traceparent</span> vào HTTP request đi
+        backend nội bộ — cùng <span class="mono">trace_id</span> xuất hiện ở app event +
+        log API + log DB, dò lỗi xuyên hệ thống.
+        <b style="color:var(--accent)">Allowlist trống = SDK không inject gì cả</b>
+        (fail-closed, tránh leak header sang Firebase / Maps / CDN).
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="col" style="gap:4px">
+          <span class="muted" style="font-size:11px">Tên header (mặc định traceparent)</span>
+          <input type="text" id="cfTrHdr" value="${esc(tr.header_name||'traceparent')}" placeholder="traceparent"/>
+        </label>
+        <label class="row" style="gap:6px;align-self:end;padding:6px 0">
+          <input type="checkbox" id="cfTrSampled" ${tr.sampled!==false?'checked':''}>
+          <span style="font-size:12.5px">Đánh dấu sampled (flags=01)</span>
+        </label>
+      </div>
+      <label class="col" style="gap:4px;margin-top:8px">
+        <span class="muted" style="font-size:11px">
+          Allowlist host (1 dòng/host, hỗ trợ <span class="mono">*.mobix.asia</span>)
+        </span>
+        <textarea id="cfTrHosts" rows="3" placeholder="api.mobix.asia&#10;*.fpt.vn">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
+      </label>
 
       <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="cfSave">Lưu config</button>
@@ -2211,6 +2254,159 @@ async function renderConfig(pid, mountSel){
     }
   }
 
+  // ═════════ Custom HTTP Providers: state + render + modal CRUD ═════════
+  //
+  // State sống trong textarea hidden #cfHpData (JSON array). UI render list
+  // ở #cfHpList. Add/Edit dùng cùng 1 modal. cfSave đọc lại #cfHpData lúc PUT.
+  const HP_FORMATS = [
+    ['json_single', 'JSON đơn (1 event = 1 POST)'],
+    ['json_lines',  'NDJSON (mỗi event 1 dòng)'],
+    ['json_array',  'JSON array (gộp 1 mảng)'],
+    ['elastic_bulk','Elasticsearch _bulk (Kibana / ELK)'],
+  ];
+  const hpRead = () => {
+    try { return JSON.parse($('#cfHpData').value || '[]'); } catch (_) { return []; }
+  };
+  const hpWrite = (arr) => { $('#cfHpData').value = JSON.stringify(arr); hpRender(); };
+  const hpFormatLabel = (k) => (HP_FORMATS.find(([id]) => id === k) || ['', k])[1];
+  const hpRender = () => {
+    const list = hpRead();
+    const host = $('#cfHpList');
+    if (!host) return;
+    if (!list.length) {
+      host.innerHTML =
+        '<div class="muted" style="font-size:12px;font-style:italic;padding:8px 0">' +
+        'Chưa có provider nào. Bấm <b>+ Thêm provider</b> để gắn Kibana / ELK / backend FPT.</div>';
+      return;
+    }
+    host.innerHTML = list.map((p, i) => `
+      <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:var(--panel2)">
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="mono" style="font-weight:600;color:var(--fg)">${esc(p.id)}</span>
+          <span class="tag-soft" style="font-size:11px">${esc(hpFormatLabel(p.format||'json_single'))}</span>
+          <span style="font-size:11px;color:${p.enabled===false?'var(--muted)':'var(--ok,#0a7d3a)'}">
+            ${p.enabled===false?'⏸ Tắt':'● Bật'}
+          </span>
+          <span style="flex:1"></span>
+          <button class="btn ghost sm" type="button" data-hp-edit="${i}">Sửa</button>
+          <button class="btn ghost sm" type="button" data-hp-del="${i}" style="color:var(--accent)">Xoá</button>
+        </div>
+        <div class="muted mono" style="font-size:11.5px;margin-top:6px;word-break:break-all">${esc(p.endpoint||'')}</div>
+        <div class="muted" style="font-size:11px;margin-top:3px">
+          Batch ${p.batch_size||50} event · flush ${Math.round((p.flush_interval_ms||30000)/1000)}s
+          · ${Object.keys(p.headers||{}).length} header
+        </div>
+      </div>`).join('');
+    host.querySelectorAll('[data-hp-edit]').forEach((btn) => {
+      btn.onclick = () => hpOpenModal(+btn.dataset.hpEdit);
+    });
+    host.querySelectorAll('[data-hp-del]').forEach((btn) => {
+      btn.onclick = () => {
+        const idx = +btn.dataset.hpDel;
+        const arr = hpRead();
+        if (!confirm('Xoá provider "' + (arr[idx]?.id || '') + '"?')) return;
+        arr.splice(idx, 1); hpWrite(arr);
+      };
+    });
+  };
+  const hpOpenModal = (editIdx) => {
+    const arr = hpRead();
+    const cur = editIdx != null ? (arr[editIdx] || {}) : { format: 'json_single', enabled: true, batch_size: 50, flush_interval_ms: 30000 };
+    const headersText = Object.entries(cur.headers || {})
+      .map(([k, v]) => k + ': ' + v).join('\n');
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+    modal.innerHTML = `
+      <div style="background:var(--bg);border-radius:12px;padding:20px;width:560px;max-width:92vw;max-height:90vh;overflow:auto;border:1px solid var(--line)">
+        <h3 style="margin:0 0 14px;font-size:15px">${editIdx!=null?'Sửa':'Thêm'} HTTP Provider</h3>
+        <label class="col" style="gap:4px;margin-bottom:10px">
+          <span class="muted" style="font-size:11px">ID (A-Z, 0-9, _, dùng làm khoá retry — không trùng)</span>
+          <input type="text" id="hpfId" value="${esc(cur.id||'')}" placeholder="kibana"/>
+        </label>
+        <label class="col" style="gap:4px;margin-bottom:10px">
+          <span class="muted" style="font-size:11px">Endpoint URL</span>
+          <input type="text" id="hpfEndpoint" value="${esc(cur.endpoint||'')}" placeholder="https://kibana.fpt.vn/_bulk"/>
+        </label>
+        <label class="col" style="gap:4px;margin-bottom:10px">
+          <span class="muted" style="font-size:11px">Định dạng payload</span>
+          <select id="hpfFormat">
+            ${HP_FORMATS.map(([id, label]) =>
+              `<option value="${id}" ${cur.format===id?'selected':''}>${esc(label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="col" style="gap:4px;margin-bottom:10px">
+          <span class="muted" style="font-size:11px">
+            Headers (1 dòng = <span class="mono">key: value</span>;
+            value có thể là <span class="mono">\${ENV_KIBANA_KEY}</span> để SDK lấy từ env vars)
+          </span>
+          <textarea id="hpfHeaders" rows="3" placeholder="Authorization: \${ENV_KIBANA_KEY}">${esc(headersText)}</textarea>
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <label class="col" style="gap:4px">
+            <span class="muted" style="font-size:11px">Batch size (số event/batch)</span>
+            <input type="number" id="hpfBatch" min="1" max="500" value="${cur.batch_size||50}"/>
+          </label>
+          <label class="col" style="gap:4px">
+            <span class="muted" style="font-size:11px">Flush mỗi (giây)</span>
+            <input type="number" id="hpfFlush" min="1" max="600" value="${Math.round((cur.flush_interval_ms||30000)/1000)}"/>
+          </label>
+        </div>
+        <label class="row" style="gap:6px;margin-bottom:14px">
+          <input type="checkbox" id="hpfEnabled" ${cur.enabled!==false?'checked':''}>
+          <span style="font-size:12.5px">Bật provider này</span>
+        </label>
+        <div class="row" style="gap:8px;justify-content:flex-end">
+          <button class="btn ghost sm" id="hpfCancel" type="button">Huỷ</button>
+          <button class="btn sm" id="hpfSave" type="button">Lưu</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.querySelector('#hpfCancel').onclick = close;
+    modal.onclick = (e) => { if (e.target === modal) close(); };
+    modal.querySelector('#hpfSave').onclick = () => {
+      const id = modal.querySelector('#hpfId').value.trim();
+      const endpoint = modal.querySelector('#hpfEndpoint').value.trim();
+      if (!id || !/^[A-Za-z0-9_]+$/.test(id)) {
+        toast('ID phải chỉ chứa A-Z, 0-9, dấu _', 'err'); return;
+      }
+      if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
+        toast('Endpoint phải bắt đầu https:// hoặc http://', 'err'); return;
+      }
+      // Unique id check (skip the row we're editing).
+      const others = hpRead().filter((_, i) => i !== editIdx);
+      if (others.some((p) => p.id === id)) {
+        toast('Đã có provider id "' + id + '"', 'err'); return;
+      }
+      // Parse headers from "key: value" lines.
+      const headers = {};
+      modal.querySelector('#hpfHeaders').value.split('\n').forEach((line) => {
+        const idx = line.indexOf(':');
+        if (idx > 0) {
+          const k = line.slice(0, idx).trim();
+          const v = line.slice(idx + 1).trim();
+          if (k) headers[k] = v;
+        }
+      });
+      const entry = {
+        id, endpoint,
+        format:           modal.querySelector('#hpfFormat').value,
+        headers:          Object.keys(headers).length ? headers : undefined,
+        batch_size:       +modal.querySelector('#hpfBatch').value || 50,
+        flush_interval_ms: (+modal.querySelector('#hpfFlush').value || 30) * 1000,
+        enabled:          modal.querySelector('#hpfEnabled').checked,
+      };
+      const arr = hpRead();
+      if (editIdx != null) arr[editIdx] = entry; else arr.push(entry);
+      hpWrite(arr);
+      close();
+    };
+  };
+  // Initial render + add button wire.
+  hpRender();
+  const addBtn = $('#cfHpAdd');
+  if (addBtn) addBtn.onclick = () => hpOpenModal(null);
+
   $('#cfSave').onclick=async()=>{
    try {
     // Build the base block then attach flavor_overrides if any flavor box has
@@ -2338,6 +2534,11 @@ async function renderConfig(pid, mountSel){
     // Apps that need remote toggles wire Firebase Remote Config or their own
     // backend directly; UniTrack stays scoped to tracking.
 
+    // Custom HTTP Providers — read JSON từ hidden state managed bởi modal CRUD.
+    let httpProviders = [];
+    try { httpProviders = JSON.parse($('#cfHpData').value || '[]'); }
+    catch (_) { httpProviders = []; }
+
     const body = {
       endpoint: $('#cfEndpoint').value.trim(),
       sdk_config: { batchSize:+$('#cfBatch').value, flushIntervalMs:+$('#cfFlush').value, logLevel:$('#cfLog').value,
@@ -2349,6 +2550,7 @@ async function renderConfig(pid, mountSel){
         screen_load_event:  $('#cfScreenLoad').value.trim(),
       },
       snowplow, firebase, tracing,
+      http_providers: httpProviders,
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
