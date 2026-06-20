@@ -1,7 +1,7 @@
 {
   "name": "@unitrack/firebase",
-  "version": "1.0.0",
-  "description": "Firebase provider for @unitrack/react-native. Forwards UniTrack events to Firebase Analytics, plus optional helpers for Messaging (FCM token + push tracking), Crashlytics (non-fatal errors), and Remote Config.",
+  "version": "1.1.0",
+  "description": "Firebase Analytics provider for @unitrack/react-native. Mirrors every UniTrack event into Firebase Analytics so marketing funnels / audiences keep working without wiring two SDKs by hand. Analytics-only as of 1.1.0.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -41,15 +41,7 @@
   "peerDependencies": {
     "@unitrack/react-native": ">=1.0.0",
     "@react-native-firebase/app": ">=18.0.0",
-    "@react-native-firebase/analytics": ">=18.0.0",
-    "@react-native-firebase/messaging": ">=18.0.0",
-    "@react-native-firebase/crashlytics": ">=18.0.0",
-    "@react-native-firebase/remote-config": ">=18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@react-native-firebase/messaging":     { "optional": true },
-    "@react-native-firebase/crashlytics":   { "optional": true },
-    "@react-native-firebase/remote-config": { "optional": true }
+    "@react-native-firebase/analytics": ">=18.0.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

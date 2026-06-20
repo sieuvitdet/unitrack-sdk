@@ -14,11 +14,6 @@
 
 import type { AnalyticsProvider, EventProperties } from '@unitrack/react-native';
 
-// Re-export helper façades so apps only need a single import.
-export { UniTrackFirebaseMessaging } from './messaging';
-export { UniTrackFirebaseCrashlytics } from './crashlytics';
-export { UniTrackFirebaseRemoteConfig } from './remoteConfig';
-
 export class FirebaseProvider implements AnalyticsProvider {
   private analytics: any = null;
 

@@ -154,10 +154,6 @@ public final class FirebaseProvider: AnalyticsProvider {
         for (k, v) in traits {
             Analytics.setUserProperty(stringify(v), forName: sanitizeName(k))
         }
-        // Keep Crashlytics' user id in sync so crash reports are attributed
-        // to the same identity Analytics segments by. Compiled-out when
-        // Crashlytics isn't linked.
-        UniTrackFirebaseCrashlytics.syncUser(userId)
     }
 
     public func setScreen(_ name: String) {

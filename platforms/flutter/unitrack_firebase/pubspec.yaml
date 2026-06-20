@@ -1,9 +1,10 @@
 name: unitrack_firebase
 description: >-
-  Firebase provider for UniTrack. Forwards UniTrack events to Firebase Analytics,
-  plus optional helpers for Messaging (FCM token + push notification tracking),
-  Crashlytics (non-fatal error recording), and Remote Config resolution.
-version: 1.0.0
+  Firebase Analytics provider for UniTrack. Mirrors every UniTrack event into
+  Firebase Analytics so marketing funnels / audiences keep working without
+  wiring two SDKs by hand. Analytics-only — Messaging / Crashlytics / Remote
+  Config helpers were dropped in 1.1.0 to keep the SDK focused on tracking.
+version: 1.1.0
 homepage: https://github.com/sieuvitdet/unitrack-sdk
 repository: https://github.com/sieuvitdet/unitrack-sdk
 issue_tracker: https://github.com/sieuvitdet/unitrack-sdk/issues
@@ -30,9 +31,6 @@ dependencies:
   # app pins (vd MobiX uses firebase_core 4.x / firebase_analytics 12.x).
   firebase_core: '>=2.0.0 <5.0.0'
   firebase_analytics: '>=10.0.0 <13.0.0'
-  firebase_messaging: '>=14.0.0 <16.0.0'
-  firebase_crashlytics: '>=3.0.0 <5.0.0'
-  firebase_remote_config: '>=4.0.0 <6.0.0'
 
 dev_dependencies:
   flutter_lints: ^3.0.0

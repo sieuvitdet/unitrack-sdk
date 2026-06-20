@@ -117,10 +117,6 @@ class FirebaseProvider @JvmOverloads constructor(
         for ((k, v) in traits) {
             fa?.setUserProperty(sanitizeName(k), stringify(v))
         }
-        // Keep Crashlytics' user id in sync so crash reports attribute to the
-        // same identity Analytics segments by. No-op when Crashlytics isn't
-        // linked into the app (reflection inside the helper handles that).
-        UniTrackFirebaseCrashlytics.syncUser(userId)
     }
 
     override fun setScreen(name: String) {
