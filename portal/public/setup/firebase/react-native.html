@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Firebase · React Native · UniTrack</title>
+<link rel="stylesheet" href="./_styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a href="../../" class="back">← Quay lại Portal</a>
+  <h1>📘 Setup Firebase <span class="platform-pill">⚛ React Native</span></h1>
+</div>
+
+<div class="wrap">
+
+  <div class="platform-switch">
+    <a href="./ios.html">🍎 iOS Native</a>
+    <a href="./android.html">🤖 Android Native</a>
+    <a href="./flutter.html">🐦 Flutter</a>
+    <a class="active" href="./react-native.html">⚛ React Native</a>
+  </div>
+
+  <div class="hero">
+    <h2>Tích hợp Firebase vào dự án React Native</h2>
+    <p>
+      Dùng <strong>@react-native-firebase/*</strong>. Hỗ trợ cả <strong>bare RN CLI</strong> và
+      <strong>Expo (managed/EAS)</strong>. Tốn ~10 phút cho cả 2 platform.
+    </p>
+  </div>
+
+  <div class="callout">
+    <strong>⚙ Yêu cầu trước khi bắt đầu</strong>
+    Node ≥ 18 · React Native ≥ 0.72 · CocoaPods (iOS) · Android SDK Tools.
+    Nếu dùng Expo, cần dùng custom dev client (không chạy được trên Expo Go vì native module).
+  </div>
+
+
+  <h2 class="section"><span class="num">1</span> Tạo Firebase project + đăng ký 2 app</h2>
+  <p>Vào <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a> → tạo project →</p>
+  <ul>
+    <li>Đăng ký <strong>iOS app</strong> với bundle ID (lấy từ <code>ios/YourApp.xcodeproj</code>)</li>
+    <li>Đăng ký <strong>Android app</strong> với package name (lấy từ <code>android/app/build.gradle</code> → <code>applicationId</code>)</li>
+    <li>Tải <code>GoogleService-Info.plist</code> → đặt vào <code>ios/YourApp/</code></li>
+    <li>Tải <code>google-services.json</code> → đặt vào <code>android/app/</code></li>
+  </ul>
+
+
+  <h2 class="section"><span class="num">2</span> Cài <code>@react-native-firebase/*</code> packages</h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal · npm</span><button class="copy">📋 Copy</button></div>
+    <pre><code>npm install @react-native-firebase/app
+npm install @react-native-firebase/analytics
+npm install @react-native-firebase/crashlytics</code></pre>
+  </div>
+
+  <p>Hoặc yarn:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal · yarn</span><button class="copy">📋 Copy</button></div>
+    <pre><code>yarn add @react-native-firebase/app
+yarn add @react-native-firebase/analytics
+yarn add @react-native-firebase/crashlytics</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">3</span> Sửa Android Gradle</h2>
+  <p>Mở <code>android/build.gradle</code> (project-level), thêm classpath:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Groovy · android/build.gradle</span><button class="copy">📋 Copy</button></div>
+    <pre><code>buildscript {
+    dependencies {
+        // ... existing
+        classpath 'com.google.gms:google-services:4.4.2'
+        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.2'
+    }
+}</code></pre>
+  </div>
+
+  <p>Mở <code>android/app/build.gradle</code>, thêm <strong>dưới cùng</strong> file:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Groovy · android/app/build.gradle</span><button class="copy">📋 Copy</button></div>
+    <pre><code>apply plugin: 'com.google.gms.google-services'
+apply plugin: 'com.google.firebase.crashlytics'</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">4</span> Setup iOS</h2>
+  <p>Mở <code>ios/YourApp/AppDelegate.mm</code> (hoặc <code>.m</code>):</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Objective-C · AppDelegate.mm</span><button class="copy">📋 Copy</button></div>
+    <pre><code>#import &lt;Firebase.h&gt;    // ← Thêm
+
+@implementation AppDelegate
+
+- (BOOL)application:(UIApplication *)application
+    didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    [FIRApp configure];    // ← Thêm DÒNG NÀY TRƯỚC return YES;
+
+    // ... existing code
+    return YES;
+}
+@end</code></pre>
+  </div>
+
+  <p>Chạy pod install:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>cd ios
+pod install --repo-update
+cd ..</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">5</span> Verify trong JS code</h2>
+  <p>Tạo file <code>src/firebase.ts</code>:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">TypeScript · src/firebase.ts</span><button class="copy">📋 Copy</button></div>
+    <pre><code>import firebase from '@react-native-firebase/app';
+import analytics from '@react-native-firebase/analytics';
+import crashlytics from '@react-native-firebase/crashlytics';
+
+// Firebase tự init từ GoogleService-Info.plist và google-services.json
+// — không cần gọi initializeApp() thủ công trong RN.
+
+export async function logAppOpen() {
+  await analytics().logAppOpen();
+}
+
+export function enableCrashlytics() {
+  crashlytics().setCrashlyticsCollectionEnabled(true);
+}</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">6</span> Build & chạy</h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code># iOS
+npx react-native run-ios
+
+# Android
+npx react-native run-android</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">7</span> Setup Expo (nếu dùng Expo)</h2>
+  <p>Expo Go <strong>không hỗ trợ</strong> @react-native-firebase. Phải dùng custom dev client:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal · Expo</span><button class="copy">📋 Copy</button></div>
+    <pre><code># Cài expo-build-properties + dev client
+npx expo install expo-build-properties expo-dev-client
+
+# Cấu hình app.json
+# Thêm plugin section</code></pre>
+  </div>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">JSON · app.json</span><button class="copy">📋 Copy</button></div>
+    <pre><code>{
+  "expo": {
+    "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/crashlytics",
+      [
+        "expo-build-properties",
+        {
+          "ios": { "useFrameworks": "static" }
+        }
+      ]
+    ],
+    "ios": {
+      "googleServicesFile": "./GoogleService-Info.plist"
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json"
+    }
+  }
+}</code></pre>
+  </div>
+
+  <p>Build dev client:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>eas build --profile development --platform all</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">8</span> Bật forward UniTrack → Firebase</h2>
+  <p>
+    Mở Portal → Project → tab <strong>Config (remote)</strong> → bật toggle
+    <strong>"Firebase Analytics / Crashlytics"</strong> → Lưu.
+  </p>
+
+
+  <h2 class="section"><span class="num">✓</span> Checklist hoàn thành</h2>
+  <ul class="checklist">
+    <li>Tạo Firebase project + đăng ký iOS app + Android app</li>
+    <li>Đặt <code>GoogleService-Info.plist</code> vào <code>ios/YourApp/</code></li>
+    <li>Đặt <code>google-services.json</code> vào <code>android/app/</code></li>
+    <li>Cài <code>@react-native-firebase/app</code> + analytics + crashlytics</li>
+    <li>Sửa <code>android/build.gradle</code> + <code>android/app/build.gradle</code></li>
+    <li>Gọi <code>[FIRApp configure]</code> trong AppDelegate (iOS)</li>
+    <li>Chạy <code>pod install</code> + <code>run-ios</code> + <code>run-android</code></li>
+    <li>Firebase Console nhận data sau ~5 phút</li>
+    <li>Bật toggle Firebase trên Portal</li>
+  </ul>
+
+
+  <h2 class="section">🆘 Gặp lỗi?</h2>
+  <ul>
+    <li><strong>"Default FirebaseApp is not initialized"</strong> trên iOS: thiếu <code>[FIRApp configure]</code> trong AppDelegate.</li>
+    <li><strong>"Could not find google-services.json"</strong> Android: đặt vào sai chỗ. Phải nằm trong <code>android/app/</code>.</li>
+    <li><strong>Pod install fail</strong>: xoá <code>ios/Pods</code> + <code>ios/Podfile.lock</code> → chạy lại <code>pod install --repo-update</code>.</li>
+    <li><strong>Expo Go báo "Native module not found"</strong>: phải dùng dev client, không phải Expo Go.</li>
+    <li><strong>Crashlytics không nhận crash debug</strong>: đặt <code>setCrashlyticsCollectionEnabled(true)</code> rõ ràng (default disable trong debug build).</li>
+  </ul>
+
+
+  <div class="steps-nav">
+    <a href="./ios.html">→ Xem hướng dẫn iOS</a>
+    <a href="./android.html">→ Xem hướng dẫn Android</a>
+    <a href="./flutter.html">→ Xem hướng dẫn Flutter</a>
+  </div>
+
+</div>
+
+<script src="./_copy.js"></script>
+</body>
+</html>

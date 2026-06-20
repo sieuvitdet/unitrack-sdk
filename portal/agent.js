@@ -68,6 +68,7 @@ function buildSessionRow(events) {
   let started_at = null, ended_at = null, ended_reason = 'active';
   let user_id = null, platform = null, app_version = null;
   let crashed = 0;
+  let tracking_id = null;         // UUID 1:1 với session_id, SDK 0.3.31/0.3.7+
   let sawStart = false, sawEnd = false;   // first-wins for boundary markers (C2)
   const journey = [];
   const screenPath = [];          // distinct consecutive screens → flow_signature
@@ -78,6 +79,10 @@ function buildSessionRow(events) {
     app_version = e.app_version || app_version;
 
     const props = parseJSON(e.properties, {});
+    // SnowplowProvider stamps tracking_id vào property của mọi event. Tất cả
+    // event trong cùng session phải có cùng tracking_id (1:1 với session_id),
+    // nhưng vẫn first-wins để chống corruption từ event lạc.
+    if (!tracking_id && props && props.tracking_id) tracking_id = props.tracking_id;
     const screen = cleanScreen(e.screen_name || e.screen || (props && props.screen) || '');
 
     if (e.event_name === 'crash') crashed = 1;
@@ -152,6 +157,7 @@ function buildSessionRow(events) {
   const flow_signature = screenPath.length ? screenPath.join('>') : '(no_screens)';
   return {
     user_id, platform, app_version,
+    tracking_id,
     started_at, ended_at, ended_reason,
     duration_ms,
     event_count: events.length,
@@ -164,11 +170,12 @@ function buildSessionRow(events) {
 
 const upsertSession = db.prepare(`
   INSERT INTO app_sessions
-    (project_id, session_id, user_id, platform, app_version, started_at, ended_at,
+    (project_id, session_id, tracking_id, user_id, platform, app_version, started_at, ended_at,
      ended_reason, duration_ms, event_count, screen_count, crashed, journey,
      flow_signature, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(project_id, session_id) DO UPDATE SET
+    tracking_id = COALESCE(excluded.tracking_id, app_sessions.tracking_id),
     user_id = excluded.user_id, platform = excluded.platform,
     app_version = excluded.app_version, started_at = excluded.started_at,
     ended_at = excluded.ended_at, ended_reason = excluded.ended_reason,
@@ -300,7 +307,7 @@ function reconstructSessions(projectId, { force = false } = {}) {
       }
 
       upsertSession.run(
-        projectId, session_id, row.user_id, row.platform, row.app_version,
+        projectId, session_id, row.tracking_id, row.user_id, row.platform, row.app_version,
         row.started_at, row.ended_at, row.ended_reason, row.duration_ms,
         row.event_count, row.screen_count, row.crashed, row.journey,
         row.flow_signature, now

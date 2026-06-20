@@ -118,6 +118,7 @@ db.exec(`
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id     INTEGER NOT NULL,
     session_id     TEXT NOT NULL,
+    tracking_id    TEXT,                  -- UUID 1:1 với session_id, SDK stamp vào property của event Snowplow
     user_id        TEXT,
     platform       TEXT,
     app_version    TEXT,
@@ -184,6 +185,36 @@ db.exec(`
     version        INTEGER NOT NULL DEFAULT 1,
     updated_at     INTEGER NOT NULL
   );
+
+  -- Journey imports: dữ liệu QA upload từ đội Snowplow để dựng user-flow.
+  -- Mỗi tracking_id một bộ event tạm, TTL 24h. Snowplow là source-of-truth,
+  -- Portal chỉ giữ vừa đủ để render flow trong session debug.
+  CREATE TABLE IF NOT EXISTS journey_meta (
+    tracking_id    TEXT PRIMARY KEY,
+    project_id     INTEGER,
+    session_id     TEXT,
+    user_id        TEXT,
+    platform       TEXT,
+    app_version    TEXT,
+    event_count    INTEGER,
+    started_at_ms  INTEGER,           -- min(ts) trong file
+    ended_at_ms    INTEGER,           -- max(ts) trong file
+    imported_at    INTEGER NOT NULL,  -- epoch ms upload time
+    expires_at     INTEGER NOT NULL,  -- imported_at + 24h
+    source         TEXT,              -- 'snowplow_export'
+    notes          TEXT
+  );
+  CREATE TABLE IF NOT EXISTS journey_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    tracking_id    TEXT NOT NULL,
+    ts             INTEGER NOT NULL,      -- epoch ms
+    event_name     TEXT NOT NULL,
+    screen         TEXT,
+    element_key    TEXT,
+    props_json     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_journey_events_tid_ts ON journey_events(tracking_id, ts);
+  CREATE INDEX IF NOT EXISTS idx_journey_meta_expires  ON journey_meta(expires_at);
 `);
 
 // 2) Migrate pre-existing single-table databases: add any missing columns.
@@ -209,6 +240,9 @@ ensureColumn('projects', 'providers', 'TEXT');
 // in the portal (Sessions/wireframe) and searchable in the IDE.
 ensureColumn('projects', 'screen_labels', 'TEXT');
 ensureColumn('project_config', 'tracing', 'TEXT');
+// tracking_id (1:1 với session_id) — SDK 0.3.31/0.3.7+ stamp lên mọi event.
+// QA dùng để query Snowplow ra full event timeline cho 1 session cụ thể.
+ensureColumn('app_sessions', 'tracking_id', 'TEXT');
 
 // Parked / dropped fields. SQLite 3.35+ supports DROP COLUMN; pre-3.35 just
 // keeps the orphan column (harmless once code stops writing it).

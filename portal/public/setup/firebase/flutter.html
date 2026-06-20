@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Firebase · Flutter · UniTrack</title>
+<link rel="stylesheet" href="./_styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a href="../../" class="back">← Quay lại Portal</a>
+  <h1>📘 Setup Firebase <span class="platform-pill">🐦 Flutter</span></h1>
+</div>
+
+<div class="wrap">
+
+  <div class="platform-switch">
+    <a href="./ios.html">🍎 iOS Native</a>
+    <a href="./android.html">🤖 Android Native</a>
+    <a class="active" href="./flutter.html">🐦 Flutter</a>
+    <a href="./react-native.html">⚛ React Native</a>
+  </div>
+
+  <div class="hero">
+    <h2>Tích hợp Firebase vào dự án Flutter</h2>
+    <p>
+      Dùng <strong>FlutterFire CLI</strong> — tự động hoá cao nhất trong 4 platform. Chỉ ~3 phút cho 1 project, 5 phút cho multi-flavor.
+    </p>
+  </div>
+
+  <div class="callout">
+    <strong>⚙ Yêu cầu trước khi bắt đầu</strong>
+    Flutter SDK ≥ 3.16 · Firebase CLI · FlutterFire CLI.
+  </div>
+
+
+  <h2 class="section"><span class="num">1</span> Cài Firebase CLI + FlutterFire CLI</h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code># Firebase CLI (Node.js, npm)
+npm install -g firebase-tools
+
+# FlutterFire CLI
+dart pub global activate flutterfire_cli
+
+# Login Firebase
+firebase login</code></pre>
+  </div>
+
+  <p>Nếu cmd <code>flutterfire</code> không nhận, thêm path vào shell:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Bash</span><button class="copy">📋 Copy</button></div>
+    <pre><code>export PATH="$PATH":"$HOME/.pub-cache/bin"</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">2</span> Tạo Firebase project (nếu chưa có)</h2>
+  <p>Vào <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a> → tạo project. Không cần register app thủ công — FlutterFire CLI sẽ làm tự động ở bước 3.</p>
+
+
+  <h2 class="section"><span class="num">3</span> Chạy <code>flutterfire configure</code></h2>
+  <p>Từ root project Flutter, chạy:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>cd path/to/your_flutter_project
+flutterfire configure</code></pre>
+  </div>
+
+  <p>CLI sẽ hỏi:</p>
+  <ul>
+    <li>Chọn Firebase project (từ danh sách project bạn có)</li>
+    <li>Chọn platform: <code>android</code>, <code>ios</code>, hoặc cả 2 (dùng space để toggle, enter để confirm)</li>
+    <li>Cho phép tạo Firebase apps tự động (yes)</li>
+  </ul>
+
+  <p>Sau khi xong, CLI sẽ:</p>
+  <ul class="checklist">
+    <li>Tạo file <code>lib/firebase_options.dart</code> — chứa config cho mọi platform</li>
+    <li>Tạo <code>android/app/google-services.json</code></li>
+    <li>Tạo <code>ios/Runner/GoogleService-Info.plist</code></li>
+    <li>Tự động sửa <code>android/build.gradle</code> và <code>app/build.gradle</code></li>
+    <li>Tự động chạy <code>pod install</code> cho iOS</li>
+  </ul>
+
+
+  <h2 class="section"><span class="num">4</span> Cài Firebase packages</h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>flutter pub add firebase_core
+flutter pub add firebase_analytics
+flutter pub add firebase_crashlytics</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">5</span> Khởi tạo Firebase trong <code>main.dart</code></h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Dart · main.dart</span><button class="copy">📋 Copy</button></div>
+    <pre><code>import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'firebase_options.dart';
+
+Future&lt;void&gt; main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Forward mọi error chưa catch → Crashlytics
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+  runApp(const MyApp());
+}</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">6</span> (Multi-flavor) Tạo config riêng cho mỗi env</h2>
+  <p>Nếu app có dev/staging/prod, chạy <code>flutterfire configure</code> nhiều lần với option <code>--out</code>:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code># Dev
+flutterfire configure \
+  --project=myapp-dev \
+  --out=lib/firebase_options_dev.dart \
+  --android-package-name=asia.mobix.myapp.dev \
+  --ios-bundle-id=asia.mobix.myapp.dev
+
+# Prod
+flutterfire configure \
+  --project=myapp-prod \
+  --out=lib/firebase_options_prod.dart \
+  --android-package-name=asia.mobix.myapp \
+  --ios-bundle-id=asia.mobix.myapp</code></pre>
+  </div>
+
+  <p>Trong main.dart, switch theo flavor:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Dart · main.dart</span><button class="copy">📋 Copy</button></div>
+    <pre><code>import 'firebase_options_dev.dart' as dev;
+import 'firebase_options_prod.dart' as prod;
+
+const flavor = String.fromEnvironment('FLAVOR', defaultValue: 'dev');
+
+await Firebase.initializeApp(
+  options: flavor == 'prod'
+      ? prod.DefaultFirebaseOptions.currentPlatform
+      : dev.DefaultFirebaseOptions.currentPlatform,
+);</code></pre>
+  </div>
+
+  <p>Build với flavor:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>flutter run --dart-define=FLAVOR=prod</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">7</span> Bật forward UniTrack → Firebase</h2>
+  <p>
+    Mở Portal → Project → tab <strong>Config (remote)</strong> → bật toggle
+    <strong>"Firebase Analytics / Crashlytics"</strong> → Lưu.
+  </p>
+
+
+  <h2 class="section"><span class="num">✓</span> Checklist hoàn thành</h2>
+  <ul class="checklist">
+    <li>Cài Firebase CLI + FlutterFire CLI + login</li>
+    <li>Tạo Firebase project trên Console</li>
+    <li>Chạy <code>flutterfire configure</code> ở root project</li>
+    <li>Add packages: firebase_core + firebase_analytics + firebase_crashlytics</li>
+    <li>Gọi <code>Firebase.initializeApp()</code> trong main.dart</li>
+    <li>Wire <code>FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError</code></li>
+    <li>Build & chạy — Firebase Console nhận data sau ~5 phút</li>
+    <li>Bật toggle Firebase trên Portal</li>
+  </ul>
+
+
+  <h2 class="section">🆘 Gặp lỗi?</h2>
+  <ul>
+    <li><strong>"command not found: flutterfire"</strong>: thêm <code>$HOME/.pub-cache/bin</code> vào <code>PATH</code>.</li>
+    <li><strong>"No Firebase App '[DEFAULT]' has been created"</strong>: thiếu await <code>Firebase.initializeApp()</code> trước <code>runApp()</code>.</li>
+    <li><strong>iOS build fail sau khi configure</strong>: chạy <code>cd ios && pod install --repo-update</code>.</li>
+    <li><strong>Android build fail "Could not find google-services.json"</strong>: re-run <code>flutterfire configure</code> để regenerate file.</li>
+  </ul>
+
+
+  <div class="steps-nav">
+    <a href="./ios.html">→ Xem hướng dẫn iOS</a>
+    <a href="./android.html">→ Xem hướng dẫn Android</a>
+    <a href="./react-native.html">→ Xem hướng dẫn React Native</a>
+  </div>
+
+</div>
+
+<script src="./_copy.js"></script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Firebase · Android Native · UniTrack</title>
+<link rel="stylesheet" href="./_styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a href="../../" class="back">← Quay lại Portal</a>
+  <h1>📘 Setup Firebase <span class="platform-pill">🤖 Android Native</span></h1>
+</div>
+
+<div class="wrap">
+
+  <div class="platform-switch">
+    <a href="./ios.html">🍎 iOS Native</a>
+    <a class="active" href="./android.html">🤖 Android Native</a>
+    <a href="./flutter.html">🐦 Flutter</a>
+    <a href="./react-native.html">⚛ React Native</a>
+  </div>
+
+  <div class="hero">
+    <h2>Tích hợp Firebase vào dự án Android Native</h2>
+    <p>
+      Hướng dẫn này áp dụng cho cả <strong>Groovy DSL</strong> (<code>.gradle</code>)
+      và <strong>Kotlin DSL</strong> (<code>.gradle.kts</code>) — chỉ tốn ~7 phút.
+    </p>
+  </div>
+
+  <div class="callout">
+    <strong>⚙ Yêu cầu trước khi bắt đầu</strong>
+    Android Studio Hedgehog+ · Gradle 8+ · Google account để dùng Firebase Console.
+  </div>
+
+
+  <h2 class="section"><span class="num">1</span> Tạo Firebase project</h2>
+  <p>Vào <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a> → <strong>"Thêm dự án"</strong> → đặt tên (vd <code>my-app-android</code>) → bật/tắt Google Analytics tuỳ nhu cầu.</p>
+
+
+  <h2 class="section"><span class="num">2</span> Đăng ký app Android trong Firebase project</h2>
+  <p>Click <strong>"Add app" → biểu tượng Android</strong>. Điền:</p>
+  <ul>
+    <li><strong>Android package name</strong>: lấy từ <code>app/build.gradle</code> → <code>applicationId</code> (vd <code>asia.mobix.myapp</code>)</li>
+    <li><strong>App nickname</strong>: tuỳ ý</li>
+    <li><strong>SHA-1 (tuỳ chọn)</strong>: cần nếu dùng Google Sign-In / Dynamic Links. Lấy từ:
+      <div class="code-block">
+        <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+        <pre><code>./gradlew signingReport</code></pre>
+      </div>
+    </li>
+  </ul>
+
+
+  <h2 class="section"><span class="num">3</span> Download <code>google-services.json</code></h2>
+  <p>Firebase Console sẽ hiện nút "Download google-services.json" — tải về và đặt vào thư mục <code>app/</code> (cùng cấp với <code>app/build.gradle</code>).</p>
+
+  <div class="callout warn">
+    <strong>⚠ Multi-flavor (dev / staging / prod)?</strong>
+    Tạo Firebase app riêng cho mỗi <code>applicationId</code> + suffix.
+    Đặt file <code>google-services.json</code> vào folder flavor tương ứng:
+    <code>app/src/dev/google-services.json</code>, <code>app/src/prod/google-services.json</code>.
+    Gradle sẽ tự pick đúng file theo build variant.
+  </div>
+
+
+  <h2 class="section"><span class="num">4</span> Khai báo Google Services plugin</h2>
+  <p>Mở <code>build.gradle</code> ở <strong>thư mục root</strong> (project-level):</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Groovy · build.gradle (project)</span><button class="copy">📋 Copy</button></div>
+    <pre><code>// Trong block 'plugins' ở đầu file
+plugins {
+    // ... existing plugins
+    id 'com.google.gms.google-services' version '4.4.2' apply false
+    id 'com.google.firebase.crashlytics' version '3.0.2' apply false
+}</code></pre>
+  </div>
+
+  <p>Hoặc cho Kotlin DSL:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Kotlin · build.gradle.kts (project)</span><button class="copy">📋 Copy</button></div>
+    <pre><code>plugins {
+    // ... existing plugins
+    id("com.google.gms.google-services") version "4.4.2" apply false
+    id("com.google.firebase.crashlytics") version "3.0.2" apply false
+}</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">5</span> Apply plugin và thêm dependencies trong <code>app/build.gradle</code></h2>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Groovy · app/build.gradle</span><button class="copy">📋 Copy</button></div>
+    <pre><code>plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'         // ← Thêm
+    id 'com.google.firebase.crashlytics'        // ← Thêm
+}
+
+dependencies {
+    // Firebase BoM — quản lý version đồng bộ
+    implementation platform('com.google.firebase:firebase-bom:33.5.1')
+
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-crashlytics'
+
+    // ... existing dependencies
+}</code></pre>
+  </div>
+
+  <p>Hoặc Kotlin DSL:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Kotlin · app/build.gradle.kts</span><button class="copy">📋 Copy</button></div>
+    <pre><code>plugins {
+    id("com.android.application")
+    kotlin("android")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
+}
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
+}</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">6</span> Khởi tạo Firebase trong Application</h2>
+  <p>Tạo class <code>MyApplication</code> (nếu chưa có) hoặc sửa class hiện có:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Kotlin · MyApplication.kt</span><button class="copy">📋 Copy</button></div>
+    <pre><code>package asia.mobix.myapp
+
+import android.app.Application
+import com.google.firebase.FirebaseApp
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        FirebaseApp.initializeApp(this)
+        FirebaseCrashlytics.getInstance().isCrashlyticsCollectionEnabled = true
+    }
+}</code></pre>
+  </div>
+
+  <p>Khai báo trong <code>AndroidManifest.xml</code>:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">XML · AndroidManifest.xml</span><button class="copy">📋 Copy</button></div>
+    <pre><code>&lt;application
+    android:name=".MyApplication"
+    ...&gt;
+    &lt;!-- ... --&gt;
+&lt;/application&gt;</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">7</span> Sync Gradle và build</h2>
+  <p>Android Studio sẽ tự nhận diện google-services plugin. Click <strong>"Sync Now"</strong> → build app.</p>
+  <p>Nếu sync thất bại với "File google-services.json is missing", kiểm tra:</p>
+  <ul>
+    <li>File ở đúng <code>app/google-services.json</code> chứ KHÔNG phải root <code>google-services.json</code></li>
+    <li>Multi-flavor: file trong <code>app/src/{flavor}/google-services.json</code></li>
+  </ul>
+
+
+  <h2 class="section"><span class="num">8</span> Bật forward UniTrack → Firebase</h2>
+  <p>
+    Mở Portal → Project → tab <strong>Config (remote)</strong> → bật toggle
+    <strong>"Firebase Analytics / Crashlytics"</strong> → Lưu. SDK UniTrack sẽ tự nhận config qua SSE.
+  </p>
+
+
+  <h2 class="section"><span class="num">✓</span> Checklist hoàn thành</h2>
+  <ul class="checklist">
+    <li>Tạo Firebase project</li>
+    <li>Đăng ký Android app với đúng <code>applicationId</code></li>
+    <li>Đặt <code>google-services.json</code> vào <code>app/</code></li>
+    <li>Thêm 2 plugin <code>google-services</code> + <code>firebase-crashlytics</code></li>
+    <li>Thêm Firebase BoM + analytics + crashlytics dependencies</li>
+    <li>Gọi <code>FirebaseApp.initializeApp(this)</code> trong Application</li>
+    <li>Sync Gradle, build, chạy app — Firebase Console nhận data sau ~5 phút</li>
+    <li>Bật toggle Firebase trên Portal</li>
+  </ul>
+
+
+  <h2 class="section">🆘 Gặp lỗi?</h2>
+  <ul>
+    <li><strong>"File google-services.json is missing"</strong>: đặt sai chỗ. Phải nằm trong <code>app/</code>, không phải root.</li>
+    <li><strong>"No matching client found for package name"</strong>: <code>applicationId</code> trong gradle ≠ package name lúc đăng ký Firebase. Kiểm tra cả 2.</li>
+    <li><strong>Build chậm</strong>: là bình thường lần đầu cài plugin, sync xong lần 2 sẽ nhanh.</li>
+    <li><strong>Crashlytics không nhận crash</strong>: đảm bảo build với buildType debug = false (Crashlytics mặc định disable trong debug), hoặc force enable bằng <code>isCrashlyticsCollectionEnabled = true</code>.</li>
+  </ul>
+
+
+  <div class="steps-nav">
+    <a href="./ios.html">→ Xem hướng dẫn iOS</a>
+    <a href="./flutter.html">→ Xem hướng dẫn Flutter</a>
+    <a href="./react-native.html">→ Xem hướng dẫn React Native</a>
+  </div>
+
+</div>
+
+<script src="./_copy.js"></script>
+</body>
+</html>

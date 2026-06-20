@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Firebase · iOS Native · UniTrack</title>
+<link rel="stylesheet" href="./_styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a href="../../" class="back">← Quay lại Portal</a>
+  <h1>📘 Setup Firebase <span class="platform-pill">🍎 iOS Native</span></h1>
+</div>
+
+<div class="wrap">
+
+  <div class="platform-switch">
+    <a class="active" href="./ios.html">🍎 iOS Native</a>
+    <a href="./android.html">🤖 Android Native</a>
+    <a href="./flutter.html">🐦 Flutter</a>
+    <a href="./react-native.html">⚛ React Native</a>
+  </div>
+
+  <div class="hero">
+    <h2>Tích hợp Firebase vào dự án iOS Native</h2>
+    <p>
+      Hướng dẫn này giúp bạn cài Firebase Analytics + Crashlytics vào app iOS Native (Swift / Objective-C),
+      <strong>chỉ tốn ~5 phút</strong>. Sau khi xong, bật toggle Firebase trên Portal và UniTrack sẽ tự
+      forward mọi event sang Firebase.
+    </p>
+  </div>
+
+  <div class="callout">
+    <strong>⚙ Yêu cầu trước khi bắt đầu</strong>
+    Đã có Apple Developer account · Xcode ≥ 15 · CocoaPods hoặc Swift Package Manager đã setup.
+  </div>
+
+
+  <h2 class="section"><span class="num">1</span> Tạo Firebase project</h2>
+  <p>Vào <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a> → click <strong>"Thêm dự án"</strong> → đặt tên (vd <code>my-app-ios</code>) → tắt Google Analytics nếu chỉ cần Crashlytics, bật nếu cần cả 2.</p>
+
+  <img class="figure" src="https://www.simoahava.com/images/2019/08/ios-add-firebase-app.jpg"
+       alt="Firebase Console — Add iOS app">
+  <div class="fig-caption">Hình 1 · Firebase Console — chọn biểu tượng iOS để thêm app mới<br>
+    <span style="font-size:11px">(Nguồn: simoahava.com)</span></div>
+
+
+  <h2 class="section"><span class="num">2</span> Đăng ký app iOS trong Firebase project</h2>
+  <p>Trong Firebase project vừa tạo, click <strong>"Add app" → biểu tượng iOS</strong>. Điền:</p>
+  <ul>
+    <li><strong>Apple bundle ID</strong>: ví dụ <code>asia.mobix.myapp</code> (lấy từ Xcode → Target → General → Bundle Identifier)</li>
+    <li><strong>App nickname</strong>: ghi gì cũng được, để dễ phân biệt</li>
+    <li><strong>App Store ID</strong>: bỏ trống nếu chưa có</li>
+  </ul>
+
+  <img class="figure" src="https://www.simoahava.com/images/2019/08/ios-bundle-identifier.jpg"
+       alt="Firebase Console — Register iOS app with bundle ID">
+  <div class="fig-caption">Hình 2 · Điền Bundle ID + nickname để Firebase đăng ký app</div>
+
+  <div class="callout">
+    <strong>💡 Multi-flavor (dev / staging / prod)?</strong>
+    Tạo 1 Firebase app cho mỗi bundle ID. Vd <code>asia.mobix.myapp.dev</code>,
+    <code>asia.mobix.myapp.staging</code>, <code>asia.mobix.myapp</code>.
+  </div>
+
+
+  <h2 class="section"><span class="num">3</span> Download file <code>GoogleService-Info.plist</code></h2>
+  <p>
+    Sau khi đăng ký app, Firebase Console hiện nút <strong>"Download GoogleService-Info.plist"</strong>.
+    Tải file này về máy — đây là file cấu hình quan trọng nhất.
+  </p>
+  <p>Trong Xcode:</p>
+  <ul>
+    <li>Mở project trong Xcode</li>
+    <li>Kéo file <code>GoogleService-Info.plist</code> vào thư mục root của target (cùng cấp với <code>Info.plist</code>)</li>
+    <li>Khi popup hiện, <strong>tick "Copy items if needed"</strong> và chọn target tương ứng</li>
+  </ul>
+
+  <img class="figure" src="https://www.simoahava.com/images/2019/08/ios-add-files.jpg"
+       alt="Xcode — Add Files dialog, tick Copy items if needed + chọn target">
+  <div class="fig-caption">Hình 3 · Dialog "Add Files to ..." trong Xcode — nhớ tick <b>Copy items if needed</b> và chọn đúng target</div>
+
+  <img class="figure" src="https://www.simoahava.com/images/2019/08/ios-googleservice-info.jpg"
+       alt="Xcode project navigator — GoogleService-Info.plist trong target">
+  <div class="fig-caption">Hình 4 · Sau khi add — file <code>GoogleService-Info.plist</code> nằm trong project navigator cùng cấp <code>Info.plist</code></div>
+
+  <div class="callout warn">
+    <strong>⚠ Multi-flavor:</strong>
+    Đặt mỗi file <code>GoogleService-Info.plist</code> vào folder riêng (vd <code>Config/Dev/</code>,
+    <code>Config/Prod/</code>). Dùng <strong>Run Script Phase</strong> trong Build Phases để copy đúng file
+    theo Configuration (xem hướng dẫn nâng cao ở bước 7).
+  </div>
+
+
+  <h2 class="section"><span class="num">4</span> Thêm Firebase SDK qua CocoaPods</h2>
+  <p>Mở <code>Podfile</code> và thêm:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Ruby · Podfile</span><button class="copy">📋 Copy</button></div>
+    <pre><code>target 'YourAppName' do
+  use_frameworks!
+
+  pod 'Firebase/Analytics'
+  pod 'Firebase/Crashlytics'
+end</code></pre>
+  </div>
+
+  <p>Sau đó chạy:</p>
+  <div class="code-block">
+    <div class="head"><span class="lang">Terminal</span><button class="copy">📋 Copy</button></div>
+    <pre><code>cd ios
+pod install --repo-update</code></pre>
+  </div>
+
+  <div class="callout">
+    <strong>Dùng Swift Package Manager?</strong>
+    Xcode → File → Add Packages → URL <code>https://github.com/firebase/firebase-ios-sdk</code> →
+    chọn product <code>FirebaseAnalytics</code> + <code>FirebaseCrashlytics</code>.
+  </div>
+
+
+  <h2 class="section"><span class="num">5</span> Khởi tạo Firebase trong app</h2>
+  <p>Sửa <code>AppDelegate.swift</code> (hoặc <code>App.swift</code> với SwiftUI):</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Swift · AppDelegate.swift</span><button class="copy">📋 Copy</button></div>
+    <pre><code>import UIKit
+import FirebaseCore
+
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+
+  func application(_ application: UIApplication,
+                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    // Firebase phải init NGAY sau khi app launch, trước mọi service khác
+    FirebaseApp.configure()
+    return true
+  }
+}</code></pre>
+  </div>
+
+
+  <h2 class="section"><span class="num">6</span> Bật forward UniTrack → Firebase</h2>
+  <p>
+    Sau khi Firebase chạy được, mở Portal → Project của bạn → tab <strong>Config (remote)</strong>
+    → bật toggle <strong>"Firebase Analytics / Crashlytics"</strong> → Lưu.
+  </p>
+  <p>
+    SDK UniTrack ở app sẽ tự nhận cấu hình qua SSE và bắt đầu mirror mọi event tới Firebase trong vài giây.
+  </p>
+
+
+  <h2 class="section"><span class="num">7</span> (Nâng cao) Multi-flavor: copy plist đúng theo Configuration</h2>
+  <p>Nếu app có nhiều Configuration (Debug-Dev / Debug-Prod / Release-Prod), thêm Run Script Phase trong Build Phases:</p>
+
+  <div class="code-block">
+    <div class="head"><span class="lang">Bash · Run Script Phase</span><button class="copy">📋 Copy</button></div>
+    <pre><code>#!/bin/bash
+# Chọn folder theo Configuration name
+case "$CONFIGURATION" in
+  *Dev*)     SRC="${SRCROOT}/Config/Dev/GoogleService-Info.plist" ;;
+  *Staging*) SRC="${SRCROOT}/Config/Staging/GoogleService-Info.plist" ;;
+  *)         SRC="${SRCROOT}/Config/Prod/GoogleService-Info.plist" ;;
+esac
+
+DEST="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/GoogleService-Info.plist"
+cp -f "$SRC" "$DEST"
+echo "✓ Copied $SRC → $DEST"</code></pre>
+  </div>
+
+  <p>Drag Run Script Phase này lên <strong>trước</strong> "Copy Bundle Resources" — quan trọng để file có sẵn lúc build resource.</p>
+
+
+  <h2 class="section"><span class="num">✓</span> Checklist hoàn thành</h2>
+  <ul class="checklist">
+    <li>Tạo Firebase project trên Console</li>
+    <li>Đăng ký iOS app với đúng Bundle ID</li>
+    <li>Tải <code>GoogleService-Info.plist</code> và kéo vào Xcode target</li>
+    <li>Cài Firebase SDK qua CocoaPods/SPM</li>
+    <li>Gọi <code>FirebaseApp.configure()</code> trong AppDelegate</li>
+    <li>Build & chạy app lần đầu — Firebase Console sẽ báo "đã nhận data" sau ~5 phút</li>
+    <li>Bật toggle Firebase trên Portal → SDK UniTrack tự forward event</li>
+  </ul>
+
+
+  <div class="callout warn">
+    <strong>⚠ Lưu ý bảo mật</strong>
+    <code>GoogleService-Info.plist</code> chứa API key public — KHÔNG có secret, an toàn để commit vào git.
+    Nhưng vẫn nên giới hạn key trong Firebase Console (Authentication → Restrict to bundle ID).
+  </div>
+
+
+  <h2 class="section">🆘 Gặp lỗi?</h2>
+  <ul>
+    <li><strong>"FirebaseApp.configure() was not called"</strong>: thiếu gọi configure trong AppDelegate.</li>
+    <li><strong>"No matching client found"</strong>: Bundle ID trong Xcode ≠ Bundle ID lúc đăng ký Firebase app. Vào Firebase Console → Project Settings → Your apps → kiểm tra/edit.</li>
+    <li><strong>Crashlytics không nhận crash</strong>: cần upload dSYM, chạy Build Phase script Firebase cung cấp hoặc upload thủ công.</li>
+    <li><strong>App nhận 2 config:</strong> nếu có 2 file <code>GoogleService-Info.plist</code> trong bundle, kiểm tra lại copy script ở bước 7.</li>
+  </ul>
+
+
+  <div class="steps-nav">
+    <a href="./android.html">→ Xem hướng dẫn Android</a>
+    <a href="./flutter.html">→ Xem hướng dẫn Flutter</a>
+    <a href="./react-native.html">→ Xem hướng dẫn React Native</a>
+  </div>
+
+</div>
+
+<script src="./_copy.js"></script>
+</body>
+</html>

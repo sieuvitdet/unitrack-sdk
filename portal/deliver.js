@@ -7,7 +7,8 @@
 
 const TELEGRAM_TIMEOUT_MS = 15_000;
 
-async function sendTelegram(token, chatId, text, { markdown = false } = {}) {
+async function sendTelegram(token, chatId, text, opts = {}) {
+  const { markdown = false, replyMarkup = null } = opts;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TELEGRAM_TIMEOUT_MS);
   try {
@@ -18,6 +19,10 @@ async function sendTelegram(token, chatId, text, { markdown = false } = {}) {
     // huge preview card.
     if (markdown) body.parse_mode = 'Markdown';
     else          body.disable_web_page_preview = true;
+    // reply_markup carries inline_keyboard for the project-picker flow —
+    // optional, used when one bot is configured to serve multiple projects
+    // and we need the user to pick which one a command (vd /report) targets.
+    if (replyMarkup) body.reply_markup = replyMarkup;
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -27,6 +32,18 @@ async function sendTelegram(token, chatId, text, { markdown = false } = {}) {
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok && j.ok !== false, info: j.description || ('http_' + r.status) };
   } finally { clearTimeout(timer); }
+}
+
+// Acknowledge a callback_query so Telegram stops showing the spinner on the
+// button the user tapped. Optional 'text' shows a toast above the chat.
+async function answerCallback(token, queryId, text) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: queryId, text: text || '' }),
+    });
+  } catch (_) { /* best-effort */ }
 }
 
 // Route by category: app issues → mobile dev, everything else → backend dev.
@@ -66,4 +83,4 @@ async function deliver(cfg, report) {
   return { delivered, channels };
 }
 
-module.exports = { deliver, sendTelegram };
+module.exports = { deliver, sendTelegram, answerCallback };

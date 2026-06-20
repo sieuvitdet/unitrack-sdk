@@ -1,0 +1,97 @@
+/* Setup guide — shared style. Dark theme cùng portal hiện tại. */
+:root{
+  --bg:#0b0e14; --panel:#141925; --panel2:#1b2231; --line:#283044;
+  --text:#e6e9ef; --muted:#8b94a7;
+  --accent:#5b8cff; --accent2:#27d796; --warn:#ffb454; --danger:#ff6b6b;
+  --code-bg:#0a0d14; --code-line:#243044;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+            background:var(--bg); color:var(--text); }
+a{ color:var(--accent); text-decoration:none; }
+a:hover{ text-decoration:underline; }
+*::-webkit-scrollbar{ width:8px; height:8px; }
+*::-webkit-scrollbar-track{ background:transparent; }
+*::-webkit-scrollbar-thumb{ background:#243044; border-radius:6px; }
+
+.topbar{ display:flex; align-items:center; gap:14px; padding:14px 24px;
+          border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+.topbar .back{ font-size:12.5px; color:var(--muted); }
+.topbar .back:hover{ color:var(--text); }
+.topbar h1{ font-size:17px; font-weight:600; margin:0; display:flex; align-items:center; gap:10px; }
+.topbar .platform-pill{ display:inline-flex; align-items:center; gap:6px;
+                        background:var(--panel2); border:1px solid var(--line);
+                        padding:5px 12px; border-radius:14px; font-size:12.5px; }
+
+.wrap{ max-width:920px; margin:0 auto; padding:28px 24px 72px; }
+.hero{ background:linear-gradient(135deg,var(--panel),var(--panel2));
+        border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:28px; }
+.hero h2{ font-size:22px; margin:0 0 8px; font-weight:700; }
+.hero p{ margin:0; color:var(--muted); font-size:14px; line-height:1.6; max-width:680px; }
+
+h2.section{ font-size:18px; font-weight:700; margin:32px 0 14px;
+             display:flex; align-items:center; gap:10px; }
+h2.section .num{ width:28px; height:28px; border-radius:8px; background:var(--accent);
+                  color:#fff; display:inline-flex; align-items:center; justify-content:center;
+                  font-size:13px; font-weight:700; flex-shrink:0; }
+
+p{ margin:0 0 12px; line-height:1.6; color:var(--text); }
+ul{ margin:0 0 14px; padding-left:24px; line-height:1.7; }
+li code, p code{ background:var(--panel2); padding:1px 8px; border-radius:4px;
+                  font-family:ui-monospace,"SF Mono",Monaco,monospace; font-size:12.5px;
+                  border:1px solid var(--line); color:var(--accent2); }
+
+.callout{ border-left:3px solid var(--accent); background:rgba(91,140,255,.08);
+          padding:12px 16px; border-radius:0 8px 8px 0; margin:14px 0;
+          font-size:13px; line-height:1.6; }
+.callout.warn{ border-color:var(--warn); background:rgba(255,180,84,.08); }
+.callout.danger{ border-color:var(--danger); background:rgba(255,107,107,.08); }
+.callout strong{ display:block; margin-bottom:4px; font-size:13px; }
+
+.code-block{ position:relative; background:var(--code-bg); border:1px solid var(--code-line);
+              border-radius:10px; margin:12px 0; overflow:hidden; }
+.code-block .head{ display:flex; align-items:center; justify-content:space-between;
+                    padding:7px 14px; background:rgba(255,255,255,.02);
+                    border-bottom:1px solid var(--code-line); font-size:11.5px; color:var(--muted); }
+.code-block .head .lang{ text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+.code-block .copy{ background:var(--panel2); color:var(--text); border:1px solid var(--line);
+                    border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer;
+                    transition:background .12s; font-weight:600; }
+.code-block .copy:hover{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.code-block .copy.ok{ background:var(--accent2); border-color:var(--accent2); color:#08111f; }
+.code-block pre{ margin:0; padding:14px 16px; overflow-x:auto;
+                  font-family:ui-monospace,"SF Mono",Monaco,monospace; font-size:12.5px;
+                  line-height:1.55; color:var(--text); }
+.code-block code{ color:inherit; background:none; border:none; padding:0; }
+
+.cmd .line{ display:flex; gap:8px; }
+.cmd .line::before{ content:'$'; color:var(--accent2); user-select:none; }
+
+img.figure{ display:block; max-width:100%; height:auto; border:1px solid var(--line);
+            border-radius:10px; margin:14px auto; box-shadow:0 4px 18px #0004; }
+.fig-caption{ text-align:center; color:var(--muted); font-size:12px; margin-top:-4px; margin-bottom:18px;
+              font-style:italic; }
+
+.steps-nav{ display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; }
+.steps-nav a{ background:var(--panel); border:1px solid var(--line); border-radius:9px;
+               padding:9px 14px; font-size:13px; font-weight:600; }
+.steps-nav a:hover{ background:var(--panel2); text-decoration:none; }
+
+.platform-switch{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+.platform-switch a{ background:var(--panel); border:1px solid var(--line); border-radius:10px;
+                     padding:8px 14px; font-size:13px; font-weight:600; color:var(--text); }
+.platform-switch a:hover{ background:var(--panel2); border-color:var(--accent); text-decoration:none; }
+.platform-switch a.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+.checklist{ list-style:none; padding:0; }
+.checklist li{ padding:9px 0 9px 32px; position:relative; }
+.checklist li::before{ content:'✓'; position:absolute; left:0; top:7px;
+                        width:22px; height:22px; border-radius:50%; background:var(--accent2);
+                        color:#08111f; display:flex; align-items:center; justify-content:center;
+                        font-weight:700; font-size:13px; }
+
+.image-placeholder{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+                     border:2px dashed var(--line); border-radius:12px; padding:36px 24px;
+                     color:var(--muted); margin:14px 0; background:var(--panel2); }
+.image-placeholder .icon{ font-size:32px; margin-bottom:6px; }
+.image-placeholder .caption{ font-size:12.5px; font-style:italic; text-align:center; line-height:1.5; }

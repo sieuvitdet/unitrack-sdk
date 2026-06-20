@@ -169,14 +169,6 @@
   <div class="dlg-h">Tạo dự án mới<button onclick="projDlg.close()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
   <div class="dlg-b">
     <div><label>Tên dự án</label><input id="pName" placeholder="Mobix Shop" style="width:100%"/></div>
-    <div><label>App bundle / package</label><input id="pBundle" placeholder="asia.mobix.shop" style="width:100%"/></div>
-    <div><label>Loại source</label>
-      <select id="pType" style="width:100%">
-        <option value="native_ios">Native iOS</option>
-        <option value="native_android">Native Android</option>
-        <option value="flutter">Flutter</option>
-        <option value="react_native">React Native</option>
-      </select></div>
   </div>
   <div class="dlg-f"><button class="btn ghost" onclick="projDlg.close()">Huỷ</button><button class="btn" id="pCreate">Tạo</button></div>
 </dialog>
@@ -307,6 +299,9 @@ let route = {name:'projects', pid:null, tab:'sessions'};
 let _suppressHashChange = false;
 function routeToHash(r){
   if(r.name==='cms') return '#/cms';
+  if(r.name==='journey' && r.pid && r.tid){
+    return `#/p/${r.pid}/journey/${encodeURIComponent(r.tid)}`;
+  }
   if(r.name==='project' && r.pid){
     let h = `#/p/${r.pid}`;
     if(r.tab && r.tab!=='sessions') h += `/${r.tab}`;
@@ -321,6 +316,8 @@ function hashToRoute(){
   if(m){
     const pid = parseInt(m[1], 10);
     const seg2 = m[2], seg3 = m[3];
+    // /p/<pid>/journey/<tid> — user-flow viewer cho 1 tracking_id
+    if(seg2 === 'journey' && seg3) return {name:'journey', pid, tid: decodeURIComponent(seg3)};
     // /p/<pid>/sessions/<sid> opens the IDE drawer for that session.
     if(seg2 === 'sessions' && seg3) return {name:'project', pid, tab:'sessions', openSid: decodeURIComponent(seg3)};
     if(seg2) return {name:'project', pid, tab: seg2};
@@ -359,6 +356,7 @@ $('#navCms').onclick=()=>go({name:'cms'});
 async function render(){
   try{
     if(route.name==='projects'){ $('#crumb').textContent=''; return await renderProjects(); }
+    if(route.name==='journey'){ return await renderJourney(); }
     if(route.name==='project'){ return await renderProject(); }
     if(route.name==='cms'){ $('#crumb').textContent='· CMS'; return await renderCMS(); }
   }catch(e){
@@ -398,6 +396,404 @@ async function renderCMS(){
       </tbody></table></div>`;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// User Flow viewer — page độc lập (route #/p/:pid/journey/:tid).
+// State A: chưa import JSON → upload area.
+// State B: đã có data → render flow chart ngang theo nhóm screen, mỗi screen
+//   list API + tap dẫn sang màn kế. Click screen → drawer chi tiết event.
+// Data nguồn: API /api/projects/:pid/journey/:tid (journey_meta + events).
+// Phase 1 này render linear flow group-by-screen, chưa branching.
+// ──────────────────────────────────────────────────────────────────────────
+
+const _jState = { pid:null, tid:null, sid:null, meta:null, screens:[], events:[], selScreen:null };
+
+function _jShortSid(s){ return s ? s.slice(0,8) : ''; }
+function _jFmtTime(ms){
+  if(!ms) return '—';
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`;
+}
+function _jFmtDur(ms){
+  if(ms == null) return '—';
+  const s = ms/1000;
+  if(s < 1) return s.toFixed(2)+'s';
+  if(s < 60) return s.toFixed(1)+'s';
+  return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
+}
+
+// Group events theo screen contiguous. Mỗi screen segment có:
+//   { screen, enter, exit, events:[...], apis:[...] }
+// Network event được đẩy vào màn liền trước (vd Snowplow `network_request`).
+function _jGroupByScreen(events){
+  const segs = [];
+  let cur = null;
+  for (const e of events){
+    const isScreen = e.event_name === 'screen_view' || e.event_name === 'screen_end' || e.event_name === 'screen_load_completed';
+    const sname = e.screen;
+    if (isScreen && sname){
+      if (!cur || cur.screen !== sname){
+        if (cur) cur.exit = e.ts;
+        cur = { screen:sname, enter:e.ts, exit:e.ts, events:[], apis:[], crash:false };
+        segs.push(cur);
+      } else {
+        cur.exit = e.ts;
+      }
+      cur.events.push(e);
+      continue;
+    }
+    // non-screen event → attach vào segment hiện tại (hoặc tạo "(unknown)" segment)
+    if (!cur){
+      cur = { screen:'(không xác định)', enter:e.ts, exit:e.ts, events:[], apis:[], crash:false };
+      segs.push(cur);
+    }
+    cur.exit = e.ts;
+    cur.events.push(e);
+    if (e.event_name === 'application_error' || e.event_name === 'crash') cur.crash = true;
+    if (e.event_name === 'network_request' || e.event_name === 'network_error'){
+      const p = e.props || {};
+      cur.apis.push({
+        m: (p.method || 'GET').toUpperCase(),
+        u: p.url || (p.host ? (p.host + (p.path||'')) : '(url thiếu)'),
+        s: p.status != null ? p.status : (p.status_code != null ? p.status_code : 0),
+        ms: p.duration_ms || 0,
+      });
+    }
+  }
+  return segs;
+}
+
+async function renderJourney(){
+  const { pid, tid } = route;
+  _jState.pid = pid; _jState.tid = tid;
+  $('#crumb').textContent = `· User Flow · ${_jShortSid(tid)}`;
+  // Page skeleton: topbar gọn + nội dung canvas + drawer right
+  $('#view').innerHTML = `
+    <div id="jPage" style="position:relative;min-height:calc(100vh - 80px)">
+      <div id="jTopbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn ghost sm" onclick="go({name:'project',pid:${pid},tab:'sessions'})">← Sessions</button>
+        <div class="mono" style="background:var(--panel2);padding:6px 12px;border-radius:8px;border:1px solid var(--line);font-size:12px;display:inline-flex;align-items:center;gap:10px">
+          <span style="color:var(--danger);font-weight:700" title="tracking_id">${esc(tid)}</span>
+          <span class="muted">·</span>
+          <span class="muted" id="jUserLabel">…</span>
+        </div>
+        <div id="jZoom" style="display:none;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px">
+          <button class="btn ghost sm" id="jZout" style="padding:4px 10px">−</button>
+          <span class="mono" id="jZpct" style="padding:0 8px;font-size:12px;min-width:48px;text-align:center">100%</span>
+          <button class="btn ghost sm" id="jZin" style="padding:4px 10px">+</button>
+          <button class="btn ghost sm" id="jZreset" style="padding:4px 10px;margin-left:4px" title="Reset">⟳</button>
+          <button class="btn ghost sm" id="jFull" style="padding:4px 10px;margin-left:2px" title="Toàn màn hình">⛶</button>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn ghost sm" id="jReimport" style="display:none">↻ Re-import</button>
+          <button class="btn ghost sm" id="jDelete" style="display:none;color:var(--danger)">🗑 Xoá</button>
+        </div>
+      </div>
+      <div id="jContent"></div>
+    </div>
+  `;
+  await _jLoad();
+}
+
+async function _jLoad(){
+  const { pid, tid } = _jState;
+  try {
+    const data = await api(`/api/projects/${pid}/journey/${encodeURIComponent(tid)}`);
+    _jState.meta = data.meta;
+    _jState.events = data.events || [];
+    _jState.screens = _jGroupByScreen(_jState.events);
+    _jRenderFilled();
+  } catch (err){
+    if (err && /404/.test(String(err.message||err))) _jRenderEmpty();
+    else _jRenderEmpty(String(err.message || err));
+  }
+}
+
+function _jRenderEmpty(errMsg){
+  $('#jUserLabel').textContent = '(chưa có data)';
+  const err = errMsg ? `<div style="background:#2a1620;border:1px solid var(--danger);color:var(--danger);padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:13px">⚠ ${esc(errMsg)}</div>` : '';
+  $('#jContent').innerHTML = `
+    ${err}
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:40px;text-align:center;max-width:680px;margin:40px auto">
+      <div style="font-size:56px;margin-bottom:8px">📥</div>
+      <h3 style="margin:0 0 8px;font-size:18px">Chưa có dữ liệu hành trình</h3>
+      <p class="muted" style="margin:0 0 24px;font-size:13px;line-height:1.6">
+        Gửi <code class="mono" style="background:var(--panel2);padding:2px 6px;border-radius:4px;color:var(--danger)">${esc(_jState.tid)}</code> cho đội Snowplow.<br>
+        Họ sẽ trả lại file JSON (events query từ data lake) — upload file đó vào đây.
+      </p>
+      <label for="jFile" class="btn" style="cursor:pointer;display:inline-block">⬆ Chọn file JSON / NDJSON</label>
+      <input type="file" id="jFile" accept=".json,.ndjson,application/json,text/plain" style="display:none">
+      <div class="muted" style="font-size:11.5px;margin-top:16px;line-height:1.5">
+        Hỗ trợ JSON array hoặc NDJSON · tối đa 100MB · TTL 24h<br>
+        Portal validate tracking_id trong file phải khớp.
+      </div>
+    </div>
+  `;
+  $('#jFile').onchange = _jOnFile;
+}
+
+async function _jOnFile(ev){
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const { pid, tid } = _jState;
+  $('#jContent').innerHTML = `<div class="empty" style="padding:60px"><div style="font-size:36px">⏳</div><div style="margin-top:8px">Đang upload ${esc(f.name)} (${(f.size/1024/1024).toFixed(1)}MB)…</div></div>`;
+  try {
+    const buf = await f.arrayBuffer();
+    const r = await fetch(`${BASE}/api/projects/${pid}/journey/import?tracking_id=${encodeURIComponent(tid)}`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' }, body: buf,
+    });
+    // Parse response defensively — server có thể trả HTML lúc 413/502
+    const ctype = r.headers.get('content-type') || '';
+    let body, raw;
+    if (ctype.includes('application/json')) {
+      body = await r.json();
+    } else {
+      raw = await r.text();
+      try { body = JSON.parse(raw); } catch (_) { body = null; }
+    }
+    if (!r.ok) {
+      const msg = (body && (body.message || body.error))
+        || (r.status === 413 ? `File quá lớn (>${r.status === 413 ? '8MB' : '?'}). Hãy chia nhỏ file Snowplow trước khi upload.`
+            : (raw && raw.slice(0, 200)) || `HTTP ${r.status}`);
+      throw new Error(msg);
+    }
+    if (!body) throw new Error('Server trả về phản hồi không hợp lệ');
+    toast(`Imported ${body.imported} event${body.skipped?` · skip ${body.skipped}`:''}`);
+    await _jLoad();
+  } catch (err){
+    _jRenderEmpty(err.message || String(err));
+  }
+}
+
+function toast(msg){
+  let t = document.getElementById('jToast');
+  if (!t){
+    t = document.createElement('div');
+    t.id = 'jToast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);color:var(--accent);padding:10px 20px;border-radius:10px;z-index:50;font-size:13px;font-weight:600';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>{ t.style.display='none'; }, 2200);
+}
+
+function _jRenderFilled(){
+  const { meta, screens, events } = _jState;
+  $('#jUserLabel').textContent = 'user ' + (meta.user_id || '—');
+  $('#jZoom').style.display = 'inline-flex';
+  $('#jReimport').style.display = '';
+  $('#jDelete').style.display = '';
+  $('#jReimport').onclick = ()=>_jRenderEmpty();
+  $('#jDelete').onclick = async ()=>{
+    if (!confirm('Xoá dữ liệu user-flow của tracking_id này?')) return;
+    await api(`/api/projects/${_jState.pid}/journey/${encodeURIComponent(_jState.tid)}`, { method:'DELETE' });
+    _jState.meta = null; _jState.events = []; _jState.screens = [];
+    _jRenderEmpty();
+  };
+
+  // Stats
+  const totalDurMs = (meta.ended_at_ms||0) - (meta.started_at_ms||0);
+  const apiCount = screens.reduce((a,s)=>a+s.apis.length,0);
+  const apiOk = screens.reduce((a,s)=>a+s.apis.filter(x=>x.s>=200&&x.s<300).length,0);
+  const apiErr = apiCount - apiOk;
+  const crashCount = screens.filter(s=>s.crash).length;
+
+  // Nodes: 1 card / screen group + connector tap label (nếu có element_key giữa screens)
+  let nodesHtml = '';
+  screens.forEach((s, i) => {
+    const apisHtml = s.apis.length
+      ? s.apis.slice(0, 6).map(a=>`
+          <div class="japi">
+            <span class="jmeth ${a.m==='POST'?'post':'get'}">${esc(a.m)}</span>
+            <span class="jurl" title="${esc(a.u)}">${esc(a.u.length>34?a.u.slice(0,32)+'…':a.u)}</span>
+            <span class="jdot" style="background:${a.s>=500?'#dc2626':(a.s>=400?'#f59e0b':(a.ms>1000?'#f59e0b':'#22c55e'))}"></span>
+            <span class="jms">${a.ms}ms</span>
+          </div>`).join('')
+        + (s.apis.length>6 ? `<div class="muted" style="font-size:11px;padding:4px 8px">…+${s.apis.length-6} API nữa</div>` : '')
+      : '<div class="muted" style="font-size:11px;padding:6px 8px">— không có API call —</div>';
+    const taps = s.events.filter(e=>e.event_name==='tap' || e.event_name==='click');
+    const lastTap = taps[taps.length-1];
+    const footer = i === screens.length-1
+      ? `<div class="jfoot dest">🎯 Màn cuối</div>`
+      : (lastTap
+          ? `<div class="jfoot">👆 ${esc(lastTap.element_key || lastTap.props?.element || 'tap')}</div>`
+          : `<div class="jfoot muted">navigate</div>`);
+    nodesHtml += `
+      <div class="jnode ${s.crash?'crash':''}" data-i="${i}">
+        <div class="jnode-h">
+          <div class="jnbadge">${i+1}</div>
+          <div class="jnname" title="${esc(s.screen)}">${esc(s.screen)}</div>
+          <div class="jndur">⏱ ${_jFmtDur(s.exit - s.enter)}</div>
+        </div>
+        <div class="jntime">${_jFmtTime(s.enter)} → ${_jFmtTime(s.exit)}</div>
+        <div class="jnstat">🌐 ${s.apis.length} API · 📺 ${s.events.length} event${s.crash?' · ⚠ crash':''}</div>
+        <div class="japis">${apisHtml}</div>
+        ${footer}
+      </div>
+    `;
+    if (i < screens.length-1){
+      const label = lastTap ? (lastTap.element_key || 'tap') : 'navigate';
+      nodesHtml += `<div class="jconn"><span class="jclbl">${esc(label)}</span><span class="jcarrow">→</span></div>`;
+    }
+  });
+
+  $('#jContent').innerHTML = `
+    <style>
+      .jstats{display:flex;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+      .jstats .jstat{padding:2px 12px;border-right:1px solid var(--line)}
+      .jstats .jstat:last-child{border:none}
+      .jstats .jstat .k{color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:10px;font-weight:600}
+      .jstats .jstat .v{font-family:ui-monospace,monospace;font-size:14px;font-weight:700}
+      .jstats .jstat .v.ok{color:var(--accent2)} .jstats .jstat .v.err{color:var(--danger)}
+      .jcanvas{position:relative;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:auto;
+               min-height:560px;padding:24px;cursor:grab}
+      .jcanvas.fs{position:fixed;inset:0;z-index:50;border-radius:0;border:none;cursor:grab}
+      .jcanvas.dragging{cursor:grabbing}
+      .jtrack{display:flex;align-items:center;gap:0;transform-origin:left center;transition:transform .15s;padding:8px 0}
+      .jnode{flex:0 0 auto;width:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+             padding:14px 16px;cursor:pointer;transition:transform .15s,border-color .15s,box-shadow .15s}
+      .jnode:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 4px 18px rgba(91,140,255,0.18)}
+      .jnode.sel{border-color:var(--warn);box-shadow:0 0 0 2px var(--warn)}
+      .jnode.crash{border-color:var(--danger)} .jnode.crash:hover{box-shadow:0 4px 18px rgba(255,107,107,0.22)}
+      .jnode-h{display:flex;align-items:center;gap:10px}
+      .jnbadge{width:26px;height:26px;border-radius:8px;background:var(--accent);color:#fff;font-weight:700;font-size:12px;
+               display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .jnode.crash .jnbadge{background:var(--danger)}
+      .jnname{flex:1;font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace}
+      .jndur{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--warn);font-weight:600;flex-shrink:0}
+      .jntime{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted);margin-top:6px}
+      .jnstat{font-size:11px;color:var(--muted);margin-top:6px}
+      .japis{margin-top:10px;display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);padding-top:8px}
+      .japi{display:flex;align-items:center;gap:8px;padding:3px 0;font-family:ui-monospace,monospace;font-size:11px}
+      .jmeth{font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:3px;width:34px;text-align:center;flex-shrink:0}
+      .jmeth.get{background:rgba(91,140,255,.18);color:#79c0ff}
+      .jmeth.post{background:rgba(255,107,107,.18);color:#ffa3a3}
+      .jurl{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+      .jdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+      .jms{color:var(--muted);font-size:10.5px;flex-shrink:0;min-width:42px;text-align:right}
+      .jfoot{margin-top:10px;padding:6px 10px;background:var(--panel2);border-radius:8px;font-size:11px;font-weight:600;
+             text-align:center;font-family:ui-monospace,monospace;color:var(--accent2)}
+      .jfoot.dest{color:var(--accent2);background:rgba(39,215,150,.10)}
+      .jfoot.muted{color:var(--muted)}
+      .jconn{flex:0 0 auto;width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+      .jclbl{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted);background:var(--panel);padding:2px 8px;border-radius:6px;border:1px solid var(--line);max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .jcarrow{color:var(--accent);font-size:22px;font-weight:300}
+    </style>
+    <div class="jstats">
+      <div class="jstat"><div class="k">Tổng flow</div><div class="v">${_jFmtDur(totalDurMs)}</div></div>
+      <div class="jstat"><div class="k">Màn</div><div class="v">${screens.length}</div></div>
+      <div class="jstat"><div class="k">Events</div><div class="v">${events.length}</div></div>
+      <div class="jstat"><div class="k">API call</div><div class="v ${apiErr?'err':'ok'}">${apiOk}/${apiCount}${apiErr?' err':''}</div></div>
+      <div class="jstat"><div class="k">Crash</div><div class="v ${crashCount?'err':'ok'}">${crashCount}</div></div>
+      <div class="jstat" style="margin-left:auto"><div class="k">Platform</div><div class="v" style="font-size:12px">${esc(meta.platform || '—')}</div></div>
+    </div>
+    <div class="jcanvas" id="jCanvas">
+      <div class="jtrack" id="jTrack">${nodesHtml || '<div class="empty">Không có màn nào</div>'}</div>
+    </div>
+  `;
+
+  // Wire interactions
+  document.querySelectorAll('#jTrack .jnode').forEach(el => {
+    el.onclick = ()=>{
+      document.querySelectorAll('.jnode.sel').forEach(n=>n.classList.remove('sel'));
+      el.classList.add('sel');
+      _jOpenScreenDrawer(+el.dataset.i);
+    };
+  });
+  _jWireZoomPan();
+}
+
+function _jWireZoomPan(){
+  const track = document.getElementById('jTrack');
+  const canvas = document.getElementById('jCanvas');
+  let zoom = 1;
+  const apply = ()=>{
+    track.style.transform = `scale(${zoom})`;
+    document.getElementById('jZpct').textContent = Math.round(zoom*100)+'%';
+  };
+  $('#jZin').onclick = ()=>{ zoom = Math.min(1.6, +(zoom+0.1).toFixed(2)); apply(); };
+  $('#jZout').onclick = ()=>{ zoom = Math.max(0.5, +(zoom-0.1).toFixed(2)); apply(); };
+  $('#jZreset').onclick = ()=>{ zoom = 1; apply(); canvas.scrollLeft = 0; };
+  $('#jFull').onclick = ()=>{
+    canvas.classList.toggle('fs');
+    $('#jFull').textContent = canvas.classList.contains('fs') ? '⤡' : '⛶';
+  };
+  canvas.addEventListener('wheel', (e)=>{
+    if (!(e.ctrlKey||e.metaKey)) return;
+    e.preventDefault();
+    zoom = Math.min(1.6, Math.max(0.5, +(zoom - Math.sign(e.deltaY)*0.1).toFixed(2)));
+    apply();
+  }, { passive:false });
+  // Drag to pan
+  let drag = null;
+  canvas.addEventListener('pointerdown', (e)=>{
+    if (e.target.closest('.jnode')) return;
+    drag = { sx:e.clientX, sy:e.clientY, sl:canvas.scrollLeft, st:canvas.scrollTop };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('dragging');
+  });
+  canvas.addEventListener('pointermove', (e)=>{
+    if (!drag) return;
+    canvas.scrollLeft = drag.sl - (e.clientX - drag.sx);
+    canvas.scrollTop = drag.st - (e.clientY - drag.sy);
+  });
+  canvas.addEventListener('pointerup', ()=>{ drag=null; canvas.classList.remove('dragging'); });
+}
+
+function _jOpenScreenDrawer(idx){
+  const s = _jState.screens[idx];
+  if (!s) return;
+  // dùng drawer chung có sẵn (id="drawer")
+  const drawer = document.getElementById('drawer');
+  const scrim = document.getElementById('scrim');
+  if (!drawer || !scrim) return;
+  const eventsHtml = s.events.map(e=>`
+    <div style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--panel2)">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <span class="mono" style="font-weight:700;color:${e.event_name==='application_error'?'var(--danger)':'var(--accent2)'}">${esc(e.event_name)}</span>
+        <span class="muted mono" style="font-size:11px;margin-left:auto">${_jFmtTime(e.ts)}</span>
+      </div>
+      ${e.element_key ? `<div class="mono muted" style="font-size:11px;margin-top:3px">${esc(e.element_key)}</div>` : ''}
+      ${Object.keys(e.props||{}).length ? `<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--muted);font-size:11px">properties</summary><pre style="margin:6px 0 0;font-size:10.5px;max-height:160px">${esc(JSON.stringify(e.props, null, 2))}</pre></details>` : ''}
+    </div>
+  `).join('');
+  $('#drawer .dh').innerHTML = `
+    <div style="flex:1">
+      <div style="font-size:15px;font-weight:700">${esc(s.screen)}</div>
+      <div class="muted mono" style="font-size:11px;margin-top:2px">${_jFmtTime(s.enter)} → ${_jFmtTime(s.exit)} · ${_jFmtDur(s.exit-s.enter)}</div>
+    </div>
+    <button>✕</button>
+  `;
+  $('#drawer .db').innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span class="badge">🌐 ${s.apis.length} API</span>
+      <span class="badge" style="background:#1d2a1f;color:var(--accent2)">📺 ${s.events.length} event</span>
+      ${s.crash ? `<span class="badge crash">⚠ crash</span>` : ''}
+    </div>
+    ${s.apis.length ? `
+      <h4 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)">API calls (${s.apis.length})</h4>
+      <div style="margin-bottom:14px">${s.apis.map(a=>`
+        <div style="display:flex;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;font-size:12px;font-family:ui-monospace,monospace;align-items:center">
+          <span class="jmeth ${a.m==='POST'?'post':'get'}" style="font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:3px;width:34px;text-align:center">${esc(a.m)}</span>
+          <span style="flex:1;word-break:break-all">${esc(a.u)}</span>
+          <span style="font-weight:700;color:${a.s>=400?'var(--danger)':'var(--accent2)'}">${a.s||'—'}</span>
+          <span class="muted" style="min-width:50px;text-align:right">${a.ms}ms</span>
+        </div>
+      `).join('')}</div>
+    ` : ''}
+    <h4 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)">Events (${s.events.length})</h4>
+    ${eventsHtml}
+  `;
+  drawer.classList.add('open');
+  scrim.classList.add('open');
+  // wire close
+  $('#drawer .dh button').onclick = ()=>{
+    drawer.classList.remove('open'); scrim.classList.remove('open');
+    document.querySelectorAll('.jnode.sel').forEach(n=>n.classList.remove('sel'));
+  };
+}
+
 async function renderProjects(){
   const projs = await api('/api/projects');
   $('#view').innerHTML = `
@@ -418,13 +814,13 @@ async function renderProjects(){
         </tr>`).join(''):'<tr><td colspan="6" class="empty">Chưa có dự án.</td></tr>'}
       </tbody></table>
     </div>`;
-  $('#newProj').onclick=()=>{ $('#pName').value='';$('#pBundle').value='';$('#projDlg').showModal(); };
+  $('#newProj').onclick=()=>{ $('#pName').value='';$('#projDlg').showModal(); };
   document.querySelectorAll('tr.click').forEach(tr=>tr.onclick=(e)=>{ if(e.target.closest('.del'))return; go({name:'project',pid:tr.dataset.id}); });
   document.querySelectorAll('.del').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); if(confirm('Xoá dự án này?')){ await fetch(`${BASE}/api/projects/${b.dataset.id}`,{method:'DELETE'}); renderProjects(); }});
 }
 
 $('#pCreate').onclick=async()=>{
-  const body={name:$('#pName').value.trim(),app_bundle:$('#pBundle').value.trim(),source_type:$('#pType').value};
+  const body={name:$('#pName').value.trim()};
   if(!body.name)return;
   await api('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   $('#projDlg').close(); renderProjects();
@@ -454,7 +850,7 @@ async function renderProject(){
       </div>
       <div class="row">
         <span class="keybox" title="API key">${esc(p.api_key)}</span>
-        <button class="btn ghost sm" id="cfgDrawerBtn" title="Mở Config (remote) — Snowplow / Firebase / W3C / Tên màn">⚙ Config</button>
+        <button class="btn ghost sm" id="cfgDrawerBtn" style="display:none" title="Mở Config (remote) — Snowplow / Firebase / W3C / Tên màn">⚙ Config</button>
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
       </div>
     </div>
@@ -474,16 +870,15 @@ async function renderProject(){
         <div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div>
       </div>
     </div>
-    <!-- Report charts row: rendered async by renderStatsCharts() below the stat
-         cards. 3 area charts side-by-side, fed from /stats-series. -->
-    <div id="statsChartsRow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px"></div>
+    <!-- Report charts row: rendered async by renderStatsCharts(). HIDDEN
+         temporarily — operators only need Sessions + Config (remote) for now.
+         Re-enable by removing display:none here + restoring renderStatsCharts()
+         call below + the hidden tabs (logs / wireframe / agent). -->
+    <div id="statsChartsRow" style="display:none;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px"></div>
     <div class="panel">
       <div class="tabs">
-        <div class="tab ${route.tab==='logs'?'active':''}" data-tab="logs">Log events</div>
-        <div class="tab ${(!route.tab||route.tab==='sessions')?'active':''}" data-tab="sessions">Sessions</div>
-        <div class="tab ${route.tab==='wireframe'?'active':''}" data-tab="wireframe">Hành trình & Heatmap</div>
-        <div class="tab ${route.tab==='agent'?'active':''}" data-tab="agent">Agent</div>
         <div class="tab ${route.tab==='config'?'active':''}" data-tab="config">Config (remote)</div>
+        <div class="tab ${(!route.tab||route.tab==='sessions')?'active':''}" data-tab="sessions">Sessions</div>
       </div>
       <div id="tabBody"></div>
     </div>`;
@@ -536,13 +931,14 @@ async function renderProject(){
   if (usersCard && stats.users) {
     usersCard.onclick = () => openUsersDialog(pid);
   }
-  // Async — never blocks the project page render. The series endpoint has
-  // its own ETag so revisits are cheap (304 + browser cache).
-  renderStatsCharts(pid).catch(() => {});
-  if(route.tab==='logs') renderLogs(pid);
-  else if(route.tab==='wireframe') renderWireframe(pid);
-  else if(route.tab==='agent') renderAgent(pid);
-  else if(route.tab==='config') renderConfig(pid);
+  // Stats charts (Báo cáo + 7d/24h/30d) and the logs/wireframe/agent tabs
+  // are hidden in the current UI — operators only need Sessions + Config.
+  // Re-enable both lines + the tab markup above to bring them back.
+  // renderStatsCharts(pid).catch(() => {});
+  // if(route.tab==='logs') renderLogs(pid);
+  // else if(route.tab==='wireframe') renderWireframe(pid);
+  // else if(route.tab==='agent') renderAgent(pid);
+  if(route.tab==='config') renderConfig(pid);
   else renderSessions(pid);   // default tab = Sessions
 }
 
@@ -914,7 +1310,9 @@ async function renderConfig(pid, mountSel){
       <div class="row" style="gap:10px;margin-top:8px;flex-wrap:wrap">
         <div><label>batchSize</label><input id="cfBatch" type="number" style="width:90px" value="${s.batchSize??10}"/></div>
         <div><label>flushIntervalMs</label><input id="cfFlush" type="number" style="width:110px" value="${s.flushIntervalMs??3000}"/></div>
-        <div><label>logLevel</label><select id="cfLog"><option ${s.logLevel==='debug'?'selected':''}>debug</option><option ${s.logLevel!=='debug'?'selected':''}>warn</option></select></div>
+        <div><label>logLevel</label><select id="cfLog">
+          ${['error','warn','info','debug'].map(lv=>`<option value="${lv}" ${ (s.logLevel||'info')===lv?'selected':''}>${lv}</option>`).join('')}
+        </select></div>
       </div>
       <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
         <div style="font-size:12px;font-weight:600;margin-bottom:6px">Auto-capture flags <span class="muted" style="font-weight:400">— SDK tự fire mỗi khi user tap / navigate / HTTP. Tắt để chỉ ghi nhận business event app code chủ động fire.</span></div>
@@ -962,26 +1360,6 @@ async function renderConfig(pid, mountSel){
         <div class="muted" style="font-size:10.5px;margin-top:6px">
           <b>start/end</b>: core fire khi đổi screen (end kèm dwell_ms cho màn trước). Trống = không emit.
           <b>load</b>: swizzler fire ở viewDidAppear kèm load_ms (viewDidLoad → first appearance). Default: <span class="mono">screen_load_completed</span>.
-        </div>
-      </div>
-
-      <!-- Custom values: key/value bag app reads via UniTrack.getRemoteValue.
-           Replaces Firebase RemoteConfig for keys an operator wants to flip
-           without a Firebase Console publish cycle. Edit as key=value lines —
-           values typed by their literal form: "true"/"false" → bool, integer
-           → int, decimal → double, anything else → string. -->
-      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px">
-          Custom values <span class="muted" style="font-weight:400">— remote feature flags / experiment knobs (app gọi <span class="mono">UniTrack.getRemoteValue("key", default: ...)</span>)</span>
-        </div>
-        <textarea id="cfCustomValues" style="width:100%;height:88px;font-family:ui-monospace,monospace;font-size:11.5px"
-          placeholder="feature_camera_grid=true
-home_banner_copy=Welcome
-ab_bucket=2
-retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</textarea>
-        <div class="muted" style="font-size:10.5px;margin-top:4px">
-          <b>Resolve order</b>: portal custom_values → Firebase RemoteConfig (nếu app có wire <span class="mono">UniTrackFirebase</span>) → defaultValue ở app.
-          Value <span class="mono">true</span>/<span class="mono">false</span> được parse boolean, số nguyên → int, số thập phân → double, còn lại → string.
         </div>
       </div>
 
@@ -1303,77 +1681,42 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
       ${flavorOverrideHtml('Sp', sp)}
 
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}> Firebase</label></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Kéo-thả <b>google-services.json</b> hoặc <b>GoogleService-Info.plist</b> vào ô <b>Base</b> để tự điền base config. 4 dropzone bên dưới cho từng flavor — env nào kéo file vào, info hiện ngay & app gọi <span class="mono">?flavor=X</span> sẽ ăn theo.</div>
-
-      <!-- ── Base config ────────────────────────────────────────────── -->
-      <div style="border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);margin-bottom:10px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">🟦 Base (fallback)</div>
-        <div id="cfFbDrop" style="border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px">Thả file vào đây</div>
-        <div class="row" style="gap:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:200px"><label>GOOGLE_APP_ID (appId)</label><input id="cfFbApp" style="width:100%" value="${esc(fbo.appId||'')}"/></div>
-          <div style="flex:1;min-width:160px"><label>GCM_SENDER_ID</label><input id="cfFbSender" style="width:100%" value="${esc(fbo.gcmSenderId||'')}"/></div>
+      <h3 style="margin:0 0 8px;font-size:14px">
+        <label class="row" style="gap:6px;display:inline-flex">
+          <input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}>
+          Firebase Analytics / Crashlytics
+        </label>
+      </h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">
+        Portal chỉ bật/tắt provider. App tự cấu hình Firebase bằng <code>google-services.json</code> (Android) /
+        <code>GoogleService-Info.plist</code> (iOS) theo hướng dẫn dưới đây.
+      </div>
+      <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--panel2)">
+        <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">📘 Hướng dẫn setup Firebase theo platform</div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <a class="btn ghost sm" href="setup/firebase/ios.html" target="_blank">🍎 iOS Native</a>
+          <a class="btn ghost sm" href="setup/firebase/android.html" target="_blank">🤖 Android Native</a>
+          <a class="btn ghost sm" href="setup/firebase/flutter.html" target="_blank">🐦 Flutter</a>
+          <a class="btn ghost sm" href="setup/firebase/react-native.html" target="_blank">⚛ React Native</a>
         </div>
-        <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:8px">
-          <div style="flex:1;min-width:160px"><label>API_KEY</label><input id="cfFbKey" style="width:100%" value="${esc(fbo.apiKey||'')}"/></div>
-          <div style="flex:1;min-width:140px"><label>PROJECT_ID</label><input id="cfFbProj" style="width:100%" value="${esc(fbo.projectId||'')}"/></div>
-          <div style="flex:1;min-width:140px"><label>BUNDLE_ID</label><input id="cfFbBundle" style="width:100%" value="${esc(fbo.bundleId||'')}"/></div>
+        <div class="muted" style="font-size:11px;margin-top:8px;line-height:1.5">
+          <b>Đã tích hợp Firebase rồi:</b> chỉ cần bật toggle ở trên, SDK sẽ bắc cầu UniTrack event → Firebase.<br>
+          <b>Chưa tích hợp Firebase:</b> mở guide tương ứng platform → làm theo các bước (có code mẫu, nút copy, hình minh hoạ).
         </div>
-        <label style="margin-top:8px">superProperties (mọi event)</label>
-        <textarea id="cfFbSuper" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.superProperties))}</textarea>
-        <label>userProperties (audience)</label>
-        <textarea id="cfFbUser" style="width:100%;height:56px;font-family:ui-monospace,monospace">${esc(kvText(fb.userProperties))}</textarea>
       </div>
+      <!-- Hidden inputs cho cfSave: Firebase config + W3C — tạm ẩn UI nhưng giữ giá trị cũ -->
+      <input type="hidden" id="cfFbApp"    value="${esc(fbo.appId||'')}"/>
+      <input type="hidden" id="cfFbSender" value="${esc(fbo.gcmSenderId||'')}"/>
+      <input type="hidden" id="cfFbKey"    value="${esc(fbo.apiKey||'')}"/>
+      <input type="hidden" id="cfFbProj"   value="${esc(fbo.projectId||'')}"/>
+      <input type="hidden" id="cfFbBundle" value="${esc(fbo.bundleId||'')}"/>
+      <textarea id="cfFbSuper" style="display:none">${esc(kvText(fb.superProperties))}</textarea>
+      <textarea id="cfFbUser"  style="display:none">${esc(kvText(fb.userProperties))}</textarea>
 
-      <!-- ── 4 dropzones per flavor ─────────────────────────────────── -->
-      <div style="margin-top:6px;padding:10px;border:1px solid var(--line);border-radius:8px">
-        <div style="font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:4px">📂 Firebase per flavor</div>
-        <div class="muted" style="font-size:11px;margin-bottom:8px">App truyền <span class="mono">?flavor=X</span> sẽ nhận options của flavor X (merge lên base). Bỏ trống = ăn base.</div>
-        ${(() => {
-          // Pre-load saved options per flavor from firebase.flavor_overrides[f].options
-          const fbOv = (fb && fb.flavor_overrides) || {};
-          return FLAVORS.map(f => {
-            const fbf = (fbOv[f] && fbOv[f].options) || {};
-            const color = FLAVOR_COLOR[f];
-            const has = !!(fbf.appId || fbf.apiKey || fbf.projectId);
-            return `
-              <div id="cfFbFv_${f}_card" data-flavor="${f}" style="margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:10px;background:#0e0e0e">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span>
-                  <b style="color:${color};font-size:12px;text-transform:uppercase;letter-spacing:0.5px">${f}</b>
-                  <span class="muted" style="font-size:10.5px;flex:1">kéo google-services.json / GoogleService-Info.plist</span>
-                  <button class="btn ghost sm cfFbFv_clear" type="button" data-flavor="${f}" style="padding:2px 8px;display:${has?'inline-block':'none'}">✕ Xoá</button>
-                </div>
-                <div id="cfFbFv_${f}_drop" class="cfFbFv_drop" data-flavor="${f}"
-                     style="border:1px dashed var(--line);border-radius:6px;padding:14px;text-align:center;color:var(--muted);margin-bottom:8px;cursor:pointer">
-                  ${has ? '🟢 Đã có config — kéo file mới để thay' : 'Thả file vào đây'}
-                </div>
-                <div id="cfFbFv_${f}_info" style="display:${has?'block':'none'};font-size:11.5px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font-family:ui-monospace,monospace">
-                  <div style="display:grid;grid-template-columns:90px 1fr;gap:4px 10px">
-                    <span class="muted">file</span><span id="cfFbFv_${f}_file">${has?'(saved)':'—'}</span>
-                    <span class="muted">appId</span><span id="cfFbFv_${f}_appId">${esc(fbf.appId||'')}</span>
-                    <span class="muted">apiKey</span><span id="cfFbFv_${f}_apiKey">${esc(fbf.apiKey||'')}</span>
-                    <span class="muted">projectId</span><span id="cfFbFv_${f}_projectId">${esc(fbf.projectId||'')}</span>
-                    <span class="muted">bundleId</span><span id="cfFbFv_${f}_bundleId">${esc(fbf.bundleId||'')}</span>
-                    <span class="muted">senderId</span><span id="cfFbFv_${f}_gcmSenderId">${esc(fbf.gcmSenderId||'')}</span>
-                  </div>
-                </div>
-                <input type="hidden" id="cfFbFv_${f}_data" value='${esc(JSON.stringify(fbf||{}))}'/>
-              </div>`;
-          }).join('');
-        })()}
-      </div>
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}> W3C Tracing (traceparent)</label></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Inject header W3C vào outbound HTTP. Allowlist trống = không inject (fail-closed, không leak trace_id ra Firebase/Maps/CDN).</div>
-      <div class="row" style="gap:10px;flex-wrap:wrap">
-        <div style="flex:1;min-width:160px"><label>Header name</label><input id="cfTrHdr" style="width:100%" value="${esc(tr.header_name||'traceparent')}"/></div>
-        <label class="row" style="gap:5px;align-self:flex-end;padding-bottom:6px"><input type="checkbox" id="cfTrSampled" ${tr.sampled!==false?'checked':''}> sampled (flags=01)</label>
-      </div>
-      <label style="margin-top:8px">Allowlist hosts (1 dòng / pattern; <span class="mono">*.suffix.com</span> hỗ trợ wildcard)</label>
-      <textarea id="cfTrHosts" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
-      ${flavorOverrideHtml('Tr', tr)}
+      <input type="hidden" id="cfTrOn"      data-checked="${tr.enabled?'1':''}" value="${tr.enabled?'on':''}"/>
+      <input type="hidden" id="cfTrHdr"     value="${esc(tr.header_name||'traceparent')}"/>
+      <input type="hidden" id="cfTrSampled" data-checked="${tr.sampled!==false?'1':''}" value="${tr.sampled!==false?'on':''}"/>
+      <textarea id="cfTrHosts" style="display:none">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
 
       <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="cfSave">Lưu config</button>
@@ -1748,16 +2091,19 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
   */
 
   // Firebase file drag-drop → parse json/plist, fill inputs.
+  // UI Firebase config đã rút gọn — dropzone không còn render, skip nếu null.
   const drop=$('#cfFbDrop');
-  ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
-  drop.addEventListener('dragleave',()=>drop.style.borderColor='var(--line)');
-  drop.addEventListener('drop',e=>{
-    e.preventDefault();drop.style.borderColor='var(--line)';
-    const f=e.dataTransfer.files[0]; if(!f)return;
-    const r=new FileReader();
-    r.onload=()=>{ try{ fillFirebaseFromFile(f.name, r.result); toast('Đã đọc '+f.name);}catch(err){toast('File không hợp lệ','err');} };
-    r.readAsText(f);
-  });
+  if (drop) {
+    ['dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor='var(--accent)';}));
+    drop.addEventListener('dragleave',()=>drop.style.borderColor='var(--line)');
+    drop.addEventListener('drop',e=>{
+      e.preventDefault();drop.style.borderColor='var(--line)';
+      const f=e.dataTransfer.files[0]; if(!f)return;
+      const r=new FileReader();
+      r.onload=()=>{ try{ fillFirebaseFromFile(f.name, r.result); toast('Đã đọc '+f.name);}catch(err){toast('File không hợp lệ','err');} };
+      r.readAsText(f);
+    });
+  }
   function fillFirebaseFromFile(name, text){
     const opts = parseFirebaseFile(name, text);
     $('#cfFbApp').value   = opts.appId       || '';
@@ -1866,6 +2212,7 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
   }
 
   $('#cfSave').onclick=async()=>{
+   try {
     // Build the base block then attach flavor_overrides if any flavor box has
     // content. The server treats flavor_overrides as opaque JSON and only
     // strips it on the app-facing read.
@@ -1974,35 +2321,22 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
     }
     if (Object.keys(fbOv).length) firebase.flavor_overrides = fbOv;
 
-    // Tracing block (was missing from the save handler before this commit —
-    // editing it on the portal had no effect).
+    // Tracing block — UI tạm ẩn (em chuyển input thành hidden để giữ giá trị).
+    // Đọc qua data-checked attr nếu là hidden, fallback .checked cho checkbox cũ.
+    const cfTrOnEl = $('#cfTrOn');
+    const cfTrSampledEl = $('#cfTrSampled');
+    const readChk = (el) => el ? (el.type === 'checkbox' ? el.checked : el.dataset.checked === '1') : false;
     const tracing = {
-      enabled: $('#cfTrOn').checked,
+      enabled: readChk(cfTrOnEl),
       header_name: $('#cfTrHdr').value.trim() || 'traceparent',
       allowlist_hosts: $('#cfTrHosts').value.split('\n').map(s=>s.trim()).filter(Boolean),
-      sampled: $('#cfTrSampled').checked,
+      sampled: readChk(cfTrSampledEl),
     };
     const trOv = collectFlavorOverrides('Tr'); if (trOv) tracing.flavor_overrides = trOv;
 
-    // Custom values: parse `key=value` lines and coerce the value to a typed
-    // primitive so the app side reads it back without manual conversion.
-    // Resolution mirrors the contract documented in the textarea hint.
-    const parseTypedKV = (raw) => {
-      const out = {};
-      String(raw || '').split('\n').forEach(line => {
-        const eq = line.indexOf('=');
-        if (eq <= 0) return;
-        const k = line.slice(0, eq).trim();
-        const vRaw = line.slice(eq + 1).trim();
-        if (!k) return;
-        if (vRaw === 'true')  { out[k] = true;  return; }
-        if (vRaw === 'false') { out[k] = false; return; }
-        if (/^-?\d+$/.test(vRaw)) { out[k] = parseInt(vRaw, 10); return; }
-        if (/^-?\d+\.\d+$/.test(vRaw)) { out[k] = parseFloat(vRaw); return; }
-        out[k] = vRaw;
-      });
-      return out;
-    };
+    // (Removed) Custom values — the portal-side feature-flag bag was retired.
+    // Apps that need remote toggles wire Firebase Remote Config or their own
+    // backend directly; UniTrack stays scoped to tracking.
 
     const body = {
       endpoint: $('#cfEndpoint').value.trim(),
@@ -2013,7 +2347,6 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
         screen_start_event: $('#cfScreenStart').value.trim(),
         screen_end_event:   $('#cfScreenEnd').value.trim(),
         screen_load_event:  $('#cfScreenLoad').value.trim(),
-        custom_values: parseTypedKV($('#cfCustomValues').value),
       },
       snowplow, firebase, tracing,
     };
@@ -2038,6 +2371,13 @@ retry_delay_ms=1500">${esc(kvText(s.custom_values || s.customValues || {}))}</te
     // Re-render into whichever mount we're using (tab body OR drawer body)
     // so the version line + form state refresh in place.
     renderConfig(pid, mountSel);
+   } catch (e) {
+    // Bare async-onclick swallows throws — operator sees nothing happen and
+    // can't tell if the save failed or the click missed. Surface the error
+    // explicitly so they retry / report instead of guessing.
+    console.error('[cfSave]', e);
+    toast('Lưu config thất bại: ' + (e && e.message || e), 'err');
+   }
   };
 
   // ── Export: download the whole config + sp_event_maps as a portable .json.
@@ -3075,11 +3415,14 @@ function openSessionDetailDrawer(screen, replaySegs){
     const hasDetail = danger || (a.props && Object.keys(a.props).length);
     const aid=_acts.length; if(hasDetail)_acts.push(a);
     const childNet=a.networks.length?`<div style="padding:3px 0 1px 20px">${netChip(a.networks,label)}</div>`:'';
+    const navHint = a.navigatesTo
+      ? `<div style="padding:2px 0 0 20px;font-size:11px;color:var(--accent2)">↳ navigate to <span class="mono" style="color:var(--text)">${esc(a.navigatesTo)}</span></div>`
+      : '';
     return `<div style="padding:5px 0;border-bottom:1px solid var(--line)">
       <div style="display:flex;gap:8px;align-items:center;font-size:12px">
         <span class="${hasDetail?'wfd-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'chi tiết'} ⓘ</span>`:''}</span>
         <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
-      </div>${childNet}</div>`;
+      </div>${childNet}${navHint}</div>`;
   }).join('');
   const screenNetHtml = screenNets.length?`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>`:'';
   const lbl = screenLabel(seg.screen);
@@ -3349,22 +3692,27 @@ async function renderSessions(pid){
     </div>
     ${userCard}
     <div style="max-height:54vh;overflow:auto"><table>
-      <thead><tr><th>Session</th><th>User</th><th>Bắt đầu</th><th>Flow</th><th>Thời lượng</th><th>Events</th><th>Màn</th><th>Platform</th><th>Kết thúc</th><th>Crash</th></tr></thead>
+      <thead><tr><th>Session ID</th><th>Tracking ID</th><th>User ID</th><th>Timestamp</th><th>Platform</th><th>User Flow</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`
         <tr class="click sess" data-sid="${esc(r.session_id)}">
           <td class="mono" style="color:var(--accent2)" title="${esc(r.session_id)}">${shortSid(r.session_id)}</td>
+          <td class="mono" title="${esc(r.tracking_id||'(SDK cũ chưa có tracking_id)')}" style="font-size:11px;color:${r.tracking_id?'var(--danger)':'var(--muted)'}">${
+            r.tracking_id
+              ? `<span style="cursor:pointer" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(r.tracking_id)}').then(()=>this.textContent='✓ copied').then(()=>setTimeout(()=>this.textContent='${shortSid(r.tracking_id)} 📋',1200))" title="Click để copy ${esc(r.tracking_id)}">${shortSid(r.tracking_id)} 📋</span>`
+              : '—'
+          }</td>
           <td class="mono muted" style="font-size:11px">${esc(r.user_id||'—')}</td>
           <td class="mono muted">${r.started_at?fmtTime(r.started_at):'—'}</td>
-          <td style="max-width:420px;font-size:14px;line-height:1.45;white-space:normal;word-break:break-word" title="${esc(r.flow_signature||'')}">${flowDisplay(r.flow_signature)||'<span class=muted>—</span>'}</td>
-          <td>${fmtDur(r.duration_ms)}</td>
-          <td>${r.event_count}</td>
-          <td>${r.screen_count}</td>
           <td class="muted">${esc(r.platform)||'—'}</td>
-          <td>${sessionReasonBadge(r.ended_reason)}</td>
-          <td>${r.crashed?'<span style="color:var(--danger)">⚠</span>':''}</td>
-        </tr>`).join(''):'<tr><td colspan=10 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
+          <td>${r.tracking_id
+              ? `<button class="btn sm jbtn" data-tid="${esc(r.tracking_id)}" data-sid="${esc(r.session_id)}" onclick="event.stopPropagation()">🛤 User Flow</button>`
+              : '<span class="muted" style="font-size:11px">—</span>'}</td>
+        </tr>`).join(''):'<tr><td colspan=6 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
       </tbody></table></div>`;
   document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionIDE(pid,tr.dataset.sid));
+  document.querySelectorAll('.jbtn').forEach(b=>{
+    b.onclick=(ev)=>{ ev.stopPropagation(); go({name:'journey', pid, tid:b.dataset.tid, sid:b.dataset.sid}); };
+  });
   const sel=document.getElementById('userSelect');
   if(sel) sel.onchange=()=>{ _userFilter=sel.value; renderSessions(pid); };
 }
@@ -3427,6 +3775,32 @@ function buildSessionTree(journey){
     // "passive" = the user merely passed through (only screen_view, no taps/
     // network/custom events). Consecutive passive screens collapse into a stack.
     seg.passive = seg.actions.length === 0 && !seg.crashed;
+  }
+
+  // Navigation attribution — answers the question "what did this button do?".
+  // After segs are built, walk neighbour pairs: when the next screen starts
+  // within NAV_WINDOW_MS of the LAST tap on this screen, that tap caused the
+  // navigation, so stamp `navigatesTo = nextScreen` on the action. Skip when
+  // the gap is too large (= user just sat on the screen for a while before
+  // a new transition kicked in) so we don't falsely attribute an unrelated
+  // tap to a much later screen change.
+  const NAV_WINDOW_MS = 4000;
+  for(let i = 0; i < segs.length - 1; i++){
+    const cur  = segs[i];
+    const next = segs[i + 1];
+    if(!next || !next.started_at) continue;
+    if(cur.screen === next.screen) continue; // same screen — not a real navigation
+    // Find the last real tap on this screen (skip standalone network rows
+    // and screen lifecycle markers, those don't "cause" the next screen).
+    let lastTap = null;
+    for(let j = cur.actions.length - 1; j >= 0; j--){
+      const a = cur.actions[j];
+      if(a.standaloneNet) continue;
+      if(isTapName(a.event_name)){ lastTap = a; break; }
+    }
+    if(!lastTap || !lastTap.ts) continue;
+    if((next.started_at - lastTap.ts) > NAV_WINDOW_MS) continue;
+    lastTap.navigatesTo = next.screen;
   }
   return segs;
 }
@@ -3535,12 +3909,16 @@ async function openSessionDrawer(pid,sid){
         const aid = _treeActions.length; if(hasDetail) _treeActions.push(a);
         const childNet = a.networks.length
           ? `<div style="padding:3px 0 1px 22px">${netChip(a.networks, label)}</div>` : '';
+        const navHint = a.navigatesTo
+          ? `<div style="padding:2px 0 0 22px;font-size:11px;color:var(--accent2)">↳ navigate to <span class="mono" style="color:var(--text)">${esc(a.navigatesTo)}</span></div>`
+          : '';
         return `<div style="padding:4px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;gap:8px;align-items:center;font-size:12px">
             <span class="${hasDetail?'tree-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'xem chi tiết'} ⓘ</span>`:''}</span>
             <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
           </div>
           ${childNet}
+          ${navHint}
         </div>`;
       }).join('');
       const screenNetHtml = screenNets.length
@@ -3613,6 +3991,7 @@ async function openSessionIDE(pid, sid){
   ov.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
       <b>Session ${shortSid(sid)}</b>
+      <span id="ideTrackingId" class="muted mono" style="font-size:11px"></span>
       <span class="muted" style="font-size:12px" id="ideMeta"></span>
       <span id="ideCrashBadge"></span>
       <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
@@ -3662,27 +4041,126 @@ async function openSessionIDE(pid, sid){
   const searchEl = document.getElementById('ideSearch');
   searchEl.oninput = ()=>{ clearTimeout(searchEl._h); searchEl._h=setTimeout(()=>applyIDEFilter(), 160); };
 
-  // ── left: session list ──
+  // ── left: session navigator (current session journey) ──
+  // Old version showed every session_id in the project as a flat list — useful
+  // only when bouncing between sessions, but most navigation inside one
+  // session means scrolling the middle pane. Repurpose the left pane to show
+  // a screen-by-screen outline of the CURRENT session (📱 ScreenName, time
+  // range, nested events), so the operator can see the full journey at a
+  // glance, jump to a screen by clicking its outline entry, count screens /
+  // time on each, and spot the crashed screen. The flat session list is
+  // still reachable via the "← Danh sách" button at the top of the outline.
   const listEl = document.getElementById('ideList');
-  listEl.innerHTML = sessions.map(s=>{
-    const active = s.session_id===sid;
-    const dot = s.crashed ? '#dc2626' : (s.ended_reason==='inferred_terminate' ? '#f59e0b' : '#5b8cff');
+  listEl.innerHTML = '<div class="muted" style="padding:14px;font-size:12px">Đang tải hành trình…</div>';
+  api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`)
+    .then((s) => renderSessionOutline(pid, sid, s, sessions))
+    .catch((e) => { listEl.innerHTML = `<div class="muted" style="padding:14px;font-size:12px">Lỗi tải hành trình: ${esc(e.message||e)}</div>`; });
+
+  // ── center: load journey → wireframe + timeline ──
+  await renderIDEMain(pid, sid);
+}
+
+// Build the left sidebar outline for the CURRENT session: one collapsible
+// block per screen with the time range, duration, and a compact summary of
+// each event that fired on that screen. Reuses buildSessionTree() so the
+// outline stays in lockstep with the middle pane's timeline.
+function renderSessionOutline(pid, sid, session, allSessions){
+  const listEl = document.getElementById('ideList');
+  if(!listEl) return;
+  const journey = (session && Array.isArray(session.journey)) ? session.journey : [];
+  const segs = buildSessionTree(journey);
+
+  const headHtml = `
+    <div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;background:var(--panel)">
+      <button class="btn ghost sm" id="ideBackList" title="Danh sách session" style="padding:4px 8px;font-size:11px">← Danh sách</button>
+      <span class="mono" style="color:var(--accent2);font-size:12px">${shortSid(sid)}</span>
+      ${session && session.crashed ? '<span style="color:var(--danger)">⚠</span>' : ''}
+      <span class="muted" style="font-size:11px;margin-left:auto">${segs.length} màn</span>
+    </div>`;
+
+  const MAX_SHOWN = 6;
+  // Reverse so the NEWEST screen sits at the top of the sidebar — matches the
+  // way an IDE log pane shows recent activity first. data-seg keeps the
+  // ORIGINAL chronological index so clicking still maps to the right segs[i]
+  // and the middle pane scrollIntoView lands on the correct card.
+  const orderedSegs = segs.map((seg, idx) => ({ seg, idx })).reverse();
+  const screenBlocksHtml = orderedSegs.length ? orderedSegs.map(({ seg, idx }) => {
+    const dur = (seg.started_at && seg.ended_at) ? (seg.ended_at - seg.started_at) : 0;
+    const range = (seg.started_at && seg.ended_at)
+      ? `${fmtTime(seg.started_at)} → ${fmtTime(seg.ended_at)}`
+      : '';
+    const shown = seg.actions.slice(0, MAX_SHOWN);
+    const overflow = seg.actions.length - shown.length;
+    const actionLinesHtml = shown.map(a => {
+      if(a.standaloneNet){
+        const net = a.networks[0];
+        const path = net && net.url ? (()=>{ try{return new URL(net.url).pathname;}catch(_){return net.url;}})() : '(no url)';
+        return `<div style="font-size:11px;color:var(--muted);padding:2px 0">• network <span class="mono" style="color:var(--text)">${esc(net?.method||'')} ${esc(path)}</span> <span style="color:${statusColor(net?.status)}">${net?.status??''}</span></div>`;
+      }
+      const tapLabel = a.element_key ? ` <span class="mono" style="color:var(--text)">${esc(a.element_key)}</span>` : '';
+      const netSuffix = (a.networks && a.networks.length) ? ` <span class="muted">+${a.networks.length} net</span>` : '';
+      const navLine = a.navigatesTo
+        ? `<div style="font-size:10px;color:var(--accent2);padding:1px 0 1px 12px">↳ ${esc(a.navigatesTo)}</div>`
+        : '';
+      return `<div style="font-size:11px;color:var(--muted);padding:2px 0">• ${esc(a.event_name)}${tapLabel}${netSuffix}${navLine}</div>`;
+    }).join('');
+    const overflowHtml = overflow > 0 ? `<div class="muted" style="font-size:10px;padding:2px 0;font-style:italic">+${overflow} event nữa</div>` : '';
+    const dot = seg.crashed ? '#dc2626' : (seg.passive ? '#94a3b8' : '#5b8cff');
+    return `<div class="ide-outline-seg" data-seg="${idx}" style="padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer">
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="color:${dot}">📱</span>
+        <span class="mono" style="color:var(--text);font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(seg.screen)}">${esc(seg.screen)}</span>
+        <span class="muted" style="font-size:10px">${dur ? fmtDur(dur) : ''}</span>
+      </div>
+      ${range ? `<div class="muted" style="font-size:10px;margin-top:2px">${range}</div>` : ''}
+      <div style="margin-top:6px">${actionLinesHtml || '<div class="muted" style="font-size:11px;padding:2px 0;font-style:italic">• chỉ đi qua, không tương tác</div>'}${overflowHtml}</div>
+    </div>`;
+  }).join('') : '<div class="empty" style="font-size:12px;padding:14px">Không có màn nào trong session</div>';
+
+  listEl.innerHTML = headHtml + screenBlocksHtml;
+
+  // Back to flat session list.
+  const backBtn = document.getElementById('ideBackList');
+  if(backBtn) backBtn.onclick = ()=> renderSessionListInOutline(pid, sid, allSessions);
+
+  // Clicking a screen scrolls the middle pane to the matching .ide-row card.
+  // Middle cards carry data-i (segment index) — renderIDEMain renders in the
+  // same segs[] order so the indices line up 1:1. Highlight the clicked
+  // outline entry so the operator doesn't lose context after scroll.
+  listEl.querySelectorAll('.ide-outline-seg').forEach(el => {
+    el.onclick = () => {
+      const idx = el.dataset.seg;
+      const main = document.getElementById('ideMain');
+      const row = main && main.querySelector(`.ide-row[data-i="${idx}"]`);
+      if(row) row.scrollIntoView({behavior:'smooth', block:'start'});
+      listEl.querySelectorAll('.ide-outline-seg').forEach(x => x.style.background = '');
+      el.style.background = 'var(--panel2)';
+    };
+  });
+}
+
+// Restore the flat session list inside the left sidebar (used by the
+// "← Danh sách" button in the outline header). Kept here so the outline can
+// swap views without re-running openSessionIDE — keeps the middle pane intact.
+function renderSessionListInOutline(pid, currentSid, sessions){
+  const listEl = document.getElementById('ideList');
+  if(!listEl) return;
+  listEl.innerHTML = (sessions||[]).map(s => {
+    const active = s.session_id === currentSid;
+    const dot = s.crashed ? '#dc2626' : (s.ended_reason === 'inferred_terminate' ? '#f59e0b' : '#5b8cff');
     return `<div class="ide-sess" data-sid="${esc(s.session_id)}" style="padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px;${active?'background:var(--panel2);border-left:3px solid var(--accent)':'border-left:3px solid transparent'}">
       <div style="display:flex;gap:6px;align-items:center">
         <span style="color:${dot}">●</span>
         <span class="mono" style="color:var(--accent2)">${shortSid(s.session_id)}</span>
         <span class="muted" style="margin-left:auto;font-size:10px">${fmtDur(s.duration_ms)}</span>
       </div>
-      <div class="muted" style="font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.flow_signature||'')}">${flowDisplay(s.flow_signature)||''}</div>
+      <div class="muted" style="font-size:10px;margin-top:2px">${s.screen_count||0} màn · ${s.event_count||0} event</div>
       <div class="muted" style="font-size:10px">${s.started_at?fmtTime(s.started_at):''}</div>
     </div>`;
   }).join('') || '<div class="empty" style="font-size:12px">Chưa có session</div>';
-  listEl.querySelectorAll('.ide-sess').forEach(el=>{
-    el.onclick = ()=> openSessionIDE(pid, el.dataset.sid);
+  listEl.querySelectorAll('.ide-sess').forEach(el => {
+    el.onclick = () => openSessionIDE(pid, el.dataset.sid);
   });
-
-  // ── center: load journey → wireframe + timeline ──
-  await renderIDEMain(pid, sid);
 }
 
 // Filter mode for the middle pane: '' = show all, 'crash' = only crash/bug
@@ -3723,64 +4201,333 @@ async function renderIDEMain(pid, sid){
   const hasBug = (seg)=> seg.crashed || seg.actions.some(a=>ERR.has(a.event_name));
   let bugCount = 0;
 
-  // Reversed timeline: newest screen on top, the session's first screen at the
-  // bottom. Between screens runs a thin animated arrow that flows upward (back
-  // toward the start). data-i keeps the ORIGINAL index so clicks map correctly.
+  // ── Build a screen graph: each UNIQUE screen is one node, transitions are
+  // edges. The old timeline rendered one row per visit which exploded into
+  // hundreds of cards for long sessions; a session that bounces around 12
+  // screens many times now collapses into 12 nodes + the edges between them,
+  // which is what the operator actually wants to see.
+  //
+  // Node data per screen: visit count, total events, crash flag, first visit
+  // timestamp (used for layout ordering — entry screens land on top).
+  // Edge data per directed pair (A → B): how many times that transition fired
+  // (so a heavy "Home → Camera" gets a thicker arrow than a rare "Home →
+  // Settings"). Edges keep ORIGINAL ordering so the layout can do a BFS from
+  // the entry screen and arrange depth left→right.
+  const nodes = new Map();   // screen → { screen, visits, events, crashed, passive, firstTs, segIdxs[] }
+  const edges = new Map();   // "from→to" → { from, to, count, isBack, lastTransitionAction }
+  segs.forEach((seg, i) => {
+    let n = nodes.get(seg.screen);
+    if(!n){
+      n = { screen: seg.screen, visits: 0, events: 0, crashed: false,
+            passive: true, firstTs: seg.started_at || 0, segIdxs: [] };
+      nodes.set(seg.screen, n);
+    }
+    n.visits++;
+    n.events += seg.actions.length;
+    if(hasBug(seg)) n.crashed = true;
+    if(!seg.passive) n.passive = false;
+    n.segIdxs.push(i);
+    // Edge to the NEXT seg in chronological order — if the next segment is a
+    // different screen, that's a transition (push / back / replace). Keep
+    // ordering so we can tag back-edges (the destination has a smaller
+    // firstTs than the source) with a different arrow style.
+    const next = segs[i+1];
+    if(next && next.screen !== seg.screen){
+      const key = seg.screen + '→' + next.screen;
+      let e = edges.get(key);
+      if(!e){
+        e = { from: seg.screen, to: next.screen, count: 0, navActions: [] };
+        edges.set(key, e);
+      }
+      e.count++;
+      // Did a button on `seg` carry navigatesTo === next.screen? Pull the
+      // element_key so the edge label shows what caused the transition (vd
+      // "by tap loginBtn"). Multiple matching taps just take the first one.
+      if(!e.navActions.length){
+        const tapNav = seg.actions.find(a => a.navigatesTo === next.screen);
+        if(tapNav && tapNav.element_key) e.navActions.push(tapNav.element_key);
+      }
+    }
+  });
+  if(nodes.size) bugCount = Array.from(nodes.values()).filter(n=>n.crashed).length;
+  // Expose graph state so the right-pane detail panel can list incoming /
+  // outgoing transitions for the clicked screen (the data lived only inside
+  // this closure before — now showIDEDetailScreen can render "← came from"
+  // / "↳ navigate to" sections without rebuilding the graph).
+  window._ideGraphEdges = Array.from(edges.values());
 
-  const order = segs.map((_, i)=>i).reverse();   // last → first
-  const rows = order.map((i, pos)=>{
-    const seg = segs[i];
-    const ts = seg.started_at;
-    const bug = hasBug(seg);
-    if(bug) bugCount++;
-    const dot = bug ? 'var(--danger)' : (seg.passive ? 'var(--muted)' : 'var(--accent)');
-    const nActs = seg.actions.filter(a=>!a.standaloneNet).length;
-    const nNet = seg.actions.reduce((a,x)=>a+x.networks.length,0);
-    const isTop = pos===0;                 // newest (visually first)
-    const isBottom = pos===order.length-1; // oldest / session start
-    const lbl = screenLabel(seg.screen);
-    const meta = seg.passive
-      ? `<span class="muted" style="font-size:11px">lướt qua · ${fmtDur((seg.ended_at||ts)-(seg.started_at||ts))}</span>`
-      : `<span class="muted" style="font-size:11px">${nActs} hành động${nNet?` · ${nNet} network`:''} · ${fmtDur((seg.ended_at||ts)-(seg.started_at||ts))}</span>`;
-    // Build the searchable haystack: class name, label, element keys, API urls,
-    // event names — so the search box matches across the whole screen.
-    const hayParts = [seg.screen, lbl];
-    for(const a of seg.actions){
-      if(a.element_key) hayParts.push(a.element_key);
-      if(a.event_name) hayParts.push(a.event_name);
-      for(const n of a.networks){ if(n.url) hayParts.push(n.url); if(n.status) hayParts.push(String(n.status)); }
+  // BFS layout from the entry screen so the graph reads left→right by depth.
+  // Each level becomes a column; nodes at the same depth stack vertically.
+  // Back-edges (to a node already laid out at a smaller depth) curve around
+  // — they're the "← back" arrows the operator sees as upstream loops.
+  const entryScreen = segs.length ? segs[0].screen : null;
+  const depth = new Map();
+  const queue = entryScreen ? [entryScreen] : [];
+  if(entryScreen) depth.set(entryScreen, 0);
+  while(queue.length){
+    const cur = queue.shift();
+    const d = depth.get(cur);
+    for(const e of edges.values()){
+      if(e.from !== cur) continue;
+      if(!depth.has(e.to)){
+        depth.set(e.to, d + 1);
+        queue.push(e.to);
+      }
+    }
+  }
+  // Anything unreached (rare — happens when journey has gaps) gets stacked
+  // at the end so we don't drop them.
+  let maxDepth = 0;
+  for(const v of depth.values()) if(v > maxDepth) maxDepth = v;
+  for(const s of nodes.keys()) if(!depth.has(s)){ maxDepth++; depth.set(s, maxDepth); }
+  // Group nodes by depth and order within a depth by first-visit time so the
+  // earlier branch lands on top. SVG y axis grows downward.
+  const cols = [];
+  for(const [scr, d] of depth) {
+    (cols[d] = cols[d] || []).push(scr);
+  }
+  cols.forEach(col => col.sort((a, b) => nodes.get(a).firstTs - nodes.get(b).firstTs));
+
+  // SVG geometry. Each cell is fixed-size; the viewBox is sized to fit. Pan
+  // happens via the container's overflow:auto, zoom via CSS transform on
+  // the inner group (wired below).
+  // Bumped NODE_H to fit the activity breakdown rows (title + up to 5 lines:
+  // "Nx ghé", "network [n]", "click [n]", "error [n]", "other [n]"). ROW_GAP
+  // grew to keep vertical spacing breathable now that each node is taller.
+  const NODE_W = 220, NODE_H = 116, COL_GAP = 80, ROW_GAP = 32;
+  const cellW = NODE_W + COL_GAP, cellH = NODE_H + ROW_GAP;
+  const colCount = cols.length;
+  const rowCount = cols.reduce((m, c) => Math.max(m, c.length), 1);
+  const svgW = Math.max(900, colCount * cellW + 80);
+  const svgH = Math.max(420, rowCount * cellH + 80);
+  const nodePos = new Map();   // screen → {x, y, cx, cy}
+  cols.forEach((col, d) => {
+    const colH = col.length * cellH;
+    const startY = (svgH - colH) / 2 + 16;
+    col.forEach((scr, j) => {
+      const x = 40 + d * cellW;
+      const y = startY + j * cellH;
+      nodePos.set(scr, { x, y, cx: x + NODE_W/2, cy: y + NODE_H/2 });
+    });
+  });
+
+  // Render nodes as SVG groups, one per UNIQUE screen. The inner card shows a
+  // breakdown of WHAT happened on that screen (network N, click M, …) instead
+  // of a flat total — operators care about the SHAPE of activity (mostly
+  // tapping vs mostly waiting on APIs), not just the headline number.
+  // Activity buckets are summed across every visit to the screen so an
+  // 11-visit Home with 5 networks + 10 clicks aggregates correctly.
+  const nodeSvg = Array.from(nodes.values()).map(n => {
+    const p = nodePos.get(n.screen);
+    const segIdx = n.segIdxs[0];
+    const lbl = screenLabel(n.screen);
+    // Per-bucket counts across every visit (network / click / error / other).
+    let netCount = 0, clickCount = 0, errCount = 0, otherCount = 0;
+    const hayParts = [n.screen, lbl];
+    for(const idx of n.segIdxs){
+      for(const a of segs[idx].actions){
+        if(a.element_key) hayParts.push(a.element_key);
+        if(a.event_name) hayParts.push(a.event_name);
+        for(const nr of a.networks){
+          netCount++;
+          if(nr.url) hayParts.push(nr.url);
+        }
+        if(a.standaloneNet){
+          // already counted via the networks loop above; don't double count
+          // the standalone wrapper itself.
+        } else if(isTapName(a.event_name)){
+          clickCount++;
+        } else if(a.event_name==='crash'||a.event_name==='application_error'||a.event_name==='json_parse_error'){
+          errCount++;
+        } else {
+          otherCount++;
+        }
+      }
     }
     const hay = hayParts.join(' ').toLowerCase();
-    const time = ts ? new Date(ts).toLocaleTimeString('vi-VN',{hour12:false}) : '';
-    // Row = [time] [rail anchor — invisible, kept so arrows align under it]
-    // [screen card]. The dot was removed for a tighter look; the arrow itself
-    // is the visible connector.
-    const rowHtml = `<div class="ide-row" data-i="${i}" data-crash="${bug?'1':'0'}" data-search="${esc(hay)}" style="display:flex;align-items:stretch;cursor:pointer">
-      <div class="mono muted" style="flex:0 0 70px;font-size:11px;text-align:right;padding:6px 8px 0 0">${time}</div>
-      <div class="ide-row-rail" style="flex:0 0 24px"></div>
-      <div style="flex:1 1 auto;padding:1px 0 1px 8px;min-width:0">
-        <div class="ide-card" style="background:var(--panel);border:1.5px solid ${bug?'var(--danger)':'var(--line)'};border-radius:8px;padding:6px 10px;${seg.passive?'opacity:.72':''}">
-          <b style="font-size:13px">${bug?'⚠ ':''}📱 ${esc(seg.screen)}</b>${lbl?`<span class="muted" style="font-size:11px;font-weight:400"> - ${esc(lbl)}</span>`:''}
-          ${isTop?'<span style="font-size:9px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 6px;margin-left:6px">mới nhất</span>':''}${isBottom?'<span style="font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 6px;margin-left:6px">bắt đầu</span>':''}
-          <div style="margin-top:3px">${meta}</div>
-        </div>
-      </div>
-    </div>`;
-    // Arrow ▲ between this row and the next (skip on the bottom = oldest row).
-    // Points UP because the timeline is reversed: newer screens are above, so
-    // the arrow says "the row above me happened AFTER this one". The spacer's
-    // width is set by JS (alignArrows) post-render so the chevron lands exactly
-    // under the dot of the row above, regardless of surrounding layout.
-    return rowHtml + (isBottom ? '' :
-      '<div class="ide-arrow"><div class="ide-arrow-spacer"></div><div class="ide-arrow-chevron">▲</div></div>');
+    const strokeColor = n.crashed ? 'var(--danger)' : (n.passive ? 'var(--muted)' : 'var(--accent)');
+    const fillColor   = n.crashed ? 'rgba(220,38,38,.12)' : 'var(--panel)';
+    const isEntry = n.screen === entryScreen;
+    // Build the activity rows. Only show buckets with at least one event so
+    // a screen that's pure-network doesn't waste a line on "click [0]".
+    const rows = [];
+    rows.push({label: `${n.visits}× ghé`, color: 'var(--muted)'});
+    if(netCount)   rows.push({label: `network [${netCount}]`,  color: '#79c0ff'});
+    if(clickCount) rows.push({label: `click [${clickCount}]`,  color: '#5b8cff'});
+    if(errCount)   rows.push({label: `error [${errCount}]`,    color: 'var(--danger)'});
+    if(otherCount) rows.push({label: `other [${otherCount}]`,  color: 'var(--muted)'});
+    // Vertical layout starting under the title (y+38 = title baseline + label).
+    // Each row consumes 14px so the card grows naturally with more buckets.
+    const rowLines = rows.map((r, idx) => {
+      const yy = p.y + 40 + idx * 14;
+      return `<text x="${p.cx}" y="${yy}" text-anchor="middle" fill="${r.color}" font-size="11">${esc(r.label)}</text>`;
+    }).join('');
+    return `<g class="ide-row" data-i="${segIdx}" data-crash="${n.crashed?'1':'0'}" data-search="${esc(hay)}" style="cursor:pointer">
+      <rect class="ide-card" x="${p.x}" y="${p.y}" width="${NODE_W}" height="${NODE_H}" rx="10"
+        fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5"/>
+      <text x="${p.cx}" y="${p.y+22}" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">
+        ${n.crashed?'⚠ ':''}📱 ${esc(n.screen.length>26?n.screen.slice(0,25)+'…':n.screen)}
+      </text>
+      ${rowLines}
+      ${isEntry?`<rect x="${p.x+6}" y="${p.y+6}" width="40" height="14" rx="7" fill="var(--accent)" fill-opacity=".18" stroke="var(--accent)" stroke-width="1"/><text x="${p.x+26}" y="${p.y+16}" text-anchor="middle" fill="var(--accent)" font-size="9" font-weight="700">START</text>`:''}
+    </g>`;
   }).join('');
-  main.innerHTML = `<div style="padding:18px 16px 40px">${rows||'<div class="muted">— không có màn —</div>'}
-    <div id="ideNoMatch" class="muted" style="display:none;padding:20px;font-size:12px">Không có màn nào khớp bộ lọc.</div></div>`;
 
-  // Align each arrow EXACTLY under the rail anchor of the row above it.
-  // Measured from the DOM (no CSS box-model guessing), so it stays centered no
-  // matter what container wraps the IDE (3-pane, fullscreen, narrow window).
-  const alignArrows = () => {
+  // Edges: thin lines — visual clutter was the #1 complaint. Drop edge labels
+  // entirely; the operator can click a node and see "navigate to X" in the
+  // right pane. Forward arrows curve from right side of `from` to left side
+  // of `to`; back-edges loop up-and-over to keep them visually distinct from
+  // forward flow. Thickness is FIXED (1.0 / 0.8 px) so a screen visited many
+  // times doesn't blast a fat arrow across the canvas.
+  const edgeSvg = Array.from(edges.values()).map((e) => {
+    const a = nodePos.get(e.from), b = nodePos.get(e.to);
+    if(!a || !b) return '';
+    const isBack = depth.get(e.to) <= depth.get(e.from);
+    const color = isBack ? '#64748b' : '#5b8cff';
+    const opacity = isBack ? 0.4 : 0.55;
+    const x1 = a.x + NODE_W, y1 = a.cy;
+    const x2 = b.x,          y2 = b.cy;
+    const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+    const path = isBack
+      ? `M ${x1} ${y1} C ${x1 + 40} ${y1 - 60}, ${x2 - 40} ${y2 - 60}, ${x2} ${y2}`
+      : `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+    return `<path class="ide-edge" d="${path}" fill="none" stroke="${color}" stroke-width="${isBack?0.8:1}"
+      stroke-opacity="${opacity}" marker-end="url(#ideArrow${isBack?'Back':'Fwd'})"/>`;
+  }).join('');
+
+  main.innerHTML = `
+    <div id="ideGraphWrap" style="height:100%;overflow:auto;position:relative;background:var(--bg);cursor:grab;user-select:none;-webkit-user-select:none">
+      <!-- Zoom controls (floating top-right). Position:sticky so the buttons
+           travel with the scroll viewport, not the giant SVG canvas. -->
+      <div id="ideGraphZoom" style="position:sticky;top:10px;float:right;margin:10px 12px 0 0;z-index:2;display:flex;flex-direction:column;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,.18)">
+        <button id="ideGraphZoomIn"  title="Phóng to (⌘/Ctrl + cuộn)" style="width:28px;height:28px;font-size:16px;font-weight:700;border:none;background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">+</button>
+        <button id="ideGraphZoomOut" title="Thu nhỏ"                   style="width:28px;height:28px;font-size:16px;font-weight:700;border:none;background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">−</button>
+        <button id="ideGraphZoomFit" title="Vừa khung"                 style="width:28px;height:28px;font-size:10px;font-weight:700;border:none;background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">fit</button>
+        <div id="ideGraphZoomPct" style="font-size:10px;text-align:center;color:var(--muted);padding:2px 0">100%</div>
+      </div>
+      <div id="ideGraphInner" style="padding:14px;transform-origin:0 0;transition:transform .12s ease-out;cursor:grab">
+        <svg id="ideGraph" viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" style="display:block">
+          <defs>
+            <!-- Tiny arrowhead so the line tip doesn't visually outweigh the
+                 edge body. refX placed at the very tip so the marker doesn't
+                 overlap the destination node's stroke. -->
+            <marker id="ideArrowFwd" viewBox="0 0 6 6" refX="5.5" refY="3" markerWidth="4" markerHeight="4" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#5b8cff" fill-opacity=".7"/>
+            </marker>
+            <marker id="ideArrowBack" viewBox="0 0 6 6" refX="5.5" refY="3" markerWidth="3.5" markerHeight="3.5" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#64748b" fill-opacity=".55"/>
+            </marker>
+          </defs>
+          ${edgeSvg}
+          ${nodeSvg}
+        </svg>
+      </div>
+      <div id="ideNoMatch" class="muted" style="display:none;padding:20px;font-size:12px;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:8px">Không có màn nào khớp bộ lọc.</div>
+    </div>`;
+  // ── Graph zoom + pan wiring ──────────────────────────────────────────────
+  // CSS transform-based zoom on the inner wrapper so the SVG viewBox stays
+  // intact (the click handlers below depend on node coordinates being raw,
+  // not pre-scaled). Pan is provided by the outer container's overflow:auto
+  // + a click-and-drag handler that updates scrollLeft / scrollTop.
+  const graphWrap  = document.getElementById('ideGraphWrap');
+  const graphInner = document.getElementById('ideGraphInner');
+  const zoomPctEl  = document.getElementById('ideGraphZoomPct');
+  let zoom = 1;
+  const ZOOM_MIN = 0.25, ZOOM_MAX = 3;
+  const applyZoom = () => {
+    if(!graphInner) return;
+    graphInner.style.transform = `scale(${zoom})`;
+    // The wrapper's scrollable size must follow the scaled inner size so
+    // overflow:auto exposes the panning region; scale() alone doesn't reflow.
+    graphInner.style.width  = (svgW * zoom + 28) + 'px';
+    graphInner.style.height = (svgH * zoom + 28) + 'px';
+    if(zoomPctEl) zoomPctEl.textContent = Math.round(zoom * 100) + '%';
+  };
+  const setZoom = (next, pivotX, pivotY) => {
+    const prev = zoom;
+    zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+    if(zoom === prev) return;
+    // Keep the cursor pivot point steady on screen — adjust scroll by the
+    // delta between the old and new pixel position of that pivot.
+    if(pivotX != null && pivotY != null){
+      const rect = graphWrap.getBoundingClientRect();
+      const sx = (graphWrap.scrollLeft + (pivotX - rect.left)) / prev;
+      const sy = (graphWrap.scrollTop  + (pivotY - rect.top))  / prev;
+      applyZoom();
+      graphWrap.scrollLeft = sx * zoom - (pivotX - rect.left);
+      graphWrap.scrollTop  = sy * zoom - (pivotY - rect.top);
+    } else {
+      applyZoom();
+    }
+  };
+  const fitZoom = () => {
+    const wW = graphWrap.clientWidth  - 32;
+    const wH = graphWrap.clientHeight - 32;
+    const f = Math.min(wW / svgW, wH / svgH, 1);
+    zoom = Math.max(ZOOM_MIN, f);
+    applyZoom();
+    graphWrap.scrollLeft = 0;
+    graphWrap.scrollTop = 0;
+  };
+  applyZoom();
+  document.getElementById('ideGraphZoomIn').onclick  = () => setZoom(zoom * 1.25);
+  document.getElementById('ideGraphZoomOut').onclick = () => setZoom(zoom / 1.25);
+  document.getElementById('ideGraphZoomFit').onclick = () => fitZoom();
+  // Cmd/Ctrl + wheel zooms; plain wheel scrolls (let the browser handle it).
+  // Trackpad pinch on macOS arrives as ctrlKey wheel events, so this covers
+  // both desktop ctrl+scroll and Mac pinch gestures naturally.
+  graphWrap.addEventListener('wheel', (ev) => {
+    if(!(ev.ctrlKey || ev.metaKey)) return;
+    ev.preventDefault();
+    const factor = ev.deltaY < 0 ? 1.1 : 1/1.1;
+    setZoom(zoom * factor, ev.clientX, ev.clientY);
+  }, { passive: false });
+  // Click-and-drag pan — bound on the SCROLLING container (graphWrap), not
+  // the inner SVG, so we can adjust scrollLeft/scrollTop directly without
+  // fighting SVG event capture. Track drag state on the wrapper itself so a
+  // re-render of the IDE doesn't leave stale handlers on window.
+  // We also bail on .ide-row taps (let the click bubble) and toolbar clicks.
+  // pointermove + setPointerCapture keeps the drag alive even when the cursor
+  // briefly slips outside graphWrap.
+  let dragState = null;
+  graphWrap.addEventListener('pointerdown', (ev) => {
+    if(ev.button !== 0) return;   // left click only
+    if(ev.target.closest('.ide-row')) return;
+    if(ev.target.closest('#ideGraphZoom')) return;
+    dragState = {
+      x: ev.clientX, y: ev.clientY,
+      sl: graphWrap.scrollLeft, st: graphWrap.scrollTop,
+      pid: ev.pointerId,
+    };
+    try { graphWrap.setPointerCapture(ev.pointerId); } catch(_){}
+    graphInner.style.cursor = 'grabbing';
+    ev.preventDefault();
+  });
+  graphWrap.addEventListener('pointermove', (ev) => {
+    if(!dragState || dragState.pid !== ev.pointerId) return;
+    graphWrap.scrollLeft = dragState.sl - (ev.clientX - dragState.x);
+    graphWrap.scrollTop  = dragState.st - (ev.clientY - dragState.y);
+    ev.preventDefault();
+  });
+  const endDrag = (ev) => {
+    if(!dragState) return;
+    try { graphWrap.releasePointerCapture(dragState.pid); } catch(_){}
+    dragState = null;
+    graphInner.style.cursor = 'grab';
+  };
+  graphWrap.addEventListener('pointerup',     endDrag);
+  graphWrap.addEventListener('pointercancel', endDrag);
+  graphWrap.addEventListener('pointerleave',  endDrag);
+
+  // alignArrows is dead-code under the graph layout (no HTML chevrons exist
+  // any more — SVG markers handle arrowheads). Kept as a no-op so any leftover
+  // resize listener wiring still finds the symbol; can be deleted in a later
+  // pass once we're sure nothing else references it.
+  const alignArrows = () => {};
+  const _alignArrowsDeadBlock = () => { // kept under a no-op gate so the rest
+                                         // of the closure still parses without
+                                         // touching the now-removed chevron
+                                         // measurement code.
     main.querySelectorAll('.ide-arrow').forEach((arr) => {
       const prevRow = arr.previousElementSibling;
       if (!prevRow) return;
@@ -3815,6 +4562,35 @@ async function renderIDEMain(pid, sid){
     (ideAppName ? ideAppName + ' · ' : '')
     + `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;
 
+  // Tracking ID badge — SDK 0.3.31/0.3.7+ stamps this UUID on every Snowplow
+  // payload. QA copies it from here and pastes into the Snowplow query (the
+  // mapping endpoint that the data team owns) to pull the full event timeline
+  // for this exact session. Click → copy to clipboard.
+  const tidEl = document.getElementById('ideTrackingId');
+  if (tidEl) {
+    if (s.tracking_id) {
+      tidEl.innerHTML = `<span title="Click để copy tracking_id ${esc(s.tracking_id)}"
+            style="cursor:pointer;background:var(--danger)18;color:var(--danger);
+                   border:1px solid var(--danger)55;padding:3px 9px;border-radius:14px;
+                   font-size:11px;font-weight:600">
+          tracking_id <span style="opacity:.6">·</span> ${esc(s.tracking_id)} 📋
+        </span>`;
+      tidEl.firstElementChild.onclick = () => {
+        navigator.clipboard.writeText(s.tracking_id).then(() => {
+          const sp = tidEl.querySelector('span');
+          const old = sp.innerHTML;
+          sp.textContent = '✓ đã copy tracking_id';
+          setTimeout(() => { sp.innerHTML = old; }, 1400);
+        });
+      };
+    } else {
+      tidEl.innerHTML = `<span style="color:var(--muted);font-size:11px"
+          title="SDK cũ chưa stamp tracking_id — cập nhật iOS ≥ 0.3.31 / Android ≥ 0.3.7">
+          tracking_id chưa có (SDK cũ)
+        </span>`;
+    }
+  }
+
   // Crash/bug badge in the header — click toggles the "only buggy screens" filter.
   const badge = document.getElementById('ideCrashBadge');
   if(badge){
@@ -3828,14 +4604,45 @@ async function renderIDEMain(pid, sid){
     } else { badge.innerHTML = ''; }
   }
 
-  // Click a row → highlight + show that screen's detail in the right pane.
-  // Also pause any running replay so manual exploration doesn't get yanked
-  // away by the next replay tick.
-  main.querySelectorAll('.ide-row').forEach(el=>{
-    el.onclick = ()=>{
-      main.querySelectorAll('.ide-row .ide-card').forEach(c=>c.style.outline='');
-      el.querySelector('.ide-card').style.outline = '2px solid var(--accent)';
-      showIDEDetailScreen(segs[+el.dataset.i]);
+  // Click a graph node → highlight + show that screen's detail in the right
+  // pane. Each NODE represents a unique screen that may have been visited
+  // many times — pass a MERGED seg containing every visit's actions / nets
+  // (sorted chronologically) so the detail panel reflects the whole picture,
+  // not just the first visit. Without the merge, network bubbles for visits
+  // 2..N silently disappeared from the side panel even though the graph node
+  // counted them.
+  main.querySelectorAll('.ide-row').forEach(el => {
+    el.onclick = () => {
+      main.querySelectorAll('.ide-row .ide-card').forEach(c => {
+        c.setAttribute('stroke-width', '1.5');
+      });
+      const card = el.querySelector('.ide-card');
+      if(card) card.setAttribute('stroke-width', '3');
+      const segIdx = +el.dataset.i;
+      const firstSeg = segs[segIdx];
+      // Find every segment matching the same screen and merge their actions
+      // into one combined seg (firstSeg already covers its own visit; we
+      // append visits 2..N here so the right panel sees the full timeline).
+      const sameScreenSegs = segs.filter(g => g.screen === firstSeg.screen);
+      const allActions = [];
+      let earliest = Infinity, latest = -Infinity;
+      let crashed = false;
+      for(const g of sameScreenSegs){
+        for(const a of g.actions) allActions.push(a);
+        if(g.started_at && g.started_at < earliest) earliest = g.started_at;
+        if(g.ended_at   && g.ended_at   > latest)   latest = g.ended_at;
+        if(g.crashed) crashed = true;
+      }
+      allActions.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const mergedSeg = {
+        ...firstSeg,
+        actions: allActions,
+        started_at: earliest === Infinity ? firstSeg.started_at : earliest,
+        ended_at:   latest === -Infinity  ? firstSeg.ended_at   : latest,
+        crashed,
+        visits: sameScreenSegs.length,
+      };
+      showIDEDetailScreen(mergedSeg);
       if (_ideReplay && !_ideReplay.paused) ideReplayPause();
     };
   });
@@ -4027,14 +4834,22 @@ function showIDEDetailScreen(seg){
     const hasDetail = danger || (a.props && Object.keys(a.props).length);
     const aid=_acts.length; if(hasDetail)_acts.push(a);
     const childNet=a.networks.length?`<div style="padding:3px 0 1px 20px">${netChip(a.networks,label)}</div>`:'';
+    // Navigation hint: when buildSessionTree attributed the next screen to
+    // this tap (last tap before a fast screen transition), show
+    // "→ <NextScreen>" so the operator can tell at a glance which buttons
+    // push a screen vs which just fire local UI / network.
+    const navHint = a.navigatesTo
+      ? `<div style="padding:2px 0 0 20px;font-size:11px;color:var(--accent2)">↳ navigate to <span class="mono" style="color:var(--text)">${esc(a.navigatesTo)}</span></div>`
+      : '';
     return `<div style="padding:5px 0;border-bottom:1px solid var(--line)">
       <div style="display:flex;gap:8px;align-items:center;font-size:12px">
         <span class="${hasDetail?'ide-act':''}" ${hasDetail?`data-aid="${aid}"`:''} style="color:${color};font-weight:600;${hasDetail?'cursor:pointer':''}">${icon} ${esc(label)}${hasDetail?` <span class="muted" style="font-weight:400;font-size:10px">${danger?'xem lỗi':'chi tiết'} ⓘ</span>`:''}</span>
         <span class="muted mono" style="margin-left:auto;font-size:10px">${a.ts?tEvt(a.ts):''}</span>
-      </div>${childNet}</div>`;
+      </div>${childNet}${navHint}</div>`;
   }).join('');
   const screenNetHtml = screenNets.length?`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">┄</span> ${netChip(screenNets, seg.screen)}</div>`:'';
   const lbl = screenLabel(seg.screen);
+
   d.innerHTML = `<h3 style="margin:0 0 2px;font-size:14px">${seg.crashed?'⚠ ':''}📱 ${esc(seg.screen)}</h3>
     ${lbl?`<div style="font-size:12px;color:var(--accent2);margin-bottom:4px">${esc(lbl)}</div>`:''}
     <div class="muted" style="font-size:11px;margin-bottom:10px">${fmtTime(seg.started_at)} → ${fmtTime(seg.ended_at)} · ${fmtDur((seg.ended_at||0)-(seg.started_at||0))}</div>
@@ -4206,19 +5021,11 @@ function showActionDetail(a){
          }</div>`
       : (ctxRows.length ? '' : '<div class="muted">Sự kiện này không truyền properties.</div>');
 
-    // Tap-only: server-side Snowplow forwarder. Maps this element_key →
-    // an iglu schema + new event name, then the portal renames + forwards the
-    // event to the Snowplow collector at ingest. App keeps shipping "click"
-    // events as before — no rebuild needed.
-    const ruleBtn = (isTap && a.element_key)
-      ? `<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
-          <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="btn ghost sm" id="actSpFwdBtn">📤 Map sang Snowplow (server-side)…</button>
-          </div>
-        </div>`
-      : '';
-
-    body = ctxHtml + notifHtml + netHtml + propsHtml + ruleBtn;
+    // (Removed) "Map sang Snowplow (server-side)" button — the SDK now ships
+    // Snowplow events directly so the portal no longer needs to relay taps
+    // under a renamed schema. Apps wire UniTrack.track(<event_name>) at the
+    // call site and SnowplowProvider takes care of the forward.
+    body = ctxHtml + notifHtml + netHtml + propsHtml;
   }
 
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
@@ -4236,112 +5043,11 @@ function showActionDetail(a){
   dlg.querySelector('.act-close').onclick = kill;
   dlg.onclick = (e)=>{ if(e.target === dlg) kill(); };
 
-  // Tap-only: server-side Snowplow forwarder. Configures an event_def + element_key
-  // mapping so the portal will forward this tap to the Snowplow collector
-  // under a new event name + iglu schema. The app keeps shipping "tap"
-  // events as before — the rename happens in maybeForwardToSnowplow.
-  const spFwdBtn = dlg.querySelector('#actSpFwdBtn');
-  if (spFwdBtn) spFwdBtn.onclick = () => {
-    const screen = (a.props && (a.props.screen || a.props.screen_name)) || _ideState?.segs?.find(s => s.screen)?.screen || '';
-    const suggested = 'ev_click_' + String(a.element_key || '').replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase();
-    openSnowplowMapDialog({
-      pid: route?.pid,
-      elementKey: a.element_key,
-      screen,
-      suggestedName: suggested,
-      onSaved: () => { kill(); toast('Đã gán Snowplow — lần tap kế tiếp portal tự forward'); },
-    });
-  };
+  // (Removed) actSpFwdBtn wiring — the server-side Snowplow mapping shortcut
+  // was retired alongside its dialog. See showActionDetail for the markup
+  // change that dropped the button.
 }
 
-
-// Server-side Snowplow mapping dialog. Writes an event_def + element_key
-// mapping so the portal renames + relays the event to the Snowplow collector
-// at ingest time, without the app even knowing. When the app later wires
-// UniTrack.track(<new_name>, ...) directly at the call site, the by-event_name
-// resolver path takes over and this mapping becomes a no-op (handled by
-// maybeForwardToSnowplow).
-async function openSnowplowMapDialog({ pid, elementKey, screen, suggestedName, onSaved }) {
-  if (!pid || !elementKey) return;
-  closeAllUtilDialogs();
-  const dlg = document.createElement('dialog'); dlg.id = 'spMapDlg'; dlg.className = 'ut-util-dlg';
-  dlg.style.cssText = 'width:560px;max-width:92vw;z-index:110';
-  // Entity names must match the builders in snowplow.js (ENTITY_BUILDERS).
-  // Keep this list in sync — anything added there needs a checkbox here.
-  const ENTITY_OPTS = [
-    { id: 'user_context', label: 'user_context — username, device, app_version' },
-    { id: 'core_action',  label: 'core_action — start_time (wall-clock)' },
-  ];
-  dlg.innerHTML = `
-    <div class="dlg-h">📤 Map tap → Snowplow event (server-side)
-      <button class="sp-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
-    <div class="dlg-b">
-      <div class="muted" style="font-size:11px;margin-bottom:10px">
-        Mọi tap có <span class="mono">element_key=${esc(elementKey)}</span>
-        ${screen ? `trên màn <span class="mono">${esc(screen)}</span>` : ''}
-        sẽ được portal forward sang Snowplow collector dưới tên + schema dưới đây.
-        App <b>không cần</b> build lại.
-      </div>
-      <label style="font-size:12px">Tên event Snowplow</label>
-      <input id="spName" placeholder="vd: ev_click_show_testautomations" value="${esc(suggestedName || '')}" style="width:100%" autocomplete="off"/>
-      <label style="font-size:12px;margin-top:8px">Schema iglu (self-describing)</label>
-      <input id="spSchema" placeholder="iglu:vn.fpt.ftel.snowplow/ev_click/jsonschema/1-0-0" style="width:100%" autocomplete="off"/>
-      <label style="font-size:12px;margin-top:8px">Entities đính kèm</label>
-      <div id="spEntities" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-        ${ENTITY_OPTS.map((o) => `
-          <label style="font-size:12px;display:flex;gap:6px;align-items:center;font-weight:400">
-            <input type="checkbox" data-ent="${esc(o.id)}" ${o.id === 'user_context' ? 'checked' : ''}/>
-            <span class="mono">${esc(o.id)}</span>
-            <span class="muted" style="font-size:10.5px">— ${esc(o.label.split('—')[1] || '')}</span>
-          </label>`).join('')}
-      </div>
-      <label style="font-size:12px;margin-top:10px;display:flex;gap:6px;align-items:center;font-weight:400">
-        <input type="checkbox" id="spForward" checked/>
-        Bật forward ngay (off = lưu config nhưng chưa relay)
-      </label>
-      <div class="row" style="margin-top:14px;justify-content:flex-end;gap:8px">
-        <button class="btn ghost sm sp-cancel">Huỷ</button>
-        <button class="btn sm" id="spSave">Lưu mapping</button>
-      </div>
-    </div>`;
-  document.body.appendChild(dlg);
-  try { dlg.showModal(); } catch (_) { dlg.setAttribute('open',''); }
-  const kill = () => { try { dlg.close(); } catch (_) {} dlg.remove(); };
-  dlg.querySelector('.sp-close').onclick = kill;
-  dlg.querySelector('.sp-cancel').onclick = kill;
-  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
-  dlg.querySelector('#spName').focus();
-
-  dlg.querySelector('#spSave').onclick = async () => {
-    const name = dlg.querySelector('#spName').value.trim();
-    const schema = dlg.querySelector('#spSchema').value.trim();
-    const forward = dlg.querySelector('#spForward').checked;
-    if (!name) { toast('Nhập tên event Snowplow', 'err'); return; }
-    if (forward && !schema) { toast('Cần schema iglu khi bật forward', 'err'); return; }
-    const entities = Array.from(dlg.querySelectorAll('#spEntities input[type=checkbox]:checked'))
-      .map((i) => i.dataset.ent);
-    try {
-      // 1) Upsert event_def with the Snowplow config.
-      const def = await api(`/api/projects/${pid}/defs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, sp_schema: schema || null, sp_forward: forward, sp_entities: entities }),
-      });
-      if (!def || !def.id) throw new Error('def_save_failed');
-      // 2) Wire element_key → this def (drag-drop equivalent). Any prior
-      //    mapping for this element_key is overwritten by the API ON CONFLICT.
-      await api(`/api/projects/${pid}/mappings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ element_key: elementKey, event_def_id: def.id }),
-      });
-      kill();
-      if (onSaved) onSaved();
-    } catch (e) {
-      toast('Lưu mapping thất bại: ' + (e.message || e), 'err');
-    }
-  };
-}
 
 // Crash report dialog — opens from the Crashes card on the project overview.
 // Two views in one dialog:
