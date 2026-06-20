@@ -136,27 +136,6 @@ public class RNUniTrack: RCTEventEmitter {
         resolve(UniTrack.pendingProviderRetryCount())
     }
 
-    @objc(addHttpProvider:resolver:rejecter:)
-    func addHttpProvider(_ opts: NSDictionary,
-                         resolver resolve: @escaping RCTPromiseResolveBlock,
-                         rejecter reject: @escaping RCTPromiseRejectBlock) {
-        let id        = (opts["id"] as? String) ?? "http"
-        let endpoint  = (opts["endpoint"] as? String) ?? ""
-        let fmtIdx    = (opts["format"] as? Int) ?? 0
-        let headers   = (opts["headers"] as? [String: String]) ?? [:]
-        let batchSize = (opts["batchSize"] as? Int) ?? 50
-        let flushMs   = (opts["flushIntervalMs"] as? Int) ?? 30_000
-        let format    = PayloadFormat(rawValue: fmtIdx) ?? .jsonSingle
-        if let url = URL(string: endpoint) {
-            UniTrack.addHttpProvider(
-                id: id, endpoint: url, format: format,
-                headers: headers, batchSize: batchSize,
-                flushInterval: TimeInterval(flushMs) / 1000
-            )
-        }
-        resolve(nil)
-    }
-
     @objc(attachFirebaseAdapter:rejecter:)
     func attachFirebaseAdapter(_ resolve: @escaping RCTPromiseResolveBlock,
                                rejecter reject: @escaping RCTPromiseRejectBlock) {

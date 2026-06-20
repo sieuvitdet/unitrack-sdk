@@ -59,10 +59,6 @@ RCT_EXTERN_METHOD(rotateSession:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(pendingProviderRetryCount:(RCTPromiseResolveBlock)resolve
                                     rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(addHttpProvider:(NSDictionary *)opts
-                          resolver:(RCTPromiseResolveBlock)resolve
-                          rejecter:(RCTPromiseRejectBlock)reject)
-
 RCT_EXTERN_METHOD(attachFirebaseAdapter:(RCTPromiseResolveBlock)resolve
                                 rejecter:(RCTPromiseRejectBlock)reject)
 

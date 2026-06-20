@@ -2,18 +2,6 @@
 //
 // Forwards calls to the iOS / Android native SDK via a MethodChannel.
 
-/// HTTP payload format for the built-in HttpProvider. Indices map to the
-/// native PayloadFormat enum (`PayloadFormat.JSON_SINGLE` = 0, …).
-enum PayloadFormat {
-  /// 1 event = 1 POST as a single JSON object. Simplest backends.
-  jsonSingle,
-  /// Batched: NDJSON, 1 line per event.
-  jsonLines,
-  /// Batched: a JSON array per POST.
-  jsonArray,
-  /// Elasticsearch `_bulk`: action line + doc line, NDJSON, trailing newline.
-  elasticBulk,
-}
 
 // Auto-capture is enabled on the native side; the Dart side exposes
 // a NavigatorObserver for route tracking and a safe JSON helper.
@@ -517,30 +505,11 @@ class UniTrack {
 
   // ─── Provider Adapters (Phase 6) ─────────────────────────────────────────
   //
-  // Add HTTP backends (Kibana / ELK / FPT internal) or attach Firebase
-  // Analytics via reflection — UniTrack core has 0 dep on Firebase, so the
-  // app SDK doesn't pull it unless the host explicitly opts in.
-
-  /// Register a built-in HTTP provider. UniTrack handles transport, retry
-  /// with exponential backoff, batching, offline persistence — the app only
-  /// configures the endpoint shape.
-  Future<void> addHttpProvider({
-    required String id,
-    required String endpoint,
-    PayloadFormat format = PayloadFormat.jsonSingle,
-    Map<String, String>? headers,
-    int batchSize = 50,
-    int flushIntervalMs = 30000,
-  }) {
-    return _channel.invokeMethod('addHttpProvider', {
-      'id': id,
-      'endpoint': endpoint,
-      'format': format.index,
-      if (headers != null) 'headers': headers,
-      'batchSize': batchSize,
-      'flushIntervalMs': flushIntervalMs,
-    });
-  }
+  // Custom HTTP backends (Kibana / ELK / FPT internal) are configured by the
+  // Portal Config tab — UniTrack reconciles registered providers against the
+  // remote config on every fetch, so app code doesn't add them. The Firebase
+  // adapter is opt-in (it's the host app that decides whether Firebase is in
+  // the bundle in the first place).
 
   /// Attach the Firebase Adapter. Uses reflection on iOS (NSClassFromString)
   /// and Android (Class.forName) — no Firebase symbol is linked into UniTrack.

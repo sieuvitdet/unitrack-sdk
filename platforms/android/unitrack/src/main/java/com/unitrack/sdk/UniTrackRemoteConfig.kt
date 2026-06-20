@@ -24,6 +24,66 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
     val snowplow: JSONObject get() = raw.optJSONObject("snowplow") ?: JSONObject()
     val firebase: JSONObject get() = raw.optJSONObject("firebase") ?: JSONObject()
 
+    /** Custom HTTP backends (Kibana / ELK / FPT internal). Portal là source of
+     *  truth — app code chỉ seed cold-start, reconciler thay thế khi config về. */
+    val httpProviders: org.json.JSONArray
+        get() = raw.optJSONArray("http_providers") ?: org.json.JSONArray()
+
+    /**
+     * Reconcile registered HttpProviders với danh sách Portal config.
+     *   - id mới → addHttpProvider
+     *   - id cũ + enabled=false → removeProvider
+     *   - id cũ + endpoint/format/headers đổi → remove + add lại
+     * Idempotent — gọi lại không tạo provider trùng.
+     */
+    fun applyHttpProviders() {
+        val desired = httpProviders
+        val existingIds = UniTrack.registeredHttpProviderIds()
+
+        // Build desired-id set (enabled only).
+        val enabledIds = HashSet<String>()
+        for (i in 0 until desired.length()) {
+            val o = desired.optJSONObject(i) ?: continue
+            val id = o.optString("id", "")
+            if (id.isEmpty()) continue
+            if (o.optBoolean("enabled", true)) enabledIds.add(id)
+        }
+
+        // Drop providers no longer wanted.
+        for (id in existingIds) {
+            if (!enabledIds.contains(id)) UniTrack.removeProvider(id)
+        }
+
+        // Add / replace from Portal.
+        for (i in 0 until desired.length()) {
+            val o = desired.optJSONObject(i) ?: continue
+            if (!o.optBoolean("enabled", true)) continue
+            val id       = o.optString("id", "")
+            if (id.isEmpty()) continue
+            val endpoint = o.optString("endpoint", "")
+            if (endpoint.isEmpty()) continue
+            val formatStr = o.optString("format", "json_single").lowercase()
+            val format = when (formatStr) {
+                "json_lines"   -> com.unitrack.sdk.providers.PayloadFormat.JSON_LINES
+                "json_array"   -> com.unitrack.sdk.providers.PayloadFormat.JSON_ARRAY
+                "elastic_bulk" -> com.unitrack.sdk.providers.PayloadFormat.ELASTIC_BULK
+                else           -> com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE
+            }
+            val headersJson = o.optJSONObject("headers")
+            val headers = HashMap<String, String>()
+            if (headersJson != null) {
+                val it = headersJson.keys()
+                while (it.hasNext()) {
+                    val k = it.next(); headers[k] = headersJson.optString(k, "")
+                }
+            }
+            val batchSize = o.optInt("batch_size", 50)
+            val flushMs   = o.optLong("flush_interval_ms", 30_000L)
+            UniTrack.removeProvider(id)   // ensure clean replace
+            UniTrack.addHttpProvider(id, endpoint, format, headers, batchSize, flushMs)
+        }
+    }
+
     /** Arbitrary key/value bag the portal serves to the app at runtime —
      *  the source of truth for [UniTrack.getRemoteValue]. App reads
      *  `feature_x`, `experiment_y` here; portal operator edits via the
@@ -93,6 +153,13 @@ class UniTrackRemoteConfig(val raw: JSONObject) {
                         cache(ctx, apiKey, body)
                         result = UniTrackRemoteConfig(json)
                         latest = result   // process-wide snapshot for getRemoteValue
+                        // Portal là source of truth cho HttpProviders — reconcile
+                        // mỗi lần config về (cold start, SSE push, foreground
+                        // refetch). App không cần nhớ gọi tay.
+                        try { result.applyHttpProviders() } catch (e: Throwable) {
+                            Log.w("UniTrackRemoteConfig",
+                                  "applyHttpProviders failed: ${e.message}")
+                        }
                     }
                     conn.disconnect()
                 } catch (e: Exception) {

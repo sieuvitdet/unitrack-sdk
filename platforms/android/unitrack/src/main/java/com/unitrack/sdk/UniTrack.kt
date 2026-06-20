@@ -269,6 +269,24 @@ object UniTrack {
         providers.removeAll { it === provider }
     }
 
+    /** Remove a provider by its providerId. Used by the remote-config
+     *  reconciler to drop providers no longer in Portal config + replace
+     *  providers whose endpoint/headers/format changed (remove + add).
+     *  No-op if no match — idempotent. */
+    @JvmStatic
+    fun removeProvider(id: String) {
+        providers.removeAll { it.providerId == id }
+    }
+
+    /** IDs of every registered HttpProvider — used by the remote-config
+     *  reconciler (UniTrackRemoteConfig.applyHttpProviders) to compute the
+     *  diff against Portal's desired list. Non-HttpProvider providers
+     *  (Snowplow, Firebase, app-supplied) are excluded. */
+    @JvmStatic
+    fun registeredHttpProviderIds(): List<String> =
+        providers.filterIsInstance<com.unitrack.sdk.providers.HttpProvider>()
+                 .map { it.providerId }
+
     /** Hot-reload the screen-lifecycle wire-event names without forcing the
      *  host to call UniTrack.initialize again (which is no-op after the
      *  first call). The provider fan-out path reads these caches AT FIRE
@@ -413,19 +431,13 @@ object UniTrack {
     }
 
     /**
-     * Convenience: register a built-in HttpProvider in one call. Use this for
-     * Kibana / ELK / OpenSearch / FPT internal backend — UniTrack ships the
-     * transport + retry + batch logic, the app only configures endpoint.
-     *
-     *   UniTrack.addHttpProvider(
-     *       id        = "kibana",
-     *       endpoint  = "https://kibana.fpt.vn/_bulk",
-     *       format    = PayloadFormat.ELASTIC_BULK,
-     *       headers   = mapOf("Authorization" to "ApiKey ..."))
+     * Register a built-in HttpProvider. Internal — call site is the remote
+     * config reconciler (UniTrackRemoteConfig.applyHttpProviders). Portal is
+     * the only source of truth for custom HTTP backends, so app code never
+     * needs (and isn't allowed) to wire one by hand.
      */
-    @JvmStatic
-    @JvmOverloads
-    fun addHttpProvider(
+    @JvmSynthetic
+    internal fun addHttpProvider(
         id: String,
         endpoint: String,
         format: com.unitrack.sdk.providers.PayloadFormat = com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE,

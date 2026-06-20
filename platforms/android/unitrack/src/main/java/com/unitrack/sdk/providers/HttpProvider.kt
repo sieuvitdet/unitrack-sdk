@@ -52,6 +52,7 @@ class HttpProvider(
     private val exec = Executors.newSingleThreadExecutor { r ->
         Thread(r, "ut-http-$id").apply { isDaemon = true }
     }
+    private val resolvedHeaders: Map<String, String> = resolveHeaderSecrets(headers, id)
 
     override fun initialize(app: Application) { /* no SDK to wake */ }
     override fun track(name: String, properties: Map<String, Any?>) {
@@ -79,6 +80,17 @@ class HttpProvider(
             o.put("session_index", UniTrack.sessionIndex())
         } catch (_: Throwable) { /* before init */ }
         if (!o.has("timestamp")) o.put("timestamp", System.currentTimeMillis())
+        // W3C: stamp trace_id ở event-level khi tracing bật ở remote config,
+        // join với backend log / Snowplow / Firebase qua cùng 1 mã. HTTP-header
+        // injection vẫn do UniTrackTracingInterceptor lo allowlist riêng.
+        try {
+            if (UniTrack.tracingSnapshot().enabled && !o.has("trace_id")) {
+                val (traceId, spanId) =
+                    com.unitrack.sdk.bridge.NativeBridge.newTrace()
+                o.put("trace_id", traceId)
+                o.put("span_id",  spanId)
+            }
+        } catch (_: Throwable) { /* native not loaded yet */ }
         return o
     }
 
@@ -135,7 +147,7 @@ class HttpProvider(
                 readTimeout    = readTimeoutMs
                 doOutput = true
                 setRequestProperty("Content-Type", contentType)
-                for ((k, v) in headers) setRequestProperty(k, v)
+                for ((k, v) in resolvedHeaders) setRequestProperty(k, v)
             }
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
@@ -154,6 +166,31 @@ class HttpProvider(
             ProviderResult.RETRY
         } finally {
             conn?.disconnect()
+        }
+    }
+
+    companion object {
+        /**
+         * Resolve `${ENV_FOO}` placeholders trong header VALUES bằng env vars.
+         * Cho phép Portal lưu reference non-secret kiểu `${ENV_KIBANA_KEY}`
+         * thay vì raw API key — app/process set thật ở launch (gradle BuildConfig
+         * → System.setProperty, hoặc k8s/Docker env). Unmatched → giữ literal,
+         * log 1 lần. Header KEYS không đổi.
+         */
+        private val PLACEHOLDER = Regex("""\$\{ENV_([A-Z0-9_]+)\}""")
+
+        @JvmStatic
+        fun resolveHeaderSecrets(headers: Map<String, String>, providerId: String): Map<String, String> {
+            val env = System.getenv()
+            return headers.mapValues { (k, v) ->
+                PLACEHOLDER.replace(v) { m ->
+                    val name = "ENV_" + m.groupValues[1]
+                    env[name] ?: run {
+                        Log.w("UTHttpProvider", "$providerId header $k missing env $name")
+                        m.value
+                    }
+                }
+            }
         }
     }
 }

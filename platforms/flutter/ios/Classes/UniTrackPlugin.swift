@@ -109,23 +109,6 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
         case "pendingProviderRetryCount":
             result(UniTrack.pendingProviderRetryCount())
 
-        case "addHttpProvider":
-            let id        = (args["id"] as? String) ?? "http"
-            let endpoint  = (args["endpoint"] as? String) ?? ""
-            let fmtIdx    = (args["format"] as? Int) ?? 0
-            let headers   = (args["headers"] as? [String: String]) ?? [:]
-            let batchSize = (args["batchSize"] as? Int) ?? 50
-            let flushMs   = (args["flushIntervalMs"] as? Int) ?? 30_000
-            let format: PayloadFormat = PayloadFormat(rawValue: fmtIdx) ?? .jsonSingle
-            if let url = URL(string: endpoint) {
-                UniTrack.addHttpProvider(
-                    id: id, endpoint: url, format: format,
-                    headers: headers, batchSize: batchSize,
-                    flushInterval: TimeInterval(flushMs) / 1000
-                )
-            }
-            result(nil)
-
         case "attachFirebaseAdapter":
             UniTrack.attachFirebaseAdapter()
             // Echo back whether the adapter actually attached so Dart can

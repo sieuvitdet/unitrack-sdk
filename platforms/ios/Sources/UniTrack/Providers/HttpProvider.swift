@@ -43,6 +43,7 @@ public final class HttpProvider: AnalyticsProvider {
     private var pending: [[String: Any]] = []
     private var lastFlushAt: TimeInterval = 0
     private let session: URLSession
+    private let resolvedHeaders: [String: String]
 
     public init(id: String,
                 endpoint: URL,
@@ -56,6 +57,7 @@ public final class HttpProvider: AnalyticsProvider {
         self.endpoint      = endpoint
         self.format        = format
         self.headers       = headers
+        self.resolvedHeaders = Self.resolveHeaderSecrets(headers, providerId: id)
         self.batchSize     = batchSize
         self.flushInterval = flushInterval
         let cfg = URLSessionConfiguration.default
@@ -98,7 +100,51 @@ public final class HttpProvider: AnalyticsProvider {
         if o["timestamp"] == nil {
             o["timestamp"] = Int(Date().timeIntervalSince1970 * 1000)
         }
+        // W3C: stamp a fresh root trace per event so the kho event row joins
+        // with backend log / Snowplow / Firebase using the same trace_id. Only
+        // when tracing is enabled in remote config — avoids minting noise when
+        // the operator hasn't opted into W3C yet. Event-level only; HTTP-header
+        // injection is governed separately by UniTrackURLProtocol's allowlist.
+        if UniTrackRemoteConfig.latest?.tracing?.enabled == true,
+           o["trace_id"] == nil {
+            let ids = UniTrackTracing.newTrace()
+            o["trace_id"] = ids.traceId
+            o["span_id"]  = ids.spanId
+        }
         return o
+    }
+
+    /// Resolve `${ENV_FOO}` placeholders in header VALUES against ProcessInfo's
+    /// environment. Lets the Portal store a non-secret reference like
+    /// `${ENV_KIBANA_KEY}` instead of the raw API key — app/process sets the
+    /// real value at launch (xcconfig / scheme env / k8s secret).
+    ///
+    /// Unmatched placeholder → keep literal, log once. Multiple placeholders
+    /// in one value all resolve. Header KEYS stay unchanged.
+    static func resolveHeaderSecrets(_ headers: [String: String],
+                                     providerId: String) -> [String: String] {
+        let env = ProcessInfo.processInfo.environment
+        var out: [String: String] = [:]
+        let pattern = try? NSRegularExpression(pattern: #"\$\{ENV_([A-Z0-9_]+)\}"#)
+        for (k, v) in headers {
+            guard let re = pattern else { out[k] = v; continue }
+            var resolved = v
+            let range = NSRange(v.startIndex..<v.endIndex, in: v)
+            let matches = re.matches(in: v, range: range).reversed()
+            for m in matches {
+                guard let full = Range(m.range, in: v),
+                      let nameR = Range(m.range(at: 1), in: v) else { continue }
+                let name = "ENV_" + String(v[nameR])
+                if let val = env[name] {
+                    resolved.replaceSubrange(full, with: val)
+                } else {
+                    NSLog("[UniTrack] HttpProvider %@ header %@ missing env %@",
+                          providerId, k, name)
+                }
+            }
+            out[k] = resolved
+        }
+        return out
     }
 
     private func bufferAndMaybeFlush(event: [String: Any]) -> ProviderResult {
@@ -161,7 +207,7 @@ public final class HttpProvider: AnalyticsProvider {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        for (k, v) in resolvedHeaders { req.setValue(v, forHTTPHeaderField: k) }
         req.httpBody = body
 
         let sem = DispatchSemaphore(value: 0)

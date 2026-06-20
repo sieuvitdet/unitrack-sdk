@@ -115,28 +115,6 @@ class UniTrackPlugin : FlutterPlugin, MethodCallHandler {
             "pendingProviderRetryCount" ->
                 result.success(UniTrack.pendingProviderRetryCount())
 
-            "addHttpProvider" -> {
-                val fmtIdx = call.argument<Int>("format") ?: 0
-                val format = when (fmtIdx) {
-                    1 -> com.unitrack.sdk.providers.PayloadFormat.JSON_LINES
-                    2 -> com.unitrack.sdk.providers.PayloadFormat.JSON_ARRAY
-                    3 -> com.unitrack.sdk.providers.PayloadFormat.ELASTIC_BULK
-                    else -> com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE
-                }
-                @Suppress("UNCHECKED_CAST")
-                val headers = (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
-                    .mapValues { it.value?.toString() ?: "" }
-                UniTrack.addHttpProvider(
-                    id              = call.argument<String>("id") ?: "http",
-                    endpoint        = call.argument<String>("endpoint") ?: "",
-                    format          = format,
-                    headers         = headers,
-                    batchSize       = call.argument<Int>("batchSize") ?: 50,
-                    flushIntervalMs = (call.argument<Int>("flushIntervalMs") ?: 30_000).toLong(),
-                )
-                result.success(null)
-            }
-
             "attachFirebaseAdapter" -> {
                 val a = app
                 if (a != null) UniTrack.attachFirebaseAdapter(a)

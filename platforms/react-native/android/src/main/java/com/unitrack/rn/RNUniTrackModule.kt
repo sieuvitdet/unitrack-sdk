@@ -111,32 +111,6 @@ class RNUniTrackModule(reactContext: ReactApplicationContext)
     }
 
     @ReactMethod
-    fun addHttpProvider(opts: ReadableMap, promise: Promise) {
-        val id = opts.getString("id") ?: "http"
-        val endpoint = opts.getString("endpoint") ?: ""
-        val fmtIdx = if (opts.hasKey("format")) opts.getInt("format") else 0
-        val format = when (fmtIdx) {
-            1 -> com.unitrack.sdk.providers.PayloadFormat.JSON_LINES
-            2 -> com.unitrack.sdk.providers.PayloadFormat.JSON_ARRAY
-            3 -> com.unitrack.sdk.providers.PayloadFormat.ELASTIC_BULK
-            else -> com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE
-        }
-        val headers = if (opts.hasKey("headers") && opts.getType("headers") == com.facebook.react.bridge.ReadableType.Map) {
-            val m = opts.getMap("headers")!!
-            val out = HashMap<String, String>()
-            val it = m.keySetIterator()
-            while (it.hasNextKey()) {
-                val k = it.nextKey(); out[k] = m.getString(k) ?: ""
-            }
-            out
-        } else emptyMap()
-        val batchSize = if (opts.hasKey("batchSize")) opts.getInt("batchSize") else 50
-        val flushMs = if (opts.hasKey("flushIntervalMs")) opts.getInt("flushIntervalMs").toLong() else 30_000L
-        UniTrack.addHttpProvider(id, endpoint, format, headers, batchSize, flushMs)
-        promise.resolve(null)
-    }
-
-    @ReactMethod
     fun attachFirebaseAdapter(promise: Promise) {
         val app = reactApplicationContext.applicationContext as? android.app.Application
         if (app != null) {

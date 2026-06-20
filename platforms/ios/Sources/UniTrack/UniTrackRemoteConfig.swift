@@ -28,6 +28,26 @@ public struct UniTrackRemoteConfig: Codable {
     public var firebase: FirebaseConfig
     /// W3C distributed-tracing settings (optional — absent = disabled).
     public var tracing: TracingConfig?
+    /// Custom HTTP backends (Kibana / ELK / FPT internal). Portal là source of
+    /// truth — app code chỉ seed cold-start, reconciler thay thế khi config về.
+    public var httpProviders: [HttpProviderConfig]?
+
+    public struct HttpProviderConfig: Codable {
+        public var id: String
+        public var enabled: Bool?
+        public var endpoint: String
+        /// "json_single" | "json_lines" | "json_array" | "elastic_bulk"
+        public var format: String?
+        public var headers: [String: String]?
+        public var batchSize: Int?
+        public var flushIntervalMs: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case id, enabled, endpoint, format, headers
+            case batchSize       = "batch_size"
+            case flushIntervalMs = "flush_interval_ms"
+        }
+    }
 
     public struct SDKConfig: Codable {
         public var batchSize: Int?
@@ -154,8 +174,9 @@ public struct UniTrackRemoteConfig: Codable {
     // JSON keys are snake_case on the wire.
     enum CodingKeys: String, CodingKey {
         case version, endpoint, tracing
-        case sdkConfig = "sdk_config"
+        case sdkConfig     = "sdk_config"
         case snowplow, firebase
+        case httpProviders = "http_providers"
     }
 
     /// Hand off the tracing block to UniTrack. No-op if the portal didn't send
@@ -168,6 +189,49 @@ public struct UniTrackRemoteConfig: Codable {
             headerName:     t.headerName ?? "traceparent",
             allowlistHosts: t.allowlistHosts ?? [],
             sampled:        t.sampled ?? true)
+    }
+
+    /// Reconcile the registered HttpProviders against the Portal config.
+    /// Portal là source of truth:
+    ///   - id mới   → addHttpProvider
+    ///   - id cũ + enabled=false → removeProvider
+    ///   - id cũ + endpoint/format/headers thay đổi → remove + add lại
+    /// Idempotent — gọi lại không tạo provider trùng. Apps wire this from
+    /// the fetch callback alongside applyTracing().
+    public func applyHttpProviders() {
+        let desired = httpProviders ?? []
+        let existingIds = UniTrack.registeredHttpProviderIds()
+
+        // Drop providers that disappeared from Portal or got disabled.
+        for id in existingIds {
+            let stillWanted = desired.first { $0.id == id && ($0.enabled != false) }
+            if stillWanted == nil { UniTrack.removeProvider(byId: id) }
+        }
+
+        // Add or replace providers from Portal.
+        for cfg in desired {
+            guard cfg.enabled != false else { continue }
+            guard let url = URL(string: cfg.endpoint) else { continue }
+            let format: PayloadFormat = {
+                switch (cfg.format ?? "json_single").lowercased() {
+                case "json_lines":   return .jsonLines
+                case "json_array":   return .jsonArray
+                case "elastic_bulk": return .elasticBulk
+                default:             return .jsonSingle
+                }
+            }()
+            // Replace strategy: remove existing then add — covers endpoint/
+            // headers/format drift in one path, also handles the new-id case.
+            UniTrack.removeProvider(byId: cfg.id)
+            UniTrack.addHttpProvider(
+                id:           cfg.id,
+                endpoint:     url,
+                format:       format,
+                headers:      cfg.headers ?? [:],
+                batchSize:    cfg.batchSize ?? 50,
+                flushInterval: TimeInterval(cfg.flushIntervalMs ?? 30_000) / 1000.0
+            )
+        }
     }
 
     // MARK: - Fetch + cache
@@ -237,6 +301,10 @@ public struct UniTrackRemoteConfig: Codable {
         // without the caller threading apiKey through. The on-disk cache above
         // stays the source of truth across launches.
         latest = cfg
+        // Portal là source of truth cho HttpProviders — reconcile mỗi lần
+        // config về (cold start fetch, SSE push, foreground refetch). App
+        // không cần nhớ gọi tay — applyHttpProviders chạy on every save.
+        cfg.applyHttpProviders()
     }
 
     /// Most recent fetched config, or nil before the first successful fetch.
