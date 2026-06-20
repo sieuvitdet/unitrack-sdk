@@ -7,11 +7,11 @@ tạo thành 1 bài trình bày dài ~20 phút.
 | # | File | Nội dung |
 |---|---|---|
 | 01 | [01-the-problem.md](01-the-problem.md) | FPT Life: 5 file/event, 200 review-hours/quarter, không auto-capture |
-| 02 | [02-the-vision.md](02-the-vision.md) | UniTrack: 3 dòng init = 30 events; remote config; 4 platform |
+| 02 | [02-the-vision.md](02-the-vision.md) | 3 mục tiêu cốt lõi (4 platform / triển khai nhanh / Firebase Analytics only); 3 dòng init = 30 events |
 | 03 | [03-architecture.md](03-architecture.md) | C++ core + 4 binding mỏng + portal Node.js; convention layer |
 | 04 | [04-what-we-auto-capture.md](04-what-we-auto-capture.md) | 6 loại auto-capture: click / screen / network / crash recovery / lifecycle |
 | 05 | [05-how-tap-works.md](05-how-tap-works.md) | Convention layer: 6 schema cho 30+ business events; vs FLifeTracker 30 schema |
-| 06 | [06-fan-out-providers.md](06-fan-out-providers.md) | Fan-out: 1 event → Snowplow + Firebase + portal, không if-else 2 lần |
+| 06 | [06-fan-out-providers.md](06-fan-out-providers.md) | Fan-out: 1 event → Snowplow + Firebase Analytics + portal, không if-else 2 lần |
 | 07 | [07-portal-and-insights.md](07-portal-and-insights.md) | Portal: session IDE thay Snowplow Console + Firebase + Sentry trong 1 |
 | 08 | [08-remote-config-power.md](08-remote-config-power.md) | Đổi tên event / tắt auto-tap / export-import config bundle — không build app |
 | 09 | [09-real-results.md](09-real-results.md) | 4 demo apps live: iOS / Android / Flutter / RN; 30 events mapping sheet |

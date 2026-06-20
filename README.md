@@ -2,6 +2,14 @@
 
 Universal mobile analytics SDK — one codebase, four platforms. Auto-captures screens, taps, network requests, crashes, OOM events, and JSON parse errors. Persists events offline and flushes on network restore. Partners integrate with **one init call**.
 
+## Why UniTrack
+
+Three design goals shape every line of code in this repo:
+
+1. **One source of truth, four platforms.** The pipeline (queue, batching, transport, session, sampling, dedup) lives in a single C++ core that ships to iOS, Android, React Native, and Flutter. Behaviour on every platform stays bit-for-bit consistent — fix a bug once, all four get it. Per-platform code is a thin binding (Swift / Kotlin / TS / Dart) that owns only what's truly platform-specific: swizzling, JNI, MethodChannel.
+2. **Integrate in minutes, not weeks.** Drop the package in, write **one** init line, and screens / taps / network / crashes start flowing automatically — no per-event wiring required for the common case. Per-platform setup samples are below; each is ≤ 4 lines.
+3. **Tracking is the product.** UniTrack is an analytics SDK. The optional Firebase provider mirrors events into **Firebase Analytics only** (so marketing keeps their funnels/audiences) — UniTrack doesn't wrap Firebase Messaging, Crashlytics, or Remote Config any more (those belong to the app's own Firebase setup, not the analytics layer).
+
 ```
                        ┌─────────────────────────────────┐
                        │   Native iOS  Native Android    │
@@ -194,6 +202,17 @@ Same keys are available in Kotlin (`UniTrackConfig`), RN (`UniTrackConfig` type)
 - On network restore (caller-driven; SDK does not poll), the next batch goes out.
 - Queue is trimmed by `max_queue_size` (default 10 000) and `max_age_days` (default 7).
 - Events with `retry_count > 10` are dropped.
+
+## Optional providers
+
+UniTrack ships two opt-in providers that fan a copy of every event out to a third-party pipeline. Wire them once at init; the rest of the app keeps calling `UniTrack.track(...)`.
+
+| Provider | What it does | When to add |
+|---|---|---|
+| `UniTrackSnowplow` | Forwards events to a Snowplow collector (self-described JSON, atomic schemas, entities). | You already operate a Snowplow pipeline for warehouse-grade analytics. |
+| `UniTrackFirebase` | Mirrors events into **Firebase Analytics** (Console funnels, audiences, BigQuery export). | Marketing already uses Firebase Console and you don't want to maintain two SDKs to feed it. |
+
+`UniTrackFirebase` is **Analytics-only**. Earlier releases shipped helper façades for Firebase Messaging / Crashlytics / Remote Config; those were removed in `0.4.0` / `1.1.0` to keep this SDK scoped to tracking. Apps that need those Firebase modules wire them directly — UniTrack stays out of the way.
 
 ## License
 

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>UniTrack · User Journey · Mockup v2</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111827; --panel2:#0f172a; --line:#1f2937;
+    --text:#e5e7eb; --muted:#94a3b8; --accent:#3b82f6; --accent2:#60a5fa;
+    --danger:#ef4444; --warn:#f59e0b; --ok:#22c55e; --tid:#f43f5e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+
+  /* Thin custom scrollbar — matches the panel/bg color tone */
+  *::-webkit-scrollbar{width:6px;height:6px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:#1f2937;border-radius:3px}
+  *::-webkit-scrollbar-thumb:hover{background:#334155}
+  *{scrollbar-width:thin;scrollbar-color:#1f2937 transparent}
+
+  .topbar{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar .back{color:var(--muted);text-decoration:none;font-size:12px}
+  .topbar .back:hover{color:var(--text)}
+
+  .metaCard{padding:14px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .metaRow{display:flex;flex-wrap:wrap;align-items:center;gap:14px 28px}
+  .metaItem{display:flex;flex-direction:column;gap:2px}
+  .metaItem .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .metaItem .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px}
+  .tidPill{background:#3f1d2a;color:var(--tid);padding:5px 12px;border-radius:14px;
+           border:1px solid #7f1d1d;font-family:"JetBrains Mono",ui-monospace,monospace;
+           font-weight:700;font-size:12.5px;cursor:pointer}
+  .tidPill:hover{filter:brightness(1.15)}
+  .actions{margin-left:auto;display:flex;gap:8px}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);
+       padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer}
+  .btn:hover{background:#1e293b}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.danger{background:transparent;border-color:#7f1d1d;color:#fca5a5}
+
+  .empty{padding:60px 24px;text-align:center}
+  .empty .icon{font-size:48px;margin-bottom:8px}
+  .empty .title{font-size:18px;font-weight:700;margin-bottom:6px}
+  .empty .hint{color:var(--muted);font-size:13px;max-width:520px;margin:0 auto 18px}
+  .empty .dropzone{max-width:520px;margin:0 auto;padding:32px 20px;
+                   background:var(--panel);border:2px dashed var(--line);border-radius:12px}
+  .empty .dropzone:hover{border-color:var(--accent)}
+
+  .toolbar{padding:8px 18px;background:var(--panel);border-bottom:1px solid var(--line);
+           display:flex;align-items:center;gap:10px;font-size:12px}
+  .toolbar input{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+                 padding:5px 10px;border-radius:6px;font-size:12px}
+  .toolbar input[type=text]{width:280px}
+  .toolbar .filter{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .toolbar .filter button{background:transparent;border:none;color:var(--muted);
+                          padding:4px 10px;font-size:11.5px;cursor:pointer}
+  .toolbar .filter button.on{background:var(--accent);color:#fff}
+  .toolbar .order{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+  .toolbar .order select{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+                         padding:4px 8px;border-radius:6px;font-size:11.5px}
+
+  .layout{display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 180px)}
+  .col{overflow:auto;background:var(--bg)}
+  .col.detail{background:var(--panel);border-left:1px solid var(--line);padding:14px}
+
+  .outline h4{margin:14px 14px 6px;font-size:11px;color:var(--muted);
+              text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  .outline .sc{padding:9px 14px;cursor:pointer;border-left:3px solid transparent;display:flex;gap:9px;align-items:flex-start}
+  .outline .sc:hover{background:var(--panel2)}
+  .outline .sc.active{background:var(--panel2);border-left-color:var(--accent)}
+  .outline .sc .ic{font-size:14px;line-height:1.5}
+  .outline .sc .col2{flex:1;min-width:0}
+  .outline .sc .nm{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .outline .sc .ts{font-size:10.5px;color:var(--muted);font-family:"JetBrains Mono",ui-monospace,monospace}
+  .outline .sc.crash{color:var(--danger)}
+
+  .timeline{padding:18px 22px}
+  .screenBox{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+             margin-bottom:14px;overflow:hidden}
+  .screenBox .hd{padding:9px 14px;background:var(--panel2);
+                 display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;
+                 border-bottom:1px solid var(--line)}
+  .screenBox .hd .num{background:var(--accent);color:#fff;min-width:22px;height:22px;padding:0 6px;
+                      border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+  .screenBox .hd .nm{flex:1;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .screenBox .hd .meta{font-size:11px;color:var(--muted);font-weight:400;
+                       font-family:"JetBrains Mono",ui-monospace,monospace;white-space:nowrap}
+  .screenBox .bd{padding:6px 0}
+  .ev{display:flex;gap:10px;padding:6px 14px 6px 38px;font-size:12px;align-items:flex-start;cursor:pointer;border-left:2px solid transparent}
+  .ev:hover{background:var(--panel2);border-left-color:var(--accent2)}
+  .ev .ic{font-size:13px;width:18px;flex-shrink:0;text-align:center}
+  .ev .body{flex:1;min-width:0}
+  .ev .nm{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px}
+  .ev .desc{color:var(--muted);font-size:11px;margin-top:1px}
+  .ev .ts{color:var(--muted);font-size:10.5px;font-family:"JetBrains Mono",ui-monospace,monospace;white-space:nowrap}
+  .ev.tap{color:#a5b4fc}
+  .ev.net.ok{color:#86efac}
+  .ev.net.err{color:#fca5a5}
+  .ev.crash{color:var(--danger);font-weight:600;background:#3f1d1d33}
+
+  .badge{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;
+         font-family:"JetBrains Mono",ui-monospace,monospace}
+  .badge.ok{background:#16a34a33;color:#86efac}
+  .badge.err{background:#dc262633;color:#fca5a5}
+  .badge.warn{background:#ca8a0433;color:#fcd34d}
+
+  .detail h4{margin:0 0 10px;font-size:13px;font-weight:700;color:var(--accent2)}
+  .detail .kv{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px}
+  .detail .kv .k{width:90px;color:var(--muted);flex-shrink:0}
+  .detail .kv .v{font-family:"JetBrains Mono",ui-monospace,monospace;word-break:break-all}
+  .detail pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+              padding:10px;font-size:11px;line-height:1.5;overflow:auto;max-height:280px;margin:12px 0 0;
+              font-family:"JetBrains Mono",ui-monospace,monospace}
+  .detail .hint{color:var(--muted);font-size:12px;text-align:center;padding:40px 14px}
+
+  .mockupTag{position:fixed;top:8px;right:8px;background:var(--warn);color:#000;
+             padding:4px 10px;border-radius:4px;font-size:11px;font-weight:700;z-index:99}
+</style>
+</head>
+<body>
+<div class="mockupTag">MOCKUP v2 · data thật từ ftracking-prod.json</div>
+
+<div id="stateFilled">
+  <div class="topbar">
+    <a href="#" class="back">← Quay lại Sessions</a>
+    <div style="font-size:13px;font-weight:600">User Journey</div>
+    <div class="actions">
+      <button class="btn" onclick="location.href='./mockup-journey-tree.html'">↔ Đổi sang dạng tree</button>
+    </div>
+  </div>
+
+  <div class="metaCard">
+    <div class="metaRow">
+      <div class="metaItem"><div class="k">Session ID</div>
+        <div class="v">0c58f18f-b9df-4490-a8eb-aecf365a372e</div></div>
+      <div class="metaItem"><div class="k">Tracking ID</div>
+        <div class="tidPill" title="Click để copy">a3c14e2f-bb87-4d2e-9912-1c79b8a09b8d 📋</div></div>
+      <div class="metaItem"><div class="k">User ID</div><div class="v">584252dd-c117-4e35-9bbf-fe034dde4fce</div></div>
+      <div class="metaItem"><div class="k">Platform</div><div class="v">iOS 26.5 · iPhone16,1</div></div>
+      <div class="metaItem"><div class="k">App</div><div class="v">FPT Life · 2.16.1</div></div>
+      <div class="metaItem"><div class="k">Imported</div><div class="v">vừa xong · TTL 24h</div></div>
+      <div class="metaItem"><div class="k">Events</div><div class="v">10 events · 5 màn · 1 crash</div></div>
+      <div class="actions">
+        <button class="btn">↻ Re-import</button>
+        <button class="btn danger">🗑 Xoá</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" placeholder="🔎 Tìm màn / element / lỗi…">
+    <div class="filter">
+      <button class="on">Tất cả</button>
+      <button>screen</button>
+      <button>tap</button>
+      <button>network</button>
+      <button>crash</button>
+    </div>
+    <div class="order">
+      Thứ tự:
+      <select>
+        <option selected>Mới nhất ↑</option>
+        <option>Cũ nhất ↓</option>
+      </select>
+    </div>
+    <div style="margin-left:14px;color:var(--muted)">
+      04:26:29 → 04:28:04 · <b style="color:var(--text)">~94 giây</b>
+    </div>
+  </div>
+
+  <div class="layout">
+
+    <!-- MIDDLE: timeline grouped by screen — newest at top -->
+    <div class="col timeline">
+
+      <!-- Screen group 1 (newest): the crash block -->
+      <div class="screenBox" style="border-color:var(--danger)">
+        <div class="hd" style="background:#3f1d1d33">
+          <div class="num" style="background:var(--danger)">⚠</div>
+          <div class="nm">CameraHomeViewController · CRASH</div>
+          <div class="meta">04:28:04.069 · <span style="color:var(--danger);font-weight:700">application_error</span></div>
+        </div>
+        <div class="bd">
+          <div class="ev crash"><span class="ic">⚠</span>
+            <div class="body">
+              <div class="nm">CRASH · NSInvalidArgumentException (SWIFT)</div>
+              <div class="desc">[&lt;UIGestureRecognizerTarget&gt; valueForUndefinedKey:]: not key value coding-compliant for "action"</div>
+            </div>
+            <div class="ts">04:28:04.069</div>
+          </div>
+          <div class="ev" style="color:var(--muted);font-size:11px;padding-left:38px;font-style:italic">
+            <span class="ic">↳</span>
+            <div class="body">
+              <div>Stack: SwizzledGestureRecognizer.ut_resolveKey @ FPTLife.debug.dylib</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Screen group 2: tail screen_end burst ngay sau crash (cleanup chain) -->
+      <div class="screenBox">
+        <div class="hd">
+          <div class="num">2</div>
+          <div class="nm">screen_end burst — cleanup sau crash</div>
+          <div class="meta">04:28:04.061 → 04:28:04.262 · 5 screen_end · 200ms</div>
+        </div>
+        <div class="bd">
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · FSSHomeViewController</div>
+              <div class="desc">foreground = 0.01s</div></div>
+            <div class="ts">04:28:04.262</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · CameraHomeViewController</div>
+              <div class="desc">foreground = 0.03s</div></div>
+            <div class="ts">04:28:04.227</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · HomeAllDeviceVC</div>
+              <div class="desc"><b style="color:var(--warn)">foreground = 93.08s</b> · đây là màn user dừng lâu trước crash</div></div>
+            <div class="ts">04:28:04.181</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · AppTabBarPagerController</div>
+              <div class="desc">foreground = 0.01s</div></div>
+            <div class="ts">04:28:04.061</div></div>
+        </div>
+      </div>
+
+      <!-- Screen group 3: opening burst -->
+      <div class="screenBox">
+        <div class="hd">
+          <div class="num">3</div>
+          <div class="nm">Opening burst — load home</div>
+          <div class="meta">04:26:29 → 04:26:30 · 5 screen_end · cold start chain</div>
+        </div>
+        <div class="bd">
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · HomeAllDeviceVC</div>
+              <div class="desc">foreground = 0.66s</div></div>
+            <div class="ts">04:26:30.873</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · AppTabBarPagerController</div>
+              <div class="desc">foreground = 0.39s</div></div>
+            <div class="ts">04:26:30.551</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · MainHomeViewController</div>
+              <div class="desc">foreground = 0.12s</div></div>
+            <div class="ts">04:26:30.157</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · FSSHomeTabBarViewController</div>
+              <div class="desc">foreground = 0.01s</div></div>
+            <div class="ts">04:26:29.613</div></div>
+          <div class="ev"><span class="ic">📺</span>
+            <div class="body"><div class="nm">screen_end · HomeAllDeviceVC</div>
+              <div class="desc">foreground = 0.17s</div></div>
+            <div class="ts">04:26:29.599</div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: detail panel — CRASH event details -->
+    <div class="col detail">
+      <h4>Chi tiết event</h4>
+      <div class="kv"><div class="k">event_name</div><div class="v">application_error</div></div>
+      <div class="kv"><div class="k">timestamp</div><div class="v">2026-06-12 04:28:04.069</div></div>
+      <div class="kv"><div class="k">screen</div><div class="v">CameraHomeViewController</div></div>
+      <div class="kv"><div class="k">session_id</div><div class="v">0c58f18f…</div></div>
+      <div class="kv"><div class="k">tracking_id</div><div class="v" style="color:var(--tid)">a3c14e2f…</div></div>
+      <div class="kv"><div class="k">device</div><div class="v">Apple iPhone16,1 · iOS 26.5</div></div>
+      <div class="kv"><div class="k">language</div><div class="v">SWIFT</div></div>
+
+      <h4 style="margin-top:18px">Message</h4>
+<pre>[&lt;UIGestureRecognizerTarget 0x15333f3a0&gt; valueForUndefinedKey:]:
+this class is not key value coding-compliant
+for the key action.</pre>
+
+      <h4 style="margin-top:14px">Stack trace (đã rút gọn)</h4>
+<pre>0   CoreFoundation      _exceptionPreprocess
+1   libobjc.A.dylib     objc_exception_throw
+4   Foundation          ___forwarding___
+5   FPTLife.debug.dylib UIGestureRecognizer.ut_firstActionName
+6   FPTLife.debug.dylib UIGestureRecognizer.ut_resolveKey
+7   FPTLife.debug.dylib UIGestureRecognizer.ut_setState
+9   UIKitCore           _UIGestureRecognizerSendActions
+...
+34  UIKitCore           UIApplicationMain
+36  FPTLife.debug.dylib AppDelegate.$main</pre>
+
+      <div style="margin-top:14px;padding:10px;background:#7f1d1d33;border-left:3px solid var(--danger);border-radius:4px;font-size:11.5px;line-height:1.5">
+        💡 <b>Phân tích:</b> Crash do <code>UniTrack.GestureRecognizerSwizzler</code> trên iOS — đọc key <code>action</code> bằng KVC trên target không hỗ trợ. <b>Đã fix ở SDK 0.3.25 (drop _targets KVC peek)</b>. Forward team mobile bump SDK.
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

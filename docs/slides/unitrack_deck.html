@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>UniTrack — Internal Tech Sharing</title>
+<meta name="viewport" content="width=1280">
+<style>
+:root{
+  --bg:#fef9e7; --panel:#fff; --fg:#1f1f1f; --muted:#6b6b6b; --line:#e5e2d6;
+  --yellow:#f7c948; --blue:#3aa0ff; --green:#5cc97a; --red:#ff6b5b; --dark:#1f1f1f;
+  --code:#0f1014;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:linear-gradient(135deg,#fef9e7 0%,#e8f4ff 50%,#fff0ed 100%);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{padding:24px;min-height:100vh}
+.deck{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:32px}
+
+/* Slide */
+.slide{
+  position:relative;background:var(--panel);border-radius:24px;border:3px solid var(--dark);
+  padding:48px 56px;box-shadow:8px 8px 0 var(--dark);min-height:720px;
+  display:flex;flex-direction:column;gap:24px;overflow:hidden;
+}
+.slide.cover{align-items:center;justify-content:center;text-align:center;min-height:780px;
+  background:linear-gradient(135deg,#fef9e7 0%,#e8f4ff 60%,#fff0ed 100%);}
+.tag{display:inline-block;padding:6px 14px;border:2px solid var(--dark);border-radius:999px;
+  font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:700;letter-spacing:.05em;background:var(--dark);color:var(--yellow);box-shadow:3px 3px 0 var(--dark)}
+.kicker{display:inline-block;padding:8px 16px;border-radius:999px;background:var(--blue);color:#fff;
+  font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;letter-spacing:.06em;border:2px solid var(--dark);box-shadow:3px 3px 0 var(--dark);align-self:flex-start}
+.kicker.yellow{background:var(--yellow);color:var(--dark)}
+.kicker.green{background:var(--green);color:#fff}
+.kicker.red{background:var(--red);color:#fff}
+.title{font-size:46px;font-weight:900;line-height:1.1;letter-spacing:-.02em;margin:0}
+.title .hl{background:var(--yellow);padding:2px 12px;border-radius:8px;border:2px solid var(--dark);box-shadow:3px 3px 0 var(--dark);display:inline-block}
+.title .hl.blue{background:var(--blue);color:#fff}
+.title .hl.red{background:var(--red);color:#fff}
+.title .hl.green{background:var(--green);color:#fff}
+.subtitle{font-size:18px;color:var(--muted);max-width:900px;line-height:1.5}
+.corner{position:absolute;top:32px;right:32px;padding:8px 16px;background:var(--yellow);
+  border:2px solid var(--dark);border-radius:12px;font-family:"JetBrains Mono",monospace;
+  font-size:11px;font-weight:700;box-shadow:3px 3px 0 var(--dark);transform:rotate(-2deg)}
+.pgnum{position:absolute;bottom:24px;right:32px;font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted)}
+.foot{position:absolute;bottom:24px;left:32px;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted)}
+
+/* Cards grid */
+.grid{display:grid;gap:18px}
+.grid.cols-3{grid-template-columns:repeat(3,1fr)}
+.grid.cols-2{grid-template-columns:1fr 1fr;gap:24px}
+.card{border:2.5px solid var(--dark);border-radius:18px;padding:18px 20px;background:#fff;box-shadow:4px 4px 0 var(--dark)}
+.card .label{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--muted);letter-spacing:.06em;font-weight:700;margin-bottom:4px}
+.card .h{font-size:19px;font-weight:800;margin:2px 0 8px}
+.card .body{font-size:14px;color:var(--fg);line-height:1.5}
+.card .mono{font-family:"JetBrains Mono",monospace;font-size:12px;color:#0066cc;margin-top:8px;display:block}
+.card.yellow{background:#fff5cf}
+.card.blue{background:#cfe7ff}
+.card.green{background:#d2eed8}
+.card.red{background:#ffd6cf}
+.card.dark{background:#1a1a1a;color:#fff}
+.card.dark .label{color:var(--yellow)}
+.card.dark .body{color:#fff}
+.card.dark .h{color:#fff}
+
+/* Script panel */
+.script{margin-top:auto;background:#1a1a1a;color:#e7e5db;border-radius:14px;padding:18px 20px;
+  border:2px solid var(--dark);box-shadow:4px 4px 0 var(--yellow);font-size:13.5px;line-height:1.6}
+.script .lbl{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--yellow);font-weight:700;letter-spacing:.06em}
+.script p{margin:6px 0}
+
+/* Code block */
+.code{background:var(--code);color:#e7e5db;border-radius:14px;padding:18px 20px;
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;line-height:1.6;
+  border:2px solid var(--dark);box-shadow:4px 4px 0 var(--dark);overflow:auto}
+.code .c{color:#7a7a7a}
+.code .k{color:#82c4ff}.code .s{color:#f7c948}.code .n{color:#5cc97a}.code .v{color:#ff8a73}
+.code .nm{color:#fff;font-weight:600}
+
+/* Table */
+table{width:100%;border-collapse:collapse;border:2.5px solid var(--dark);border-radius:14px;
+  overflow:hidden;background:#fff;box-shadow:4px 4px 0 var(--dark)}
+th{background:var(--dark);color:#fff;text-align:left;padding:12px 16px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.05em;font-weight:700}
+td{padding:12px 16px;border-top:1.5px solid var(--line);font-size:13.5px;vertical-align:top}
+td.mono{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:#0066cc}
+tr:nth-child(even) td{background:#faf8ed}
+
+/* Timeline */
+.timeline{display:grid;grid-template-columns:repeat(5,1fr);gap:0;align-items:start}
+.timeline .step{position:relative;padding:14px 12px;background:#fff;border:2px solid var(--dark);
+  border-radius:12px;margin:0 6px;box-shadow:3px 3px 0 var(--dark);font-size:13px}
+.timeline .step .t{display:inline-block;padding:3px 8px;background:#1a1a1a;color:#fff;
+  font-family:"JetBrains Mono",monospace;font-size:10px;border-radius:6px;margin-bottom:6px;font-weight:700}
+.timeline .step .h{font-weight:800;font-size:14px;margin:2px 0 4px}
+.timeline .step.warn{background:#fff5cf;border-color:#b88b00}
+.timeline .step.ok{background:#d2eed8}
+.timeline .step.bad{background:#ffd6cf}
+.arrow{display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--dark)}
+
+/* SVG diagrams */
+.diagram{background:#fff;border:2.5px solid var(--dark);border-radius:14px;padding:16px;box-shadow:4px 4px 0 var(--dark)}
+
+/* Lists */
+.bullets{list-style:none;padding:0;margin:0}
+.bullets li{padding:8px 0 8px 28px;position:relative;font-size:14.5px;line-height:1.55}
+.bullets li::before{content:"◆";position:absolute;left:6px;top:8px;color:var(--blue);font-size:14px}
+.bullets.green li::before{color:var(--green)}
+.bullets.red li::before{color:var(--red)}
+.bullets.yellow li::before{color:#b88b00}
+
+/* Compare 2-col */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.compare .col{border:2.5px solid var(--dark);border-radius:18px;padding:20px;box-shadow:4px 4px 0 var(--dark)}
+.compare .col.bad{background:#ffe9e3}
+.compare .col.good{background:#d8efde}
+.compare h4{margin:0 0 12px;font-size:18px;display:flex;align-items:center;gap:8px}
+
+@media print{
+  body{background:#fff;padding:0}
+  .slide{page-break-after:always;box-shadow:none;border-radius:0;border-width:0 0 1px 0;min-height:calc(100vh - 40px)}
+  .script{box-shadow:none}
+}
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- ============== SLIDE 1: COVER ============== -->
+<section class="slide cover">
+  <div class="tag">INTERNAL TECH SHARING · 2026-06-11</div>
+  <h1 style="font-size:96px;font-weight:900;margin:24px 0 8px;letter-spacing:-.04em">
+    Uni<span class="hl red" style="font-size:96px;padding:8px 24px">Track</span>
+  </h1>
+  <p class="subtitle" style="font-size:22px;max-width:760px">
+    Từ <b>app mobile rời rạc</b> → <b>1 hệ thống full-trace</b> phát hiện sự cố trước khi KTV raise.
+    1 SDK + 1 portal cho mọi project mobile của ISC.
+  </p>
+  <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap;justify-content:center">
+    <span class="kicker yellow">iOS Swift</span>
+    <span class="kicker">Android Kotlin</span>
+    <span class="kicker green">Flutter</span>
+    <span class="kicker red">React Native</span>
+    <span class="kicker yellow">+ 1 Portal</span>
+  </div>
+  <p style="margin-top:32px;font-family:'JetBrains Mono',monospace;font-size:14px">
+    Trần Tấn Đức · <span style="color:var(--red);font-weight:700">Ductt19</span>
+  </p>
+  <div class="script" style="max-width:760px;text-align:left;margin-top:32px">
+    <div class="lbl">📢 SCRIPT — 45 GIÂY</div>
+    <p>Chào các anh em. Hôm nay tôi sẽ chia sẻ về <b>UniTrack</b> — SDK tracking + portal nội bộ đã build mấy tháng qua.</p>
+    <p>Trước khi đi vào kỹ thuật, tôi kể một tình huống <b>thực tế ở MobiX</b>. Sau đó các anh em sẽ thấy vì sao UniTrack ra đời, và quan trọng hơn — vì sao đây mới chỉ là <b>bước đầu</b> của bài toán lớn hơn.</p>
+    <p>Bài share khoảng 25 phút. Cuối bài có 3 câu hỏi rất mong các anh em góp ý.</p>
+  </div>
+  <div class="pgnum">01 / 20</div>
+</section>
+
+<!-- ============== SLIDE 2: BÀI TOÁN MOBIX/KTV ============== -->
+<section class="slide">
+  <div class="corner">BÀI TOÁN</div>
+  <span class="kicker red">● HIỆN TRẠNG MOBIX · KTV CHỜ ISC, ISC ĐOÁN SERVICE</span>
+  <h2 class="title">KTV phát hiện lỗi → <span class="hl red">2 tiếng</span> mới bắt đầu fix</h2>
+
+  <div class="timeline">
+    <div class="step"><span class="t">T + 0</span><div class="h">KTV gặp lỗi</div>API pairing camera trả 500 ngoài hiện trường</div>
+    <div class="arrow">→</div>
+    <div class="step warn"><span class="t">T + 5p</span><div class="h">Chụp + post Tele</div>Screenshot lên group ISC</div>
+    <div class="arrow">→</div>
+    <div class="step warn"><span class="t">T + 15p</span><div class="h">ISC hỏi lại KTV</div>"Anh ở màn nào? Camera nào?"</div>
+  </div>
+  <div class="timeline" style="margin-top:0">
+    <div class="step warn"><span class="t">T + 30p</span><div class="h">ISC đoán team</div>Service nào liên quan?</div>
+    <div class="arrow">→</div>
+    <div class="step bad"><span class="t">T + 1h</span><div class="h">Dev team A check</div>"Không phải bên tôi"</div>
+    <div class="arrow">→</div>
+    <div class="step bad"><span class="t">T + 2h</span><div class="h">Tìm đúng team B</div>Bắt đầu xử lý</div>
+    <div class="arrow">→</div>
+    <div class="step bad"><span class="t">+</span><div class="h" style="color:var(--red)">KTV ngồi chờ</div>Công việc <b>đình trệ</b></div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:8px">
+    <div class="card red">
+      <div class="label">VẤN ĐỀ CỐT LÕI</div>
+      <div class="h">3 đứt gãy thông tin</div>
+      <div class="body">
+        ① App mobile không biết user tap gì / màn nào — KTV mô tả tay<br>
+        ② Mobile event không nối được với log service (no trace_id chung)<br>
+        ③ ISC chỉ phản ứng <b>sau</b> khi có người báo
+      </div>
+    </div>
+    <div class="card green">
+      <div class="label">MONG MUỐN</div>
+      <div class="h">Hệ thống full-trace, chủ động</div>
+      <div class="body">
+        ✓ Phát hiện sự cố <b>trước khi</b> KTV raise<br>
+        ✓ 1 click trên dashboard → app tap nào → API nào → service nào<br>
+        ✓ Service ISC đã có <code>trace_id</code> rồi — chỉ thiếu <b>Mobile</b> đóng vòng
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 3 PHÚT (slide đắt giá — hook người nghe)</div>
+    <p>Tình huống thực tế: app MobiX cho KTV ngoài hiện trường. Khi có lỗi xảy ra — API trả 500, flow pairing camera bị stuck — KTV chụp màn hình, post Telegram group, ISC đọc rồi đi tìm team service.</p>
+    <p>Thời gian <b>từ lúc phát hiện đến lúc bắt đầu fix</b> mất 1-2 tiếng. ISC 30 phút đầu chỉ hỏi lại KTV. 1 tiếng nữa để ping nhầm team. KTV ngồi chờ — công việc của họ bị đình trệ.</p>
+    <p>Cái chúng ta muốn xây là một <b>hệ thống monitoring full hành trình từ app xuống DB</b>. Phát hiện sớm, xử lý <b>trước khi</b> KTV raise.</p>
+    <p>Service ở ISC đã có <code>trace_id</code> rồi. Mảnh ghép còn thiếu là <b>phía Mobile</b> — và đó là lý do UniTrack ra đời.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · BÀI TOÁN MOBIX</div>
+  <div class="pgnum">02 / 20</div>
+</section>
+
+<!-- ============== SLIDE 3: PAIN POINT — FIREBASE THIẾU USER-FLOW ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">VẤN ĐỀ</div>
+  <span class="kicker red">● TRACKING HIỆN TẠI KHÔNG TRẢ LỜI ĐƯỢC "USER ĐI NHƯ THẾ NÀO"</span>
+  <h2 class="title">Firebase cho ta <span class="hl red">số liệu rời rạc</span>, không phải <span class="hl">hành trình</span></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:start">
+    <!-- LEFT: Firebase Console mockup -->
+    <div style="background:#fff;border:2.5px solid var(--dark);border-radius:12px;padding:0;box-shadow:4px 4px 0 var(--dark);overflow:hidden">
+      <div style="background:#f1f3f4;padding:8px 14px;border-bottom:1px solid #dadce0;display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:#fbbc04"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:#ea4335"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:#34a853"></span>
+        <span style="font-family:JetBrains Mono,monospace;font-size:11px;color:#5f6368;margin-left:8px">Firebase Console — Events</span>
+      </div>
+      <div style="padding:14px">
+        <div style="font-size:12px;color:#5f6368;margin-bottom:6px">Top events · 24h</div>
+        <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+          <thead><tr style="background:#f8f9fa"><th style="text-align:left;padding:6px 8px;font-weight:600;color:#5f6368">Event name</th><th style="text-align:right;padding:6px 8px;font-weight:600;color:#5f6368">Count</th><th style="text-align:right;padding:6px 8px;font-weight:600;color:#5f6368">Users</th></tr></thead>
+          <tbody style="font-family:Roboto,sans-serif">
+            <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:6px 8px">screen_view (HomeVC)</td><td style="text-align:right;padding:6px 8px">12,304</td><td style="text-align:right;padding:6px 8px">3,201</td></tr>
+            <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:6px 8px">click_btn_pair_camera</td><td style="text-align:right;padding:6px 8px">8,127</td><td style="text-align:right;padding:6px 8px">2,840</td></tr>
+            <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:6px 8px">screen_view (CameraListVC)</td><td style="text-align:right;padding:6px 8px">6,512</td><td style="text-align:right;padding:6px 8px">2,201</td></tr>
+            <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:6px 8px">api_error (pairing)</td><td style="text-align:right;padding:6px 8px">412</td><td style="text-align:right;padding:6px 8px">187</td></tr>
+            <tr><td style="padding:6px 8px">crash</td><td style="text-align:right;padding:6px 8px;color:#ea4335">38</td><td style="text-align:right;padding:6px 8px;color:#ea4335">32</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:10px;padding:8px 10px;background:#fef7e0;border-left:3px solid #fbbc04;font-size:11.5px;color:#5f6368">
+          ❓ User crash ở screen_view CameraListVC … <b>trước đó họ đã làm gì? Ở session nào? API nào fail?</b>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: What we cannot answer -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card red" style="padding:14px">
+        <div class="label">FIREBASE CHỈ TRẢ LỜI ĐƯỢC</div>
+        <div class="body" style="font-size:13.5px;line-height:1.55">
+          ✔ View này là view gì<br>
+          ✔ User bấm bao nhiêu lần<br>
+          ✔ Tỉ lệ retention / DAU<br>
+          ✔ Crash rate tổng
+        </div>
+      </div>
+      <div class="card dark" style="padding:14px">
+        <div class="label" style="color:#fbbc04">❌ KHÔNG TRẢ LỜI ĐƯỢC</div>
+        <div class="body" style="color:#fff;font-size:13.5px;line-height:1.55">
+          ✘ User <b>An</b> sáng nay đã đi qua những màn nào?<br>
+          ✘ Trước khi crash, user đã click cái gì, gọi API nào?<br>
+          ✘ Session này stuck ở đâu, lý do gì?<br>
+          ✘ Flow nào nhiều user nhất / dễ bỏ giữa chừng nhất?
+        </div>
+      </div>
+      <div style="background:#fff5cf;border:2px solid var(--dark);border-radius:10px;padding:12px 14px;font-size:13px">
+        <b>Vấn đề cốt lõi:</b> event rời rạc không xâu chuỗi thành <b>hành trình theo session</b> được.
+        Mỗi event đứng riêng → không biết "user này → đã làm gì → trước/sau bước hỏng".
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>Trong quá trình tích hợp Firebase Analytics vào các dự án, em phát hiện một giới hạn lớn: <b>dữ liệu tracking rời rạc</b>. Em biết được màn nào có nhiều view, button nào nhiều click, có bao nhiêu crash — nhưng <b>không biết được user đi từ đâu tới đâu</b> trong một session.</p>
+    <p>Ví dụ: user crash ở màn <code>CameraListVC</code> 38 lần — Firebase báo đúng, nhưng <b>trước đó họ click gì? Gọi API nào trả 500? Bắt đầu từ màn nào?</b> Không biết. Mỗi event ở Firebase đứng riêng lẻ.</p>
+    <p>Đây là cái em muốn giải quyết với UniTrack: <b>1 user-flow rõ ràng theo session</b> — biết user đi như thế nào, dừng ở đâu, gặp lỗi ở bước nào.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · VẤN ĐỀ</div>
+  <div class="pgnum">03 / 20</div>
+</section>
+
+<!-- ============== SLIDE 4: MỤC TIÊU — ĐẦU RA MONG MUỐN ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--green);color:#fff">MỤC TIÊU</div>
+  <span class="kicker green">● ĐẦU RA: 1 USER-FLOW RÕ RÀNG MỖI SESSION</span>
+  <h2 class="title">Mỗi session = <span class="hl green">1 hành trình hoàn chỉnh</span> · gắn 1 <code style="color:var(--red);font-size:32px">tracking_id</code></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:stretch">
+    <!-- LEFT: Output mockup — a session journey -->
+    <div style="background:#fff;border:2.5px solid var(--dark);border-radius:12px;padding:14px;box-shadow:4px 4px 0 var(--dark)">
+      <div style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--muted);margin-bottom:6px">PORTAL — Session #c389a45b · user An · 08:32 → 08:51</div>
+      <div style="font-family:JetBrains Mono,monospace;font-size:10.5px;background:#ffeaea;color:#7a0a0a;padding:5px 9px;border-radius:6px;margin-bottom:10px;display:inline-block">
+        tracking_id: <b>a3c14e2f-…-9b8d</b> 📋
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+        <div style="padding:7px 10px;background:#e2e8f0;border-radius:6px"><b>📱 LoginVC</b> <span class="muted" style="font-size:11px">· 08:32:15</span></div>
+        <div style="padding:6px 10px 6px 22px;font-size:11.5px;color:#444">↳ click <code>btn_login</code> · 08:32:18</div>
+        <div style="padding:6px 10px 6px 22px;font-size:11.5px;color:#444">↳ POST <code>/auth/login</code> <span style="color:#2f8a4a">200</span> · 320ms</div>
+        <div style="padding:7px 10px;background:#cfe7ff;border-radius:6px"><b>📱 HomeVC</b> <span class="muted" style="font-size:11px">· 08:32:21</span></div>
+        <div style="padding:6px 10px 6px 22px;font-size:11.5px;color:#444">↳ click <code>btn_pair_camera</code> · 08:33:05</div>
+        <div style="padding:7px 10px;background:#fff5cf;border-radius:6px"><b>📱 CameraListVC</b> <span class="muted" style="font-size:11px">· 08:33:08</span></div>
+        <div style="padding:6px 10px 6px 22px;font-size:11.5px;color:#444">↳ GET <code>/cameras/list</code> <span style="color:#ea4335">500</span> · 4,210ms</div>
+        <div style="padding:6px 10px 6px 22px;font-size:11.5px;color:#ea4335"><b>⚠ CRASH</b> · NSInternalInconsistencyException · 08:33:13</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: What this unlocks -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card green" style="padding:14px">
+        <div class="label">VỚI 1 SESSION JOURNEY ĐẦY ĐỦ</div>
+        <div class="body" style="font-size:13.5px;line-height:1.6">
+          ✔ Thấy được <b>full path</b>: Login → Home → CameraList → crash<br>
+          ✔ Biết API <code>/cameras/list</code> trả <b>500 ngay trước crash</b><br>
+          ✔ Tái hiện được hành trình của user An — không cần hỏi lại<br>
+          ✔ Phát hiện flow nào nhiều user bỏ giữa chừng
+        </div>
+      </div>
+      <div class="card red" style="padding:14px">
+        <div class="label">+ TRACKING_ID = CẦU NỐI SANG SNOWPLOW</div>
+        <div class="body" style="font-size:13px;line-height:1.55">
+          Portal chỉ giữ <b>mapping</b> (user → session → tracking_id) — nhẹ.<br>
+          Cần raw event đầy đủ? Copy <code>tracking_id</code> → gửi đội Snowplow → nhận full event lake.
+        </div>
+      </div>
+      <div style="background:#d2eed8;border:2px solid #1f1f1f;border-radius:10px;padding:10px 14px;font-size:13px">
+        <b>Tóm lại:</b> Firebase báo <i>"có 38 crash"</i>. UniTrack báo <i>"user An, lúc 08:33, sau khi gọi /cameras/list 500, crash ở CameraListVC — đây là tracking_id"</i>.
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 60 GIÂY</div>
+    <p>Mục tiêu rõ ràng: mỗi session của user phải tái hiện được <b>full hành trình</b> — từ lúc mở app, đi qua màn nào, click gì, gọi API nào, đến lúc đóng app (hoặc crash). Đây chính là cái Firebase không cho mình thấy.</p>
+    <p>Mỗi session sẽ được gắn 1 <code>tracking_id</code> duy nhất — UUID v4 — đóng vai trò <b>chìa khoá tra cứu</b>. Portal nhẹ vì chỉ giữ mapping <code>user → session → tracking_id</code>. Khi QA cần đào sâu, họ copy tracking_id, gửi đội Snowplow query DB lake để ra full raw event.</p>
+    <p>Bây giờ ta đi vào <b>kiến trúc thực hiện</b> + <b>5 bước onboard</b>.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · MỤC TIÊU</div>
+  <div class="pgnum">04 / 20</div>
+</section>
+
+<!-- ============== SLIDE 5: TỔNG QUAN ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--blue);color:#fff">TỔNG QUAN</div>
+  <span class="kicker">● UNITRACK ĐANG CÓ GÌ · 1 SDK + 1 PORTAL</span>
+  <h2 class="title">Tracking đầy đủ — chỉ với <span class="hl">1 SDK</span></h2>
+  <div class="grid cols-3">
+    <div class="card yellow"><div class="label">MỘT BỘ DUY NHẤT</div><div class="h">1 SDK + 1 Portal</div>
+      <div class="body">Một thư viện + một portal quản lý cấu hình. Hết cảnh mỗi app tự viết wrapper riêng.</div></div>
+    <div class="card blue"><div class="label">4 PLATFORM · 1 LÕI</div><div class="h">iOS · Android · Flutter · RN</div>
+      <div class="body">Logic viết 1 lần ở C++ core — ~70% code dùng chung.</div></div>
+    <div class="card green"><div class="label">INIT XONG LÀ CHẠY</div><div class="h">Auto-capture đầy đủ</div>
+      <div class="body">tap · screen · network · crash · lifecycle · session — không viết 1 dòng <code>track</code>.</div></div>
+    <div class="card yellow"><div class="label">ĐỔI KHÔNG CẦN BUILD</div><div class="h">Convention + Remote config</div>
+      <div class="body">Đổi tên, bật/tắt event ngay trên portal. <span class="mono">6 kind phủ 30+ business event</span></div></div>
+    <div class="card dark"><div class="label">KHÔNG MẤT DATA</div><div class="h">Crash recovery + Portal IDE</div>
+      <div class="body">App crash vẫn gửi lại lần mở sau. <span class="mono" style="color:#f7c948">session_id + index persist qua restart</span></div></div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>Trước khi đi sâu — đây là 5 điểm UniTrack giải quyết. <b>1 SDK + 1 portal</b> thay cảnh mỗi project tự viết. <b>4 platform 1 lõi C++</b> — 70% logic dùng chung. <b>Init xong là chạy</b> — auto-capture, dev không viết tay.</p>
+    <p><b>Đổi không cần build</b> — tên event đổi từ portal. <b>Crash recovery</b> — app crash vẫn gửi event lần mở sau. Tôi sẽ đi qua từng cái.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · INTERNAL TECH SHARING</div>
+  <div class="pgnum">05 / 20</div>
+</section>
+
+<!-- ============== SLIDE 4: INIT 1 LẦN ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--green);color:#fff">TẦM NHÌN</div>
+  <span class="kicker green">● APP TÍCH HỢP CHỈ CẦN INIT MỘT LẦN</span>
+  <h2 class="title">Tối ưu hóa <span class="hl">việc khởi tạo</span></h2>
+  <div class="grid cols-2">
+    <div>
+      <div class="card dark" style="margin-bottom:14px">
+        <div class="label">SWIFT · INIT — TOÀN BỘ CODE APP CẦN VIẾT</div>
+        <pre class="code" style="margin:8px 0 0;border:none;box-shadow:none;padding:8px 0">
+<span class="k">UniTrack</span>.<span class="nm">initialize</span>(apiKey: <span class="s">"utk_…"</span>)
+<span class="k">UniTrack</span>.<span class="nm">addProvider</span>(<span class="v">SnowplowProvider</span>())
+<span class="k">UniTrack</span>.<span class="nm">addProvider</span>(<span class="v">FirebaseProvider</span>())</pre>
+      </div>
+      <div class="card green">
+        <div class="h" style="font-size:18px;margin:0">0 — Sau đó không viết thêm 1 dòng <code>track</code> nào</div>
+      </div>
+    </div>
+    <div>
+      <div class="label" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:8px">▼ TẤT CẢ ĐƯỢC AUTO-CAPTURE</div>
+      <ul class="bullets">
+        <li>Mọi button tap → <code>event_click</code></li>
+        <li>Mọi screen navigate → <code>screen_view + load_ms</code></li>
+        <li>Mọi HTTP request → <code>event_api</code></li>
+        <li>App lifecycle → <code>start / foreground / background</code></li>
+        <li>App crash → <code>event_crash</code> recover lần mở sau</li>
+        <li>Memory warning → <code>memory_warning</code></li>
+      </ul>
+      <div class="card yellow" style="margin-top:14px">
+        <div class="label">SO SÁNH FLIFETRACKER (HIỆN TẠI Ở FPT LIFE)</div>
+        <div class="body">Mỗi event mới → sửa <b>5 file</b> (enum + schema + 2 provider + UI binding).<br>
+        UniTrack: <b>0 file</b> cho event auto-capture.</div>
+      </div>
+    </div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>Đây là <b>toàn bộ</b> code app cần viết để có tracking đầy đủ — 3 dòng. Init SDK với API key, đăng ký 2 provider. Xong.</p>
+    <p>Sau đó không viết thêm dòng <code>track</code> nào — mọi tap, screen, HTTP, crash đều capture tự động.</p>
+    <p>So với FLifeTracker hiện tại: với mỗi event mới phải sửa 5 file. UniTrack: <b>0 file</b>.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · INIT 1 LẦN</div>
+  <div class="pgnum">06 / 20</div>
+</section>
+
+<!-- ============== SLIDE 5: KIẾN TRÚC C++ ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--green);color:#fff">KIẾN TRÚC</div>
+  <span class="kicker green">● 1 LÕI C++ · 4 PLATFORM BINDING · 1 PORTAL</span>
+  <h2 class="title">Viết logic <span class="hl green">1 lần</span>, chạy <span class="hl blue">4 platform</span></h2>
+  <div class="grid cols-2">
+    <div>
+      <svg viewBox="0 0 560 380" class="diagram" style="width:100%;height:auto">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#1f1f1f"/>
+          </marker>
+        </defs>
+        <!-- Portal -->
+        <rect x="20" y="20" width="520" height="70" rx="14" fill="#cfe7ff" stroke="#1f1f1f" stroke-width="2.5"/>
+        <text x="36" y="44" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">PORTAL · NODE.JS + SQLITE</text>
+        <text x="36" y="68" font-size="13" fill="#333">remote config · session IDE · agent · forward</text>
+        <line x1="280" y1="98" x2="280" y2="125" stroke="#1f1f1f" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="295" y="118" font-family="JetBrains Mono,monospace" font-size="11">HTTPS batch</text>
+        <!-- Binding -->
+        <rect x="20" y="135" width="520" height="70" rx="14" fill="#fff5cf" stroke="#1f1f1f" stroke-width="2.5"/>
+        <text x="36" y="160" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">NATIVE BINDING · SWIFT / KOTLIN / DART / TS</text>
+        <text x="36" y="184" font-size="13" fill="#333">auto-capture · convention helpers · provider fan-out</text>
+        <line x1="280" y1="213" x2="280" y2="240" stroke="#1f1f1f" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="298" y="233" font-family="JetBrains Mono,monospace" font-size="11">C ABI</text>
+        <!-- Core -->
+        <rect x="20" y="250" width="520" height="120" rx="14" fill="#d2eed8" stroke="#1f1f1f" stroke-width="2.5"/>
+        <text x="36" y="275" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">C++ CORE · core/src/</text>
+        <rect x="36" y="285" width="155" height="32" rx="8" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+        <text x="44" y="305" font-family="JetBrains Mono,monospace" font-size="11">Offline queue · SQLite</text>
+        <rect x="200" y="285" width="155" height="32" rx="8" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+        <text x="208" y="305" font-family="JetBrains Mono,monospace" font-size="11">Session manager</text>
+        <rect x="364" y="285" width="160" height="32" rx="8" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+        <text x="372" y="305" font-family="JetBrains Mono,monospace" font-size="11">Crash signal handler</text>
+        <rect x="36" y="325" width="200" height="32" rx="8" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+        <text x="44" y="345" font-family="JetBrains Mono,monospace" font-size="11">HTTP transport · curl</text>
+        <rect x="244" y="325" width="280" height="32" rx="8" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+        <text x="252" y="345" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">W3C Trace Context — sinh trace_id 128-bit</text>
+      </svg>
+    </div>
+    <div>
+      <div class="label" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:8px">▼ VÌ SAO C++ CORE, KHÔNG PHẢI SWIFT/KOTLIN?</div>
+      <table>
+        <tr><th style="width:32%">LỢI ÍCH</th><th>CHI TIẾT</th></tr>
+        <tr><td><b>DRY</b></td><td>Queue + session + crash handler viết <b>1 lần</b></td></tr>
+        <tr><td><b>Performance</b></td><td>Background thread + SQLite trực tiếp, không qua bridge RN/Flutter</td></tr>
+        <tr><td><b>Crash trap</b></td><td>SIGSEGV signal handler cần native — JS/Dart không bắt được</td></tr>
+        <tr><td><b>Battery</b></td><td>Batch transport ở C++ tiết kiệm wake-up</td></tr>
+        <tr><td><b>W3C trace</b></td><td><span style="color:var(--red);font-weight:700">Sinh sẵn cho L2 backend</span> — đây là điểm dẫn slide 10</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 3 PHÚT (slide kỹ thuật nặng nhất)</div>
+    <p>Câu hỏi hay được hỏi: <b>vì sao C++</b>? Sao không viết native từng platform?</p>
+    <p>Lý do là <b>DRY</b>. Queue + session + crash handler chỉ viết 1 lần. Sửa bug 1 lần, 4 platform được fix.</p>
+    <p>C++ core có 5 thành phần: <b>Offline queue</b> SQLite. <b>Session manager</b> persist qua restart. <b>Crash handler</b> bắt SIGSEGV/SIGTRAP. <b>HTTP transport</b> curl. <b>W3C Trace Context</b> sinh trace_id 128-bit — cái này quan trọng cho L2 lát nữa.</p>
+    <p>Performance: queue chạy thẳng C++ background thread + SQLite native, không qua bridge RN/Flutter → battery tốt hơn.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · KIẾN TRÚC</div>
+  <div class="pgnum">07 / 20</div>
+</section>
+
+<!-- ============== SLIDE 6: PLATFORM TRACKING ARCHITECTURE ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">NỀN TẢNG</div>
+  <span class="kicker red">● 1 SDK + 1 PORTAL = 1 PLATFORM TRACKING</span>
+  <h2 class="title">Kiến trúc <span class="hl red">Platform Tracking</span></h2>
+  <p class="subtitle" style="margin:-8px 0 8px;font-size:14.5px">
+    SDK sinh <code>session_id</code> + <code style="color:var(--red)">tracking_id</code> mỗi session, gắn lên mọi event đẩy Snowplow + đăng ký lên Portal.
+    QA cần debug: lấy <code style="color:var(--red)">tracking_id</code> từ Portal → query Snowplow → ra full event của session đó.
+  </p>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <!-- HTML-based architecture diagram — node grid + flow arrows.
+         Replaces the prior SVG (which got clipped at the slide height). -->
+    <div class="ptdiag" style="--col-gap:14px;background:#fff;border:2.5px solid var(--dark);border-radius:14px;padding:18px 16px;box-shadow:4px 4px 0 var(--dark);display:flex;flex-direction:column;gap:12px">
+
+      <!-- Row A: USER ─① mở app→ SDK ─③ gửi event→ SNOWPLOW -->
+      <div style="display:grid;grid-template-columns:130px 70px 1fr 70px 240px;gap:6px;align-items:stretch">
+        <!-- User -->
+        <div style="background:#e2e8f0;border:2px solid #1f1f1f;border-radius:10px;padding:10px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-size:11px;font-weight:700">NGƯỜI DÙNG</div>
+          <div style="font-size:30px;margin:6px 0">📱</div>
+          <div style="font-size:11px;color:#444">mở app</div>
+        </div>
+
+        <!-- Arrow ① User → SDK -->
+        <div class="arrowBox" data-num="①" data-label="bật app" style="--arrow-color:#caa505"></div>
+
+        <!-- SDK — 4 platform pills + 1 highlight box: Quản lý tracking -->
+        <div style="background:#fff5cf;border:2px solid #1f1f1f;border-radius:12px;padding:14px;position:relative">
+          <div style="font-size:12px;font-weight:700;text-align:center;font-family:JetBrains Mono,monospace">UNITRACK SDK</div>
+          <!-- 4 platform pills -->
+          <div style="display:flex;justify-content:center;gap:8px;margin:10px 0 12px;flex-wrap:wrap">
+            <span style="background:#fff;border:1.5px solid #7a5a00;border-radius:14px;padding:4px 12px;font-size:11.5px;font-weight:700">📱 iOS</span>
+            <span style="background:#fff;border:1.5px solid #7a5a00;border-radius:14px;padding:4px 12px;font-size:11.5px;font-weight:700">🤖 Android</span>
+            <span style="background:#fff;border:1.5px solid #7a5a00;border-radius:14px;padding:4px 12px;font-size:11.5px;font-weight:700">🦋 Flutter</span>
+            <span style="background:#fff;border:1.5px solid #7a5a00;border-radius:14px;padding:4px 12px;font-size:11.5px;font-weight:700">⚛ React Native</span>
+          </div>
+          <!-- Quản lý tracking — highlight box -->
+          <div style="background:#fff;border:2px solid var(--red);border-radius:10px;padding:10px 14px;text-align:center">
+            <div style="font-size:13px;font-weight:700;color:var(--red)">🎫 Quản lý tracking</div>
+            <div style="font-size:11px;color:#7a0a0a;margin-top:3px">
+              sinh <code>session_id</code> + <code style="color:var(--red);font-weight:700">tracking_id</code> mỗi session ·
+              gắn lên mọi event đẩy Snowplow
+            </div>
+          </div>
+        </div>
+
+        <!-- Arrow ③ SDK → Snowplow (thick blue) -->
+        <div class="arrowBox" data-num="③" data-label="event + tracking_id" style="--arrow-color:#5b8cff;--arrow-w:3"></div>
+
+        <!-- Snowplow Collector -->
+        <div style="background:#cfe7ff;border:2px solid #1f1f1f;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;text-align:center">
+          <div style="font-size:11px;font-weight:700">SNOWPLOW</div>
+          <div style="font-size:28px;margin:4px 0">🏛</div>
+          <div style="font-size:12px;font-weight:700;color:#003a7a">Kho event</div>
+          <div style="font-size:10.5px;color:#003a7a;margin-top:2px">lưu mọi event + <b>tracking_id</b></div>
+        </div>
+      </div>
+
+      <!-- Vertical arrows row: ② Portal→SDK config (up), ④ SDK→Portal upsert (down) -->
+      <div style="display:grid;grid-template-columns:130px 70px 1fr 70px 240px;gap:6px;align-items:center;height:50px">
+        <div></div>
+        <div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;justify-items:center">
+          <div class="arrowV" data-num="②" data-label="gửi cấu hình" data-dir="up" data-dash="1" style="--arrow-color:var(--red)"></div>
+          <div class="arrowV" data-num="④" data-label="upsert mapping" data-dir="down" style="--arrow-color:#1f1f1f"></div>
+        </div>
+        <div></div>
+        <div></div>
+      </div>
+
+      <!-- Row B: PORTAL + OPERATOR -->
+      <div style="display:grid;grid-template-columns:1fr 70px 240px;gap:6px;align-items:stretch">
+        <!-- Portal — 2 simple boxes -->
+        <div style="background:#ffd6cf;border:2px solid #1f1f1f;border-radius:12px;padding:14px">
+          <div style="font-size:12px;font-weight:700;text-align:center;font-family:JetBrains Mono,monospace">PORTAL</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+            <div style="background:#fff;border:2px solid #7a0a0a;border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:24px">⚙</div>
+              <div style="font-size:13px;font-weight:700;color:#7a0a0a;margin-top:4px">Quản lý cấu hình SDK</div>
+            </div>
+            <div style="background:#fff;border:2px solid #7a0a0a;border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:24px">📖</div>
+              <div style="font-size:13px;font-weight:700;color:#7a0a0a;margin-top:4px">Lưu session</div>
+              <div style="font-size:10.5px;color:#9d174d;margin-top:2px">user · session_id · <span style="color:var(--red);font-weight:700">tracking_id</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Arrow ⑤ Operator → Portal (reverse, green) -->
+        <div class="arrowBox" data-num="⑤" data-label="tra user · lấy tracking_id" data-dir="left" style="--arrow-color:#2f8a4a"></div>
+
+        <!-- Operator — plain language -->
+        <div style="background:#d2eed8;border:2px solid #1f1f1f;border-radius:10px;padding:10px;display:flex;flex-direction:column;justify-content:center;text-align:center">
+          <div style="font-size:11px;font-weight:700">NGƯỜI VẬN HÀNH</div>
+          <div style="font-size:30px;margin:4px 0">👨‍💼</div>
+          <div style="font-size:11px;color:#206035">QA · dev · CSKH</div>
+          <div style="font-size:10px;color:#444;margin-top:2px">cần tra cứu khi có lỗi</div>
+        </div>
+      </div>
+
+      <!-- Vertical arrows: ⑥ Operator→đối tác (down), ⑦ đối tác→Operator (up) -->
+      <div style="display:grid;grid-template-columns:1fr 70px 240px;gap:6px;align-items:center;height:56px">
+        <div></div>
+        <div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;justify-items:center">
+          <div class="arrowV" data-num="⑥" data-label="gửi tracking_id" data-dir="down" data-dash="1" style="--arrow-color:#caa505"></div>
+          <div class="arrowV" data-num="⑦" data-label="trả full event" data-dir="up" style="--arrow-color:#5b8cff;--arrow-w:2.5"></div>
+        </div>
+      </div>
+
+      <!-- Row C: Snowplow Data Team — plain language -->
+      <div style="display:grid;grid-template-columns:1fr;gap:var(--col-gap)">
+        <div style="background:#cfe7ff;border:2px solid #1f1f1f;border-radius:10px;padding:12px 14px;display:flex;gap:12px;align-items:center">
+          <div style="font-size:36px">🔍</div>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:700">ĐỘI SNOWPLOW (đối tác)</div>
+            <div style="font-size:12.5px;font-weight:700;margin-top:2px">Nhận <code>tracking_id</code> → query DB Snowplow → trả full event của session đó</div>
+            <div style="font-size:10.5px;color:#444;margin-top:3px"><code style="font-size:10px">SELECT * FROM events WHERE tracking_id = '…'</code> → click · screen · network · crash</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .ptdiag code{background:#0f172a10;padding:1px 4px;border-radius:3px}
+
+      /* Horizontal arrow box (between columns in a grid row).
+         data-num + data-label render number badge above + label below the line.
+         data-dir="left" reverses direction. */
+      .ptdiag .arrowBox{
+        --arrow-color:#1f1f1f; --arrow-w:2;
+        position:relative; display:flex; align-items:center; justify-content:center;
+      }
+      .ptdiag .arrowBox::before{
+        content:""; position:absolute; left:4px; right:4px; top:50%;
+        height:0; border-top:calc(var(--arrow-w)*1px) solid var(--arrow-color); transform:translateY(-50%);
+      }
+      .ptdiag .arrowBox::after{
+        content:""; position:absolute; top:50%; width:0; height:0;
+        border-top:6px solid transparent; border-bottom:6px solid transparent;
+        transform:translateY(-50%);
+      }
+      .ptdiag .arrowBox:not([data-dir="left"])::after{
+        right:4px; border-left:9px solid var(--arrow-color);
+      }
+      .ptdiag .arrowBox[data-dir="left"]::after{
+        left:4px; border-right:9px solid var(--arrow-color);
+      }
+      .ptdiag .arrowBox[data-num]::before,
+      .ptdiag .arrowBox[data-num]::after{ z-index:1 }
+      .ptdiag .arrowBox > .num{
+        position:absolute; top:-2px; left:50%; transform:translate(-50%, -100%);
+        background:var(--arrow-color); color:#fff;
+        width:20px; height:20px; border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        font-weight:800; font-size:11px;
+        border:1.5px solid #1f1f1f;
+      }
+      .ptdiag .arrowBox > .lbl{
+        position:absolute; top:50%; left:50%; transform:translate(-50%, 10px);
+        font-size:9.5px; color:#444; white-space:nowrap;
+        background:#ffffffd9; padding:0 3px;
+      }
+
+      /* Vertical arrow */
+      .ptdiag .arrowV{
+        --arrow-color:#1f1f1f; --arrow-w:2; --arrow-dash:0;
+        position:relative; width:30px; height:46px;
+      }
+      .ptdiag .arrowV::before{
+        content:""; position:absolute; left:50%; top:6px; bottom:6px;
+        width:0; border-left:calc(var(--arrow-w)*1px) solid var(--arrow-color);
+        transform:translateX(-50%);
+      }
+      .ptdiag .arrowV[style*="dash:1"]::before,
+      .ptdiag .arrowV[data-dash="1"]::before{
+        border-left-style:dashed;
+      }
+      .ptdiag .arrowV::after{
+        content:""; position:absolute; left:50%; width:0; height:0;
+        border-left:6px solid transparent; border-right:6px solid transparent;
+        transform:translateX(-50%);
+      }
+      .ptdiag .arrowV[data-dir="down"]::after{ bottom:0; border-top:9px solid var(--arrow-color) }
+      .ptdiag .arrowV[data-dir="up"]::after  { top:0;    border-bottom:9px solid var(--arrow-color) }
+      .ptdiag .arrowV > .num{
+        position:absolute; left:50%; transform:translate(-50%, -50%);
+        top:50%;
+        background:var(--arrow-color); color:#fff;
+        width:20px; height:20px; border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        font-weight:800; font-size:11px;
+        border:1.5px solid #1f1f1f;
+      }
+      .ptdiag .arrowV > .lbl{
+        position:absolute; left:36px; top:50%; transform:translateY(-50%);
+        font-size:9.5px; color:#444; white-space:nowrap;
+      }
+    </style>
+    <script>
+      // Inject .num + .lbl spans into every arrow node so we can drive content
+      // entirely from data-num / data-label attributes — keeps the markup
+      // declarative and the labels easy to re-style globally.
+      (function(){
+        document.querySelectorAll('.ptdiag .arrowBox, .ptdiag .arrowV').forEach(function(a){
+          var n=a.getAttribute('data-num'); var l=a.getAttribute('data-label');
+          if(n){ var s=document.createElement('span'); s.className='num'; s.textContent=n; a.appendChild(s);}
+          if(l){ var t=document.createElement('span'); t.className='lbl'; t.textContent=l; a.appendChild(t);}
+        });
+      })();
+    </script>
+
+
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 60 GIÂY</div>
+    <p>Đây là kiến trúc tổng quan. <b>SDK</b> nhúng vào app 4 nền tảng iOS · Android · Flutter · React Native, nhiệm vụ cốt lõi là <b>quản lý tracking</b> — sinh <code>session_id</code> + <code>tracking_id</code> mỗi session, gắn lên mọi event đẩy Snowplow.</p>
+    <p><b>Portal</b> có 2 việc: quản lý cấu hình SDK và lưu session (user · session_id · tracking_id). Snowplow là kho event. QA muốn debug thì lấy tracking_id từ Portal → query Snowplow → ra full hành trình user.</p>
+    <p>Các slide tiếp theo sẽ phân tích sâu từng phần: Portal cấu hình SDK như thế nào, SDK có tính năng gì, cách sinh tracking_id, Portal lưu session ra sao, và cách dựng hành trình user từ tracking_id.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · PLATFORM TRACKING</div>
+  <div class="pgnum">08 / 20</div>
+</section>
+
+<!-- ============== SLIDE 6B: LAYERED OVERVIEW (pastel grouped style) ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">NỀN TẢNG</div>
+  <span class="kicker red">● TỔNG QUAN HỆ THỐNG</span>
+  <h2 class="title">Kiến trúc <span class="hl red">UniTrack Platform Tracking</span></h2>
+
+  <p class="subtitle" style="margin:-6px 0 18px;font-size:15px">
+    Mỗi session sinh ra <b style="color:#e11d48">1 tracking_id</b>. SDK gắn nó lên mọi event đẩy Snowplow, đồng thời đăng ký mapping về Portal.
+    QA copy tracking_id → đối tác Snowplow query → ra full event.
+  </p>
+
+  <div class="ptArch" style="position:relative">
+    <svg class="ptArchSvg" viewBox="0 0 1100 460" preserveAspectRatio="xMidYMid meet"
+         style="width:100%;height:auto;display:block;font-family:Inter,system-ui,sans-serif">
+      <defs>
+        <marker id="ptArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#475569"/>
+        </marker>
+        <marker id="ptArrowR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#e11d48"/>
+        </marker>
+      </defs>
+
+      <!-- TOP CENTER: SDK (xanh dương, lớn) — focus tracking_id pill -->
+      <g>
+        <rect x="350" y="20" width="400" height="160" rx="22"
+              fill="#dbeafe" stroke="#2563eb" stroke-width="2.5"/>
+        <rect x="475" y="6" width="150" height="28" rx="14"
+              fill="#2563eb" stroke="#1e40af" stroke-width="2"/>
+        <text x="550" y="25" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">UniTrack SDK</text>
+
+        <text x="550" y="62" text-anchor="middle" font-size="13" fill="#1e3a8a">nhúng trong app · iOS · Android · Flutter · RN</text>
+
+        <!-- Big tracking_id pill -->
+        <rect x="385" y="80" width="330" height="80" rx="40"
+              fill="#fff" stroke="#e11d48" stroke-width="3"/>
+        <text x="550" y="108" text-anchor="middle" font-size="13" fill="#7f1d1d">mỗi session sinh ra</text>
+        <text x="550" y="138" text-anchor="middle" font-size="22" font-weight="800" fill="#e11d48" font-family="JetBrains Mono,monospace">tracking_id</text>
+        <text x="550" y="154" text-anchor="middle" font-size="11" fill="#9f1239">UUID v4 · 1↔1 với session_id</text>
+      </g>
+
+      <!-- LEFT: Portal (hồng) -->
+      <g>
+        <rect x="40" y="260" width="320" height="140" rx="22"
+              fill="#fce7f3" stroke="#db2777" stroke-width="2.5"/>
+        <rect x="130" y="246" width="140" height="28" rx="14"
+              fill="#db2777" stroke="#9d174d" stroke-width="2"/>
+        <text x="200" y="265" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Portal</text>
+
+        <text x="200" y="306" text-anchor="middle" font-size="14" font-weight="700" fill="#831843">📖 Sổ đăng ký</text>
+        <text x="200" y="332" text-anchor="middle" font-size="12.5" fill="#831843">user · session_id · <tspan font-weight="700" fill="#e11d48">tracking_id</tspan></text>
+        <text x="200" y="356" text-anchor="middle" font-size="11" fill="#9d174d">CHỈ lưu mapping</text>
+        <text x="200" y="374" text-anchor="middle" font-size="11" fill="#9d174d">không lưu event</text>
+      </g>
+
+      <!-- RIGHT: Snowplow (xanh lá) -->
+      <g>
+        <rect x="740" y="260" width="320" height="140" rx="22"
+              fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+        <rect x="830" y="246" width="140" height="28" rx="14"
+              fill="#16a34a" stroke="#166534" stroke-width="2"/>
+        <text x="900" y="265" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Snowplow</text>
+
+        <text x="900" y="306" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">🗄 Kho event đầy đủ</text>
+        <text x="900" y="332" text-anchor="middle" font-size="12.5" fill="#14532d">mọi event đều có <tspan font-weight="700" fill="#e11d48">tracking_id</tspan></text>
+        <text x="900" y="356" text-anchor="middle" font-size="11" fill="#166534">query theo tracking_id</text>
+        <text x="900" y="374" text-anchor="middle" font-size="11" fill="#166534">→ ra full event timeline</text>
+      </g>
+
+      <!-- Arrow ① SDK → Portal · đăng ký mapping -->
+      <path d="M 380 175 Q 280 220 230 255" stroke="#475569" stroke-width="2.5" fill="none" marker-end="url(#ptArrow)"/>
+      <rect x="170" y="200" width="200" height="22" rx="11" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+      <text x="270" y="215" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1f2937">① đăng ký mapping</text>
+
+      <!-- Arrow ② SDK → Snowplow · gắn tracking_id vào event -->
+      <path d="M 720 175 Q 820 220 870 255" stroke="#0284c7" stroke-width="2.8" fill="none" marker-end="url(#ptArrow)"/>
+      <rect x="730" y="200" width="230" height="22" rx="11" fill="#fff" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="845" y="215" text-anchor="middle" font-size="11.5" font-weight="700" fill="#075985">② event có tracking_id</text>
+
+      <!-- BOTTOM: QA -->
+      <g>
+        <rect x="400" y="412" width="300" height="42" rx="21"
+              fill="#fed7aa" stroke="#ea580c" stroke-width="2.5"/>
+        <text x="428" y="441" font-size="22">👨‍💼</text>
+        <text x="462" y="436" font-size="13" font-weight="700" fill="#7c2d12">QA · Dev · CSKH</text>
+        <text x="462" y="450" font-size="11" fill="#9a3412">cần debug user-flow</text>
+      </g>
+
+      <!-- ③ QA → Portal · lấy tracking_id -->
+      <path d="M 410 425 Q 280 420 250 405" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#ptArrow)"/>
+      <text x="270" y="395" text-anchor="middle" font-size="11" fill="#1f2937">③ tra user, lấy tid</text>
+
+      <!-- ④ QA → Snowplow · gửi tracking_id, nhận event -->
+      <path d="M 700 425 Q 830 420 850 405" stroke="#e11d48" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#ptArrowR)"/>
+      <text x="830" y="395" text-anchor="middle" font-size="11" fill="#9f1239">④ gửi tid → nhận event</text>
+    </svg>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 45 GIÂY</div>
+    <p>Tóm gọn kiến trúc trong một sơ đồ: trung tâm là <b>tracking_id</b> — chuỗi UUID sinh ra mỗi session, 1↔1 với session_id.</p>
+    <p>SDK làm 2 việc: <b>① đăng ký mapping</b> <code>(user, session_id, tracking_id)</code> về Portal · <b>② đẩy event có gắn tracking_id</b> sang Snowplow.</p>
+    <p>Khi cần debug: QA <b>③ tra Portal</b> để lấy tracking_id của user → <b>④ gửi cho đội Snowplow</b> query → nhận về full event timeline. Các module bên trong SDK, cấu hình Portal, query Snowplow sẽ phân tích sâu ở các slide sau.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · TỔNG QUAN HỆ THỐNG</div>
+  <div class="pgnum">09 / 20</div>
+</section>
+
+<!-- ============== SLIDE 10: PORTAL — CẤU HÌNH SDK ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">PORTAL · 1/2</div>
+  <span class="kicker red">● CẤU HÌNH SDK TRÊN PORTAL — KHÔNG CẦN BUILD APP</span>
+  <h2 class="title">Portal · <span class="hl red">Cấu hình SDK từ xa</span></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:stretch">
+    <!-- Portal Config mockup -->
+    <div style="background:#fff;border:2.5px solid var(--dark);border-radius:12px;padding:0;box-shadow:4px 4px 0 var(--dark);overflow:hidden">
+      <div style="background:#1f1f1f;color:#fff;padding:8px 14px;font-family:JetBrains Mono,monospace;font-size:11px">Portal · FPT Life Beta · Config (remote)</div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:10px;font-size:12.5px">
+        <div style="padding:8px 12px;background:#f7f7f7;border-radius:6px">
+          <div style="font-weight:700;margin-bottom:6px">🎯 Auto-capture</div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">
+            <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked disabled> tap · mọi nút bấm</label>
+            <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked disabled> screen_view · đổi màn</label>
+            <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked disabled> network · URLProtocol / OkHttp</label>
+            <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked disabled> crash · signal trap</label>
+          </div>
+        </div>
+        <div style="padding:8px 12px;background:#f7f7f7;border-radius:6px">
+          <div style="font-weight:700;margin-bottom:6px">🏷 Tên màn — đổi từ server</div>
+          <div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#444">
+            HomeVC → "Trang chủ"<br>
+            CameraListVC → "Danh sách camera"
+          </div>
+        </div>
+        <div style="padding:8px 12px;background:#f7f7f7;border-radius:6px">
+          <div style="font-weight:700;margin-bottom:6px">📡 Snowplow endpoint</div>
+          <div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#444">
+            collector_url: <code>sp.fpt.vn/.../tp2</code><br>
+            api_key: <code>sp_xxx…</code>
+          </div>
+        </div>
+        <button style="background:var(--red);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;align-self:flex-end">💾 Lưu cấu hình</button>
+      </div>
+    </div>
+
+    <!-- Right side: 3 nhóm + SSE -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card red" style="padding:14px">
+        <div class="label">3 NHÓM CẤU HÌNH</div>
+        <div class="body" style="font-size:13.5px;line-height:1.6">
+          <b>① Auto-capture</b> — bật/tắt tap, screen, network, crash<br>
+          <b>② Tên màn</b> — đổi tên class kỹ thuật sang tên thân thiện<br>
+          <b>③ Snowplow endpoint</b> — đổi nơi nhận event không build app
+        </div>
+      </div>
+      <div class="card green" style="padding:14px">
+        <div class="label">⚡ SSE PUSH — APP NHẬN NGAY</div>
+        <div class="body" style="font-size:13px;line-height:1.55">
+          Bấm <b>💾 Lưu</b> → Portal push qua <b>Server-Sent Events</b> xuống mọi app đang mở.<br>
+          App reload config <b>~500ms</b> · không kill app · không build lại.
+        </div>
+      </div>
+      <div style="background:#fff5cf;border:2px solid var(--dark);border-radius:10px;padding:10px 14px;font-size:13px">
+        <b>Nguyên tắc:</b> mọi hành vi tracking đều có thể chỉnh tại Portal — đội mobile không cần release version mỗi lần đổi.
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 75 GIÂY</div>
+    <p>Đây là tab <b>Config (remote)</b> trên Portal — chỗ điều khiển toàn bộ hành vi SDK <b>không cần build lại app</b>.</p>
+    <p>Ba nhóm chính: bật/tắt auto-capture, đổi tên màn, chỉ định nơi nhận event. Bấm Lưu — Portal push qua SSE xuống mọi app đang mở, app reload trong nửa giây.</p>
+    <p>Đây là điểm khác biệt với Firebase: muốn đổi tên event ở Firebase phải build lại app, qua App Store / Play Store. UniTrack thì chỉnh trực tiếp trên Portal.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · PORTAL CẤU HÌNH</div>
+  <div class="pgnum">10 / 20</div>
+</section>
+
+<!-- ============== SLIDE 11: SDK — CÁC TÍNH NĂNG CHÍNH ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--yellow)">SDK · 1/2</div>
+  <span class="kicker yellow">● SDK NHÚNG VÀO APP — TỰ ĐỘNG BẮT EVENT</span>
+  <h2 class="title">SDK · <span class="hl">các tính năng chính</span></h2>
+
+  <div class="grid cols-3" style="gap:14px;align-items:stretch">
+    <div class="card yellow" style="padding:14px">
+      <div style="font-size:30px">🎯</div>
+      <div class="label" style="margin-top:6px">AUTO-CAPTURE</div>
+      <div class="h" style="font-size:15px">6 loại event miễn phí</div>
+      <div class="body" style="font-size:12.5px;line-height:1.55">
+        tap · screen_view · network · crash · app_start · lifecycle —<br>
+        App <b>không viết 1 dòng track()</b>. SDK swizzle / hook tự bắt.
+      </div>
+    </div>
+    <div class="card blue" style="padding:14px">
+      <div style="font-size:30px">📡</div>
+      <div class="label" style="margin-top:6px">HOT CONFIG</div>
+      <div class="h" style="font-size:15px">Lấy cấu hình realtime</div>
+      <div class="body" style="font-size:12.5px;line-height:1.55">
+        Mở SSE channel xuống Portal — nghe thay đổi cấu hình.<br>
+        Operator save → app reload trong ~500ms, không build lại.
+      </div>
+    </div>
+    <div class="card green" style="padding:14px">
+      <div style="font-size:30px">🏗</div>
+      <div class="label" style="margin-top:6px">CROSS-PLATFORM</div>
+      <div class="h" style="font-size:15px">4 platform · 1 lõi C++</div>
+      <div class="body" style="font-size:12.5px;line-height:1.55">
+        iOS · Android · Flutter · React Native — chung 1 core C++,<br>
+        ~70% logic dùng chung. API parity giữa các nền tảng.
+      </div>
+    </div>
+    <div class="card red" style="padding:14px">
+      <div style="font-size:30px">📦</div>
+      <div class="label" style="margin-top:6px">OFFLINE-SAFE</div>
+      <div class="h" style="font-size:15px">Crash + offline recovery</div>
+      <div class="body" style="font-size:12.5px;line-height:1.55">
+        App crash giữa chừng — event vẫn gửi lại lần mở sau.<br>
+        Session_id + index persist qua restart.
+      </div>
+    </div>
+    <div class="card dark" style="padding:14px;color:#fff">
+      <div style="font-size:30px">🔌</div>
+      <div class="label" style="margin-top:6px;color:#f7c948">FAN-OUT</div>
+      <div class="h" style="font-size:15px;color:#fff">Provider mở rộng</div>
+      <div class="body" style="font-size:12.5px;line-height:1.55;color:#e5e7eb">
+        1 event → N destination song song.<br>
+        Snowplow + Firebase + Portal cùng nhận, isolated lỗi.
+      </div>
+    </div>
+    <div class="card yellow" style="padding:14px;border:3px solid var(--red);background:#fff5cf">
+      <div style="font-size:30px">🎫</div>
+      <div class="label" style="margin-top:6px;color:var(--red)">★ ĐIỂM CỐT LÕI</div>
+      <div class="h" style="font-size:15px">Quản lý <code style="color:var(--red)">tracking_id</code></div>
+      <div class="body" style="font-size:12.5px;line-height:1.55">
+        Sinh UUID 1:1 với session_id, gắn lên mọi event Snowplow.<br>
+        → đây là <b>tính năng quan trọng nhất</b>, sẽ phân tích kỹ ở slide tiếp.
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>SDK có <b>6 tính năng chính</b>:</p>
+    <p><b>Auto-capture</b> 6 loại event miễn phí — app không viết track tay. <b>Hot config</b> qua SSE — đổi cấu hình realtime. <b>Cross-platform</b> 4 nền tảng chung 1 core C++. <b>Offline-safe</b> — app crash event vẫn gửi lại. <b>Fan-out</b> 1 event đi nhiều destination.</p>
+    <p>Và quan trọng nhất: <b>quản lý tracking_id</b> — sinh UUID cho mỗi session, gắn vào mọi event đẩy Snowplow. Đây là chìa khoá của toàn bộ platform, slide sau em đi sâu vào cơ chế.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · TÍNH NĂNG</div>
+  <div class="pgnum">11 / 20</div>
+</section>
+
+<!-- ============== SLIDE 12: SDK — TẠO TRACKING_ID ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">SDK · 2/2</div>
+  <span class="kicker red">● MỖI SESSION = 1 UUID DUY NHẤT, GẮN VÀO MỌI EVENT</span>
+  <h2 class="title">SDK · cách sinh <code style="color:var(--red);font-size:32px">tracking_id</code></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:stretch">
+    <!-- LEFT: lifecycle -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card red" style="padding:14px">
+        <div class="label">🎫 KHI NÀO SINH TRACKING_ID MỚI?</div>
+        <div class="body" style="font-size:13px;line-height:1.6">
+          ① <b>Cold start</b> — app mở lần đầu sau cài / kill<br>
+          ② <b>Timeout 30 phút</b> — user idle quá lâu, session cũ chết<br>
+          ③ <b>Manual rotate</b> — gọi <code>UniTrack.rotateSession()</code> khi logout / switch account
+        </div>
+      </div>
+      <div class="card blue" style="padding:14px">
+        <div class="label">🔬 CƠ CHẾ SINH</div>
+        <div class="body" style="font-size:12.5px;line-height:1.6">
+          Chuẩn <b>UUID v4 RFC 4122</b> — 122 bit random từ <code>std::random_device</code> + 6 bit cố định (version + variant).<br>
+          Persist vào <code>session.json</code> trong app sandbox · 1:1 với <code>session_id</code>.<br>
+          Resume cùng tracking_id nếu session chưa timeout.
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: where it lands -->
+    <div style="background:#0f172a;border:2.5px solid var(--dark);border-radius:12px;padding:0;box-shadow:4px 4px 0 var(--dark);overflow:hidden;font-family:JetBrains Mono,monospace">
+      <div style="background:#020617;color:#94a3b8;padding:8px 14px;font-size:11px">Payload mọi event → Snowplow</div>
+      <pre style="margin:0;padding:14px;font-size:11.5px;line-height:1.6;color:#e2e8f0;white-space:pre-wrap">{
+  <span style="color:#86efac">"schema"</span>: <span style="color:#fde047">"iglu:com.fpt/click/jsonschema/1-0-0"</span>,
+  <span style="color:#86efac">"data"</span>: {
+    <span style="color:#86efac">"event_action"</span>: <span style="color:#fde047">"click"</span>,
+    <span style="color:#86efac">"element_key"</span>: <span style="color:#fde047">"btn_pair_camera"</span>,
+    <span style="color:#86efac">"screen"</span>:      <span style="color:#fde047">"HomeVC"</span>,
+
+    <span style="color:#ef4444">"session_id"</span>:  <span style="color:#fde047">"c389a45b-…"</span>,
+    <span style="color:#ef4444">"tracking_id"</span>: <span style="color:#fde047">"a3c14e2f-bb87-4d2e-9912-1c79b8a09b8d"</span>,
+
+    <span style="color:#86efac">"timestamp"</span>:   <span style="color:#fde047">"2026-06-15T08:33:05.421Z"</span>
+  }
+}</pre>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 75 GIÂY</div>
+    <p>Tracking_id sinh ra khi nào? 3 trường hợp: cold start (lần mở đầu sau cài / kill app), timeout 30 phút inactivity, hoặc manual khi logout.</p>
+    <p>Cơ chế sinh: chuẩn <b>UUID v4 RFC 4122</b> — 122 bit random, đảm bảo unique toàn cầu. Persist vào file <code>session.json</code> trong app sandbox, 1:1 với session_id. Nếu user mở app lại trong 30 phút, dùng lại cùng tracking_id.</p>
+    <p>Sau khi sinh, SDK <b>tự stamp vào property của mọi event</b> trước khi đẩy Snowplow. Bên phải là payload thật — session_id + tracking_id nằm trong data. Đây là chìa khoá để tra cứu ở slide cuối.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · TRACKING_ID</div>
+  <div class="pgnum">12 / 20</div>
+</section>
+
+<!-- ============== SLIDE 13: PORTAL — LƯU SESSION + TRACKING_ID ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">PORTAL · 2/2</div>
+  <span class="kicker red">● PORTAL NHẸ — CHỈ LƯU MAPPING, KHÔNG LƯU EVENT</span>
+  <h2 class="title">Portal · <span class="hl red">lưu session + tracking_id</span></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:stretch">
+    <!-- LEFT: Portal sessions table mockup -->
+    <div style="background:#fff;border:2.5px solid var(--dark);border-radius:12px;padding:0;box-shadow:4px 4px 0 var(--dark);overflow:hidden">
+      <div style="background:#1f1f1f;color:#fff;padding:8px 14px;font-family:JetBrains Mono,monospace;font-size:11px">Portal · FPT Life Beta · Sessions</div>
+      <table style="width:100%;font-size:11.5px;border-collapse:collapse;font-family:JetBrains Mono,monospace">
+        <thead><tr style="background:#f7f7f7">
+          <th style="text-align:left;padding:7px;color:#666;font-weight:600">User</th>
+          <th style="text-align:left;padding:7px;color:#666;font-weight:600">Session ID</th>
+          <th style="text-align:left;padding:7px;color:#666;font-weight:600">Tracking ID</th>
+          <th style="text-align:left;padding:7px;color:#666;font-weight:600">Bắt đầu</th>
+        </tr></thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:7px">An</td><td style="padding:7px;font-size:10.5px">c12a45b8…</td><td style="padding:7px;font-size:10.5px;color:#666">b2d09e1f… 📋</td><td style="padding:7px">08:01</td></tr>
+          <tr style="background:#fff5cf;border-bottom:1px solid #f1f3f4"><td style="padding:7px"><b>An</b></td><td style="padding:7px;font-weight:700;font-size:10.5px">c389a45b…</td><td style="padding:7px;color:var(--red);font-weight:700;font-size:10.5px">a3c14e2f… 📋</td><td style="padding:7px">08:32</td></tr>
+          <tr style="border-bottom:1px solid #f1f3f4"><td style="padding:7px">An</td><td style="padding:7px;font-size:10.5px">c401b290…</td><td style="padding:7px;font-size:10.5px;color:#666">7f3e9d10… 📋</td><td style="padding:7px">09:15</td></tr>
+          <tr><td style="padding:7px">Bình</td><td style="padding:7px;font-size:10.5px">d8e21a09…</td><td style="padding:7px;font-size:10.5px;color:#666">f9a12c33… 📋</td><td style="padding:7px">09:22</td></tr>
+        </tbody>
+      </table>
+      <div style="padding:10px 14px;background:#e0f2fe;border-top:1px solid #ddd;font-size:11px;color:#075985">
+        Click 📋 để copy tracking_id · dùng tra cứu ở Snowplow
+      </div>
+    </div>
+
+    <!-- RIGHT: data model + endpoint -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card red" style="padding:14px">
+        <div class="label">📖 PORTAL LƯU GÌ?</div>
+        <div class="body" style="font-size:12.5px;line-height:1.6;font-family:JetBrains Mono,monospace">
+          <b>users</b>(user_id, app_id, first_seen)<br>
+          <b>sessions</b>(sid, user_id, <span style="color:var(--red);font-weight:700">tracking_id</span>, started_at)<br>
+          <span style="color:#7a0a0a">KHÔNG có bảng events</span>
+        </div>
+      </div>
+      <div style="background:#0f172a;border:2px solid var(--dark);border-radius:10px;padding:0;overflow:hidden;font-family:JetBrains Mono,monospace">
+        <div style="background:#020617;color:#94a3b8;padding:6px 12px;font-size:10.5px">SDK upsert mapping mỗi khi sinh session mới</div>
+        <pre style="margin:0;padding:12px;font-size:11px;line-height:1.55;color:#e2e8f0;white-space:pre-wrap"><span style="color:#7dd3fc">POST</span> /tracking-map
+{
+  <span style="color:#86efac">"user_id"</span>:     <span style="color:#fde047">"an@fpt.vn"</span>,
+  <span style="color:#86efac">"session_id"</span>:  <span style="color:#fde047">"c389a45b-…"</span>,
+  <span style="color:#86efac">"tracking_id"</span>: <span style="color:#fde047">"a3c14e2f-…"</span>
+}</pre>
+      </div>
+      <div style="background:#fff5cf;border:2px solid var(--dark);border-radius:10px;padding:10px 14px;font-size:12.5px">
+        <b>Vì sao Portal nhẹ?</b> Event nằm hết ở Snowplow. Portal chỉ giữ <b>3 trường mapping</b> → vài bytes / session, 100k user vẫn nhỏ.
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 60 GIÂY</div>
+    <p>Đây là tab <b>Sessions</b> trên Portal. Mỗi dòng = 1 session: user · session_id · <b>tracking_id</b> · thời gian bắt đầu. Click icon 📋 để copy tracking_id.</p>
+    <p>Portal chỉ có <b>2 bảng</b>: users + sessions. <b>Không có bảng events</b> — event nằm hết ở Snowplow. Mỗi lần SDK sinh session mới, gọi <code>POST /tracking-map</code> upsert mapping về Portal — chỉ vài bytes.</p>
+    <p>Điểm khác biệt: Portal không cần lưu hàng triệu event như Firebase / Snowplow — chỉ lưu sổ đăng ký nhẹ. Khi cần đào sâu, dùng tracking_id query Snowplow.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · PORTAL LƯU SESSION</div>
+  <div class="pgnum">13 / 20</div>
+</section>
+
+<!-- ============== SLIDE 14: DỰNG HÀNH TRÌNH USER TỪ TRACKING_ID ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--blue);color:#fff">USER JOURNEY</div>
+  <span class="kicker blue">● TỪ TRACKING_ID → FULL HÀNH TRÌNH USER</span>
+  <h2 class="title">Tái hiện <span class="hl blue">user-flow</span> bằng <code style="color:var(--red);font-size:32px">tracking_id</code></h2>
+
+  <div class="grid cols-2" style="gap:18px;align-items:stretch">
+    <!-- LEFT: Query Snowplow -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#fff;border:2px solid var(--dark);border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="font-weight:700;margin-bottom:6px">① User báo lỗi → QA mở Portal</div>
+        <div style="color:#666;font-size:12px">Tra user, thấy session crash lúc 08:32 → click 📋 copy tracking_id</div>
+      </div>
+      <div style="background:#0f172a;border:2px solid var(--dark);border-radius:10px;padding:0;overflow:hidden;font-family:JetBrains Mono,monospace">
+        <div style="background:#020617;color:#94a3b8;padding:6px 12px;font-size:11px">② Gửi tracking_id cho đội Snowplow query</div>
+        <pre style="margin:0;padding:12px;font-size:11.5px;line-height:1.55;color:#e2e8f0;white-space:pre-wrap"><span style="color:#7dd3fc">SELECT</span> ts, event_action, screen,
+       element_key, properties
+<span style="color:#7dd3fc">FROM</span>   snowplow_events
+<span style="color:#7dd3fc">WHERE</span>  tracking_id =
+       <span style="color:#fde047">'a3c14e2f-bb87-4d2e-9912-1c79b8a09b8d'</span>
+<span style="color:#7dd3fc">ORDER BY</span> ts <span style="color:#7dd3fc">ASC</span>;</pre>
+      </div>
+    </div>
+
+    <!-- RIGHT: Full journey output -->
+    <div style="background:#fff;border:2.5px solid var(--dark);border-radius:12px;padding:14px;box-shadow:4px 4px 0 var(--dark)">
+      <div style="font-family:JetBrains Mono,monospace;font-size:10.5px;color:var(--muted);margin-bottom:8px">③ KẾT QUẢ — FULL HÀNH TRÌNH SESSION</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+        <div style="padding:6px 10px;background:#e2e8f0;border-radius:6px"><b>📱 LoginVC</b> <span class="muted" style="font-size:11px">· 08:32:15</span></div>
+        <div style="padding:5px 10px 5px 22px;font-size:11.5px;color:#444">↳ click <code>btn_login</code></div>
+        <div style="padding:5px 10px 5px 22px;font-size:11.5px;color:#444">↳ POST <code>/auth/login</code> <span style="color:#2f8a4a">200</span> · 320ms</div>
+        <div style="padding:6px 10px;background:#cfe7ff;border-radius:6px"><b>📱 HomeVC</b> <span class="muted" style="font-size:11px">· 08:32:21</span></div>
+        <div style="padding:5px 10px 5px 22px;font-size:11.5px;color:#444">↳ click <code>btn_pair_camera</code></div>
+        <div style="padding:6px 10px;background:#fff5cf;border-radius:6px"><b>📱 CameraListVC</b> <span class="muted" style="font-size:11px">· 08:33:08</span></div>
+        <div style="padding:5px 10px 5px 22px;font-size:11.5px;color:#444">↳ GET <code>/cameras/list</code> <span style="color:#ea4335;font-weight:700">500</span> · 4,210ms</div>
+        <div style="padding:5px 10px 5px 22px;font-size:11.5px;color:#ea4335"><b>⚠ CRASH</b> · NSInternalInconsistency · 08:33:13</div>
+      </div>
+      <div style="margin-top:10px;padding:8px 10px;background:#d2eed8;border-left:3px solid var(--green);font-size:11.5px">
+        <b>Kết luận:</b> user crash do API <code>/cameras/list</code> trả 500 → forward backend team, không cần hỏi user.
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>Đây là kết quả cuối cùng của Platform Tracking — cái mà Firebase không cho mình thấy.</p>
+    <p>User An phản ánh app crash sáng nay. QA mở Portal, tra user An → thấy 3 session, có 1 session crash lúc 08:32 → click 📋 copy <b>tracking_id</b>.</p>
+    <p>Gửi tracking_id đó cho đội Snowplow. Họ chạy 1 câu SQL đơn giản: <code>WHERE tracking_id = '...'</code>, sort theo timestamp. Trả về full event timeline của session đó.</p>
+    <p>QA đọc và thấy ngay: user click pair camera → load CameraListVC → API <code>/cameras/list</code> trả 500 → 5 giây sau crash. Forward ngay cho team backend — không cần ngồi hỏi user thêm. Đây là cái Firebase không cho mình được: tái hiện 1 session cụ thể, end-to-end, dùng đúng 1 cái UUID làm chìa khoá.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · USER JOURNEY</div>
+  <div class="pgnum">14 / 20</div>
+</section>
+
+<!-- ============== SLIDE 7: 6 EVENT MIỄN PHÍ ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--yellow)">AUTO-CAPTURE</div>
+  <span class="kicker yellow">● APP CHỈ CẦN INIT — SDK TỰ FIRE</span>
+  <h2 class="title">6 loại event <span class="hl">miễn phí</span>, không viết 1 dòng track</h2>
+  <table>
+    <tr><th>EVENT</th><th>TRIGGER</th><th>PAYLOAD</th></tr>
+    <tr><td class="mono">click</td><td>Mọi UIButton / View / Pressable nhận touch</td><td class="mono">element_key, screen, class_name, framework</td></tr>
+    <tr><td class="mono">screen_view</td><td>Navigation push / pop / replace</td><td class="mono">screen, screen_name, load_ms, from_screen, previous_screen_name</td></tr>
+    <tr><td class="mono">network_request</td><td>Mọi HTTP outbound</td><td class="mono">url, method, status, duration_ms, bytes, <b style="color:var(--red)">trace_id</b></td></tr>
+    <tr><td class="mono">app_start</td><td>Cold start</td><td class="mono">cold_start_ms, app_version, locale, model</td></tr>
+    <tr><td class="mono">app_fg / app_bg</td><td>Lifecycle</td><td class="mono">reason, dwell_sec, foreground_sec</td></tr>
+    <tr><td class="mono">crash</td><td>Native signal trap (SIGSEGV / SIGTRAP)</td><td class="mono">signal, frames, recovered_on_launch</td></tr>
+  </table>
+  <div class="card blue">
+    <div class="body" style="font-size:15px">
+      ↺ Backend session IDE biết <b>"user bấm nút loại gì, ở màn nào, khung React/Flutter/native nào"</b> — mà app
+      <b>không cần khai báo</b>. Trace_id 128-bit gắn sẵn vào mọi <code>network_request</code> — đây là chìa khoá nối lên L2.
+    </div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 2 PHÚT</div>
+    <p>6 loại event SDK tự bắn — không viết dòng code nào.</p>
+    <p><b>click</b> — mọi UIButton, View, Pressable. <b>screen_view</b> — bắt qua swizzle UIViewController / Navigator. <b>network_request</b> — qua URLProtocol / OkHttp interceptor. Và <b>cực kỳ quan trọng</b>: mọi request đi ra đều có <code>trace_id</code> gắn sẵn — đây là chìa khoá cho L2.</p>
+    <p><b>crash</b> — bắt native signal. Đây là điểm Snowplow gốc không có: họ chỉ bắt NSException Obj-C, không bắt Swift runtime trap như <code>array out of bounds</code>.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · AUTO-CAPTURE</div>
+  <div class="pgnum">15 / 20</div>
+</section>
+
+<!-- ============== SLIDE 9: REMOTE CONFIG ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--green);color:#fff">REMOTE CONFIG</div>
+  <span class="kicker green">● 8 CẶP ENDPOINT · APPID · 4 DROPZONE FIREBASE · CUSTOM VALUES</span>
+  <h2 class="title">Đổi hành vi tracking <span class="hl green">không cần build</span></h2>
+  <div class="grid cols-2">
+    <div class="card dark">
+      <div class="label">GET /CONFIG</div>
+      <pre class="code" style="margin:8px 0 0;border:none;box-shadow:none;padding:8px 0">
+{
+  <span class="s">"version"</span>: <span class="n">14</span>,
+  <span class="s">"sdk_config"</span>: {
+    <span class="s">"trackTaps"</span>: <span class="v">false</span>,    <span class="c">← tắt auto-tap</span>
+    <span class="s">"trackNetwork"</span>: <span class="v">true</span>
+  },
+  <span class="s">"snowplow"</span>: {
+    <span class="s">"event_names"</span>: {
+      <span class="s">"click"</span>: <span class="s">"event_isc_click"</span>  <span class="c">← rename</span>
+    }
+  },
+  <span class="s">"firebase"</span>: { <span class="s">"enabled"</span>: <span class="v">true</span> },
+  <span class="s">"custom_values"</span>: {
+    <span class="s">"feature_x"</span>: <span class="v">true</span>,            <span class="c">← thay Firebase RC</span>
+    <span class="s">"ab_bucket"</span>: <span class="n">2</span>
+  }
+}</pre>
+    </div>
+    <div>
+      <div class="card yellow" style="margin-bottom:14px"><div class="label">①</div><div class="h">8 cặp endpoint · appId</div>
+        <div class="body">2 platform (iOS + Android) × 4 flavor (dev/staging/beta/prod) — + 4 dropzone Firebase kéo-thả <code>.plist</code> / <code>google-services.json</code>.</div></div>
+      <div class="card blue" style="margin-bottom:14px"><div class="label">②</div><div class="h">Đổi tên event / tắt auto-tap</div>
+        <div class="body">Uncheck <code>trackTaps</code> hoặc đổi <code>click: event_isc_click</code> → Save. <b>0 dòng code</b>, app fetch lần mở sau.</div></div>
+      <div class="card red"><div class="label">③</div><div class="h">Custom values — feature flag</div>
+        <div class="body"><code>getRemoteString("feature_x")</code> — resolve order portal → Firebase RC → default. Export/Import JSON để clone sang project mới.</div></div>
+    </div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 90 GIÂY</div>
+    <p>Điểm nữa: <b>đổi tracking không cần build app</b>. App fetch <code>/config</code> lúc init.</p>
+    <p>3 thứ đáng chú ý: <b>(1)</b> 8 cặp endpoint × appId cho Snowplow + 4 dropzone Firebase plist kéo thẳng portal. <b>(2)</b> Đổi tên event hoặc tắt auto-tap → Save → app fetch lần sau apply ngay. <b>(3)</b> Custom values như feature flag — resolve order portal → Firebase RC → default.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · REMOTE CONFIG</div>
+  <div class="pgnum">16 / 20</div>
+</section>
+<!-- ============== SLIDE 10.5: 8-LAYER ARCHITECTURE ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--red);color:#fff">8 LAYER</div>
+  <span class="kicker red">● ZOOM-IN · KIẾN TRÚC OBSERVABILITY CHUẨN OPENTELEMETRY</span>
+  <h2 class="title">Đi sâu: 8 layer từ <span class="hl">tap KTV</span> đến <span class="hl red">Auto-ticket cho ISC</span></h2>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+    <div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <!-- L1 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#d2eed8;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#0a4a1f;font-weight:700">L1 · CLIENT LAYER (✓ ĐÃ CÓ)</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#5cc97a;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Mobile app</span>
+            <span style="background:#5cc97a;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">SDK C++ (trace_id)</span>
+            <span style="background:#5cc97a;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Local AI agents ⏳</span>
+          </div>
+        </div>
+        <!-- L2 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#e7e0ff;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a1f7a;font-weight:700">L2 · EDGE LAYER</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">API Gateway (W3C trace propagation)</span>
+          </div>
+        </div>
+        <!-- L3 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#e7e0ff;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a1f7a;font-weight:700">L3 · BACKEND SERVICES LAYER</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Microservices + OTel SDK</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Service mesh (sidecar)</span>
+          </div>
+        </div>
+        <!-- L4 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#e7e0ff;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a1f7a;font-weight:700">L4 · DATA LAYER</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Database</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Cache</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Message queue</span>
+          </div>
+        </div>
+        <!-- L5 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#e7e0ff;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a1f7a;font-weight:700">L5 · TELEMETRY PIPELINE</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">OTel Collector (sampling + schema)</span>
+          </div>
+        </div>
+        <!-- L6 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#e7e0ff;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a1f7a;font-weight:700">L6 · STORAGE LAYER</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Traces</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Logs</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Metrics</span>
+            <span style="background:#6b4cb8;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Service catalog</span>
+          </div>
+        </div>
+        <!-- L7 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#ffd6cf;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#7a0a0a;font-weight:700">L7 · AI INTELLIGENCE LAYER (MỞ RỘNG)</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#ff6b5b;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Root agent</span>
+            <span style="background:#ff6b5b;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Correlator</span>
+            <span style="background:#ff6b5b;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Anomaly + RCA</span>
+            <span style="background:#ff6b5b;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Report agent</span>
+          </div>
+        </div>
+        <!-- L8 -->
+        <div style="border:2.5px solid var(--dark);border-radius:10px;padding:8px 12px;background:#fff5cf;box-shadow:3px 3px 0 var(--dark)">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#7a5a00;font-weight:700">L8 · OUTPUT LAYER</div>
+          <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <span style="background:#5cc97a;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Dashboard (portal hôm nay)</span>
+            <span style="background:#888;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Alerts</span>
+            <span style="background:#888;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Auto-tickets</span>
+            <span style="background:#888;color:#fff;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1.5px solid #1f1f1f">Reports</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card green" style="margin-bottom:12px">
+        <div class="label">✓ UNITRACK ĐÃ ĐÓNG (L1 + một phần L8)</div>
+        <div class="body" style="font-size:13.5px">
+          • L1: SDK + auto-capture + W3C trace_id<br>
+          • L8: Portal dashboard + session IDE + agent report cơ bản<br>
+          <span style="color:#0a4a1f;font-weight:700">→ Hôm nay tôi share xong cái này.</span>
+        </div>
+      </div>
+      <div class="card blue" style="margin-bottom:12px">
+        <div class="label">🟣 L2 → L6 · ĐƯỜNG PIPELINE CỐT LÕI (xin team)</div>
+        <div class="body" style="font-size:13.5px">
+          Trace từ mobile chỉ ý nghĩa khi nối liền với log/metric của backend.
+          Cần đồng nhất <b>OpenTelemetry SDK + OTel Collector</b> để 5 layer này nói cùng 1 schema.
+          <br><br>
+          <b>Service mesh sidecar (Istio/Linkerd)</b> giúp service legacy không thay code vẫn propagate được trace.
+        </div>
+      </div>
+      <div class="card red" style="margin-bottom:12px">
+        <div class="label">🔴 L7 · AI LAYER (vision)</div>
+        <div class="body" style="font-size:13.5px">
+          <b>Root agent</b> orchestrate · <b>Correlator</b> map trace↔log↔metric ·
+          <b>Anomaly + RCA</b> phát hiện + giải thích nguyên nhân ·
+          <b>Report agent</b> sinh báo cáo daily cho ISC.
+        </div>
+      </div>
+      <div class="card yellow">
+        <div class="label">🟡 L8 · ACTION LAYER (vision)</div>
+        <div class="body" style="font-size:13.5px">
+          Khi L7 detect ra sự cố: <b>tự tạo ticket</b> cho team service liên quan, <b>alert</b> Telegram/Slack vào đúng channel — KTV không cần raise tay.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 5 PHÚT (slide kiến trúc lớn — chậm rãi, dừng lại từng layer)</div>
+    <p>Slide trước tôi tóm 3 layer cho dễ hiểu. Bây giờ tôi zoom-in thành <b>8 layer thật</b> — chính là kiến trúc observability chuẩn theo OpenTelemetry mà big tech đang dùng.</p>
+    <p><b>L1 Client</b> — Mobile app + SDK + trace_id. <b>UniTrack đã đóng xong cái này.</b> Slot Local AI agents tôi để mở — đây là roadmap edge inference trên device, không cần lên cloud.</p>
+    <p><b>L2 Edge</b> — API Gateway phải đón <code>traceparent</code> header từ mobile. Đây là cửa ngõ duy nhất, nếu L2 mất trace thì cả pipeline đứt.</p>
+    <p><b>L3 Backend services</b> — mỗi microservice cần OTel SDK để tự sinh span cùng trace_id. Với service legacy không thay được code, ta dùng <b>Service mesh sidecar</b> — Istio hoặc Linkerd — sidecar tự bơm trace context.</p>
+    <p><b>L4 Data</b> — DB, Cache, Message queue cũng phải <b>truyền trace context</b>. Postgres có extension log query với trace_id. Redis/Kafka có header passthrough.</p>
+    <p><b>L5 Telemetry pipeline</b> — OTel Collector ngồi giữa. Nhận trace từ mọi layer, sampling, normalize schema, route sang storage. Không có L5 thì storage sẽ ngập với data raw.</p>
+    <p><b>L6 Storage</b> — 3 store riêng biệt: Traces (Jaeger/Tempo), Logs (Loki/Elasticsearch), Metrics (Prometheus). Plus 1 Service catalog mô tả service nào do team nào quản lý — quan trọng cho L7.</p>
+    <p><b>L7 AI Intelligence</b> — mới là phần đột phá. 4 agent: <b>Root agent</b> điều phối. <b>Correlator</b> map trace ↔ log ↔ metric ↔ service catalog. <b>Anomaly + RCA</b> phát hiện bất thường và tự giải thích nguyên nhân gốc. <b>Report agent</b> sinh báo cáo cho ISC.</p>
+    <p><b>L8 Output</b> — đây là chỗ ISC tương tác: Dashboard (portal hôm nay đã có), Alerts vào đúng channel team, <b>Auto-tickets</b> tự fire vào Jira/Linear khi L7 detect issue.</p>
+    <p>Đây là bài toán dài hơi. UniTrack hôm nay đã đóng L1. Phần còn lại tôi sẽ xin 3 hướng góp ý cụ thể ở slide kế.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · 8-LAYER ARCHITECTURE</div>
+  <div class="pgnum">17 / 20</div>
+</section>
+
+<!-- ============== SLIDE 12: FLOW MOBILE → BACKEND → SYSTEM ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--blue);color:#fff">FULL TRACE</div>
+  <span class="kicker">● 1 TAP CỦA KTV → ĐI XUYÊN HỆ THỐNG</span>
+  <h2 class="title">Hành trình end-to-end: <span class="hl blue">tap → service → DB</span></h2>
+
+  <svg viewBox="0 0 1140 360" class="diagram" style="width:100%;height:auto">
+    <defs>
+      <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#1f1f1f"/>
+      </marker>
+      <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#c00"/>
+      </marker>
+    </defs>
+
+    <!-- L1 Mobile -->
+    <rect x="20" y="30" width="220" height="240" rx="14" fill="#fff5cf" stroke="#1f1f1f" stroke-width="2.5"/>
+    <text x="40" y="56" font-family="JetBrains Mono,monospace" font-size="12" font-weight="700">L1 · MOBILE — KTV TAP</text>
+    <rect x="40" y="72" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="50" y="92" font-family="JetBrains Mono,monospace" font-size="11">1. Tap "Pair Camera"</text>
+    <rect x="40" y="108" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="50" y="128" font-family="JetBrains Mono,monospace" font-size="11">2. SDK fire event_click</text>
+    <rect x="40" y="144" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="50" y="164" font-family="JetBrains Mono,monospace" font-size="11">3. App gọi POST /pairing</text>
+    <rect x="40" y="180" width="180" height="50" rx="6" fill="#ffd6cf" stroke="#c00" stroke-width="2"/>
+    <text x="50" y="200" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700" fill="#c00">4. SDK gắn header:</text>
+    <text x="50" y="216" font-family="JetBrains Mono,monospace" font-size="10" fill="#c00">traceparent: 00-abc...-def...-01</text>
+    <text x="40" y="252" font-family="JetBrains Mono,monospace" font-size="10" fill="#666">+ session_id + screen + element_key</text>
+
+    <line x1="245" y1="200" x2="280" y2="200" stroke="#c00" stroke-width="2.5" marker-end="url(#ar3)"/>
+
+    <!-- L2 Gateway -->
+    <rect x="285" y="30" width="220" height="240" rx="14" fill="#cfe7ff" stroke="#1f1f1f" stroke-width="2.5"/>
+    <text x="305" y="56" font-family="JetBrains Mono,monospace" font-size="12" font-weight="700">L2 · API GATEWAY</text>
+    <rect x="305" y="72" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="315" y="92" font-family="JetBrains Mono,monospace" font-size="11">5. Đọc traceparent</text>
+    <rect x="305" y="108" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="315" y="128" font-family="JetBrains Mono,monospace" font-size="11">6. Log: gateway_in</text>
+    <rect x="305" y="144" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="315" y="164" font-family="JetBrains Mono,monospace" font-size="11">7. Route → svc-camera</text>
+    <rect x="305" y="180" width="180" height="50" rx="6" fill="#ffd6cf" stroke="#c00" stroke-width="2"/>
+    <text x="315" y="200" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700" fill="#c00">8. Propagate header:</text>
+    <text x="315" y="216" font-family="JetBrains Mono,monospace" font-size="10" fill="#c00">traceparent: 00-abc...-XYZ...-01</text>
+    <text x="305" y="252" font-family="JetBrains Mono,monospace" font-size="10" fill="#666">Span: gateway → service</text>
+
+    <line x1="510" y1="200" x2="545" y2="200" stroke="#c00" stroke-width="2.5" marker-end="url(#ar3)"/>
+
+    <!-- L2.5 Service -->
+    <rect x="550" y="30" width="220" height="240" rx="14" fill="#d2eed8" stroke="#1f1f1f" stroke-width="2.5"/>
+    <text x="570" y="56" font-family="JetBrains Mono,monospace" font-size="12" font-weight="700">L2 · MICRO-SERVICE</text>
+    <rect x="570" y="72" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="580" y="92" font-family="JetBrains Mono,monospace" font-size="11">9. svc-camera nhận</text>
+    <rect x="570" y="108" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="580" y="128" font-family="JetBrains Mono,monospace" font-size="11">10. Query DB</text>
+    <rect x="570" y="144" width="180" height="30" rx="6" fill="#fff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="580" y="164" font-family="JetBrains Mono,monospace" font-size="11">11. Call svc-billing</text>
+    <rect x="570" y="180" width="180" height="50" rx="6" fill="#ffd6cf" stroke="#c00" stroke-width="2"/>
+    <text x="580" y="200" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700" fill="#c00">12. ❌ Lỗi 500:</text>
+    <text x="580" y="216" font-family="JetBrains Mono,monospace" font-size="10" fill="#c00">DB timeout — log với trace_id</text>
+    <text x="570" y="252" font-family="JetBrains Mono,monospace" font-size="10" fill="#666">Span: db_query + error</text>
+
+    <line x1="775" y1="200" x2="810" y2="200" stroke="#1f1f1f" stroke-width="2" marker-end="url(#ar2)"/>
+
+    <!-- L3 Warehouse + AI -->
+    <rect x="815" y="30" width="305" height="240" rx="14" fill="#fff" stroke="#1f1f1f" stroke-width="2.5"/>
+    <text x="835" y="56" font-family="JetBrains Mono,monospace" font-size="12" font-weight="700">L3 · WAREHOUSE + AI</text>
+    <rect x="835" y="72" width="265" height="40" rx="6" fill="#cfe7ff" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="845" y="90" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">13. Aggregate by trace_id</text>
+    <text x="845" y="105" font-family="JetBrains Mono,monospace" font-size="10">mobile + gateway + service + db</text>
+    <rect x="835" y="118" width="265" height="40" rx="6" fill="#d2eed8" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="845" y="136" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">14. AI anomaly detect</text>
+    <text x="845" y="151" font-family="JetBrains Mono,monospace" font-size="10">err_rate svc-camera spike → flag</text>
+    <rect x="835" y="164" width="265" height="40" rx="6" fill="#ffd6cf" stroke="#c00" stroke-width="2"/>
+    <text x="845" y="182" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700" fill="#c00">15. ALERT ISC ngay lập tức</text>
+    <text x="845" y="197" font-family="JetBrains Mono,monospace" font-size="10" fill="#c00">trước khi KTV chụp Tele</text>
+    <rect x="835" y="210" width="265" height="40" rx="6" fill="#fff5cf" stroke="#1f1f1f" stroke-width="1.5"/>
+    <text x="845" y="228" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">16. Dashboard full journey</text>
+    <text x="845" y="243" font-family="JetBrains Mono,monospace" font-size="10">tap → gateway → svc → db_query</text>
+
+    <!-- Snowplow + Portal bottom -->
+    <rect x="20" y="290" width="750" height="40" rx="10" fill="#fef9e7" stroke="#1f1f1f" stroke-width="2" stroke-dasharray="6 3"/>
+    <text x="40" y="315" font-family="JetBrains Mono,monospace" font-size="11">Song song: SDK cũng fan-out event analytics → Snowplow + Firebase + Portal nội bộ</text>
+  </svg>
+
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 2 PHÚT (giải thích diagram)</div>
+    <p>Đây là một <b>tap thật của KTV</b> đi xuyên hệ thống:</p>
+    <p><b>L1 Mobile (vàng)</b>: KTV tap "Pair Camera" → SDK fire event_click + auto gọi POST /pairing. Khi outbound HTTP, SDK <b>tự gắn header traceparent</b>.</p>
+    <p><b>L2 Gateway (xanh)</b>: đọc traceparent, log, propagate header xuống service.</p>
+    <p><b>L2 Service (xanh lá)</b>: nhận, query DB, gọi svc-billing. Gặp lỗi DB timeout → log với cùng trace_id.</p>
+    <p><b>L3 Warehouse + AI (đỏ)</b>: tổng hợp mọi log theo trace_id, AI quét, phát hiện anomaly → <b>alert ISC ngay</b> trước khi KTV chụp Telegram.</p>
+  </div>
+  <div class="foot">UNITRACK SDK · FULL TRACE FLOW</div>
+  <div class="pgnum">18 / 20</div>
+</section>
+
+<!-- ============== SLIDE 13: OPEN QUESTIONS ============== -->
+<section class="slide">
+  <div class="corner" style="background:var(--yellow)">CẦN GÓP Ý</div>
+  <span class="kicker yellow">● MỞ THẢO LUẬN · 3 CÂU HỎI CHO TEAM</span>
+  <h2 class="title">Các câu hỏi tôi cần <span class="hl">các anh em</span> góp ý</h2>
+  <div class="grid cols-3">
+    <div class="card blue">
+      <div class="label">① L2 → L4 · PIPELINE BACKEND</div>
+      <div class="h">OTel SDK + Gateway + Data?</div>
+      <div class="body">
+        Đề xuất: API Gateway parse <code>traceparent</code> → microservice gắn <b>OTel SDK</b> → DB/Cache/Queue truyền trace context.
+        <br><br>
+        <b>❓ Gateway nào của ISC sẵn sàng đón vai trò này?</b><br>
+        ❓ Service legacy không thay code được — dùng <b>service mesh sidecar</b> (Istio/Linkerd) ổn không?
+      </div>
+    </div>
+    <div class="card green">
+      <div class="label">② L5 → L7 · TELEMETRY + AI</div>
+      <div class="h">Collector + Storage + Agent?</div>
+      <div class="body">
+        Đề xuất: OTel Collector → Tempo/Loki/Prometheus → AI agent (Anomaly + RCA + Report).
+        <br><br>
+        ❓ Team nào đã có Tempo/Loki production để leverage?<br>
+        <b>❓ Anomaly rules ưu tiên: error rate, latency, hay journey drop?</b>
+      </div>
+    </div>
+    <div class="card red">
+      <div class="label">③ L8 + EXPANSION</div>
+      <div class="h">Action layer + onboard?</div>
+      <div class="body">
+        L8: Dashboard đã có. Cần xác định Alert channel (Telegram? Slack?), Auto-tickets vào đâu (Jira? Linear?).
+        <br><br>
+        <b>❓ Project mobile nào nên onboard UniTrack tiếp?</b><br>
+        ❓ Cần thêm provider gì ngoài Snowplow + Firebase?
+      </div>
+    </div>
+  </div>
+  <div class="card dark">
+    <div class="label">CAM KẾT TỪ PHÍA SDK</div>
+    <div class="body">
+      ✓ Trace_id 128-bit chuẩn W3C — không vendor lock-in (OpenTelemetry / Datadog / Jaeger / Tempo đều đọc được).<br>
+      ✓ Bất kỳ project mobile nào onboard chỉ 3 dòng code init — em hỗ trợ trực tiếp.<br>
+      ✓ Portal đã production, lưu trữ + retention sẵn sàng cho more project.
+    </div>
+  </div>
+  <div class="script">
+    <div class="lbl">📢 SCRIPT — 2 PHÚT (mở thảo luận)</div>
+    <p>Trước khi tổng kết, tôi xin 3 góp ý từ các anh em.</p>
+    <p><b>①</b> L2 Backend Gateway: trace_id từ mobile đi xuống, ai đón? Nginx? Kong? API gateway nội bộ? Và service nào chưa có trace_id, mình ưu tiên onboard?</p>
+    <p><b>②</b> L3 Warehouse + AI: ý tưởng pipeline event chảy xuống warehouse — BigQuery hoặc ClickHouse — AI agent quét daily. Nhưng start từ đâu? Error rate spike? Latency tăng? Journey drop ở 1 màn cụ thể?</p>
+    <p><b>③</b> Mở rộng UniTrack: project nào nên onboard tiếp? Provider gì khác cần thêm?</p>
+  </div>
+  <div class="foot">UNITRACK SDK · OPEN QUESTIONS</div>
+  <div class="pgnum">19 / 20</div>
+</section>
+
+<!-- ============== SLIDE 14: CẢM ƠN ============== -->
+<section class="slide cover">
+  <div class="tag">UNITRACK SDK · INTERNAL TECH SHARING</div>
+  <h1 style="font-size:96px;font-weight:900;margin:24px 0 16px;letter-spacing:-.04em">
+    Cảm ơn <span class="hl blue" style="font-size:96px;padding:8px 24px">mọi người</span>
+  </h1>
+  <p class="subtitle" style="max-width:720px;font-size:20px">
+    Em sẵn sàng demo trực tiếp portal: <b>session IDE</b> + <b>config UI</b> + <b>agent report</b> — ngay sau Q&A.
+  </p>
+  <div style="display:flex;gap:32px;margin-top:32px;flex-wrap:wrap;justify-content:center">
+    <div class="card yellow" style="text-align:left;min-width:280px">
+      <div class="label">LINK NHANH</div>
+      <div class="body">
+        🌐 Portal: <code>https://mobix.asia</code><br>
+        💻 GitHub: <code>github.com/sieuvitdet/unitrack-sdk</code><br>
+        📦 SwiftPackage / JitPack / pub.dev / npm
+      </div>
+    </div>
+    <div class="card green" style="text-align:left;min-width:280px">
+      <div class="label">LIÊN HỆ</div>
+      <div class="body">
+        Trần Tấn Đức · Ductt19<br>
+        Slack / Telegram: @ductt19
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:32px;font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--muted)">
+    Trần Tấn Đức · <span style="color:var(--red);font-weight:700">Ductt19</span>
+  </p>
+  <div class="script" style="max-width:760px;text-align:left;margin-top:24px">
+    <div class="lbl">📢 SCRIPT — 30 GIÂY</div>
+    <p>Cảm ơn các anh em đã dành thời gian. Rất mong nhận được góp ý — đặc biệt là 3 câu hỏi vừa rồi.</p>
+    <p>Em sẵn sàng demo nhanh portal nếu mọi người muốn xem trực tiếp một session IDE thực tế. Hoặc Q&A trước cũng được.</p>
+  </div>
+  <div class="pgnum">20 / 20</div>
+</section>
+
+</div>
+</body>
+</html>

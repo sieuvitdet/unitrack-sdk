@@ -6,14 +6,24 @@ header: 'UniTrack · slide 02/10'
 footer: 'Tích hợp UniTrack vào FPT Life'
 ---
 
-# Tầm nhìn: **3 dòng code = 30 events**
+# Tầm nhìn: 3 mục tiêu cốt lõi
+
+UniTrack được thiết kế xoay quanh **3 đích duy nhất** — mọi quyết định API, dependency, packaging đều phải phục vụ 1 trong 3:
+
+1. **4 platform — 1 source code.** iOS / Android / Flutter / React Native cùng dùng 1 lõi C++ (queue, batch, transport, session, sampling, crash). Sửa 1 bug → cả 4 platform được fix. Code per-platform chỉ là binding mỏng (swizzle / JNI / MethodChannel / RN bridge).
+2. **Triển khai nhanh — 1 dòng init.** Drop package, viết 1 dòng `UniTrack.initialize(apiKey:)`, screen / tap / network / crash tự bắt. Không phải wire từng event như Snowplow / Firebase SDK gốc.
+3. **Tracking là mục tiêu duy nhất.** UniTrack là analytics SDK. Provider Firebase chỉ mirror sang **Firebase Analytics** (cho marketing funnel / audience). KHÔNG wrap Messaging / Crashlytics / Remote Config — đó là việc của Firebase SDK trực tiếp, không phải của analytics layer.
+
+---
+
+## **3 dòng code = 30 events**
 
 App tích hợp UniTrack chỉ cần:
 
 ```swift
-UniTrack.initialize(apiKey: "utk_…")     // 1 dòng → init SDK + 4 provider
+UniTrack.initialize(apiKey: "utk_…")     // 1 dòng → init SDK + auto-capture
 UniTrack.addProvider(SnowplowProvider()) // 2 dòng → Snowplow tự fan-out
-UniTrack.addProvider(FirebaseProvider()) // 3 dòng → Firebase + portal mirror
+UniTrack.addProvider(FirebaseProvider()) // 3 dòng → Firebase Analytics mirror
 ```
 
 Sau đó: **không viết thêm code tracking nào** cho:

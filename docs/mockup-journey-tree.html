@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>UniTrack · User Flow · Playback Camera</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111827; --panel2:#0f172a; --line:#1f2937;
+    --text:#e5e7eb; --muted:#94a3b8; --accent:#3b82f6; --accent2:#60a5fa;
+    --danger:#ef4444; --warn:#f59e0b; --ok:#22c55e; --tid:#f43f5e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:13px;overflow:hidden}
+
+  *::-webkit-scrollbar{width:6px;height:6px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:#1f2937;border-radius:3px}
+  *::-webkit-scrollbar-thumb:hover{background:#334155}
+  *{scrollbar-width:thin;scrollbar-color:#1f2937 transparent}
+
+  .topbar{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);position:relative;z-index:5}
+  .topbar .back{color:var(--muted);text-decoration:none;font-size:12px}
+  .topbar .back:hover{color:var(--text)}
+
+  .metaCard{padding:14px 18px;background:var(--panel);border-bottom:1px solid var(--line);position:relative;z-index:5}
+  .metaRow{display:flex;flex-wrap:wrap;align-items:center;gap:14px 28px}
+  .metaItem{display:flex;flex-direction:column;gap:2px}
+  .metaItem .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .metaItem .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px}
+  .tidPill{background:#3f1d2a;color:var(--tid);padding:5px 12px;border-radius:14px;
+           border:1px solid #7f1d1d;font-family:"JetBrains Mono",ui-monospace,monospace;
+           font-weight:700;font-size:12.5px;cursor:pointer}
+  .actions{margin-left:auto;display:flex;gap:8px}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);
+       padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer}
+  .btn:hover{background:#1e293b}
+  .btn.danger{background:transparent;border-color:#7f1d1d;color:#fca5a5}
+
+  .floatbar{position:absolute;top:14px;left:14px;background:var(--panel);
+            border:1px solid var(--line);border-radius:8px;padding:6px 10px;
+            display:flex;align-items:center;gap:8px;font-size:12px;z-index:6;
+            box-shadow:0 4px 12px #00000044}
+  .floatbar button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+                   padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;min-width:30px}
+  .floatbar button:hover{background:#1e293b}
+  .floatbar .zoom{font-family:"JetBrains Mono",ui-monospace,monospace;color:var(--muted);min-width:50px;text-align:center}
+  .floatbar .sep{width:1px;height:18px;background:var(--line);margin:0 4px}
+
+  .summary{position:absolute;top:14px;right:14px;background:var(--panel);
+           border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:11px;z-index:6;
+           font-family:"JetBrains Mono",ui-monospace,monospace;display:flex;gap:18px;align-items:center;
+           box-shadow:0 4px 12px #00000044}
+  .summary .met{display:flex;flex-direction:column;gap:2px}
+  .summary .met .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+  .summary .met .v{font-size:14px;font-weight:700}
+  .summary .met .v.warn{color:var(--warn)}
+  .summary .met .v.ok{color:var(--ok)}
+
+  .legend{position:absolute;bottom:14px;left:14px;background:var(--panel);
+          border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:11px;z-index:6;
+          display:flex;align-items:center;gap:14px}
+  .legend .lg{display:flex;align-items:center;gap:6px}
+  .legend .swatch{width:14px;height:8px;border-radius:2px}
+  .legend .swatch.ok{background:#22c55e}
+  .legend .swatch.warn{background:#f59e0b}
+  .legend .swatch.err{background:#ef4444}
+
+  .canvas{position:absolute;inset:120px 0 0 0;cursor:grab;overflow:hidden;background:
+    radial-gradient(circle at 20% 30%, #1e293b 0, transparent 60%),
+    radial-gradient(circle at 80% 70%, #1e293b 0, transparent 60%),
+    var(--bg)}
+  .canvas.dragging{cursor:grabbing}
+  .canvas svg{width:100%;height:100%;display:block;user-select:none}
+
+  .nd{cursor:pointer;transition:filter .15s}
+  .nd:hover{filter:brightness(1.15) drop-shadow(0 0 12px var(--accent2))}
+  .nd.selected rect.bg{stroke:var(--warn);stroke-width:2.5}
+
+  .scrim{position:fixed;inset:0;background:#00000088;z-index:9;opacity:0;pointer-events:none;transition:opacity .2s}
+  .scrim.open{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:460px;background:var(--panel);
+          border-left:1px solid var(--line);transform:translateX(100%);transition:transform .25s;
+          z-index:10;display:flex;flex-direction:column}
+  .drawer.open{transform:translateX(0)}
+  .drawer .dh{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .drawer .dh h3{margin:0;font-size:14px;font-weight:700;flex:1}
+  .drawer .dh .sub{font-size:11px;color:var(--muted);font-family:"JetBrains Mono",ui-monospace,monospace;margin-top:2px}
+  .drawer .dh button{background:transparent;border:none;color:var(--muted);font-size:18px;cursor:pointer}
+  .drawer .db{padding:14px 18px;overflow:auto;flex:1}
+  .drawer .kv{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px}
+  .drawer .kv .k{width:90px;color:var(--muted);flex-shrink:0}
+  .drawer .kv .v{font-family:"JetBrains Mono",ui-monospace,monospace;word-break:break-all;flex:1}
+  .drawer h4{margin:16px 0 8px;font-size:12.5px;color:var(--accent2);font-weight:700}
+  .drawer pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+              padding:10px;font-size:11px;line-height:1.5;overflow:auto;max-height:200px;
+              font-family:"JetBrains Mono",ui-monospace,monospace;margin:0}
+  .drawer .chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
+                font-family:"JetBrains Mono",ui-monospace,monospace;margin-right:4px;margin-bottom:4px}
+  .drawer .chip.api{background:#14532d;color:#bbf7d0}
+  .drawer .chip.tap{background:#312e81;color:#c7d2fe}
+  .drawer .chip.scr{background:#1e3a8a;color:#bfdbfe}
+  .drawer .insight{margin-top:14px;padding:10px;background:#1e3a8a44;border-left:3px solid var(--accent);border-radius:4px;font-size:11.5px;line-height:1.5}
+  .drawer .apiRow{display:flex;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:7px;margin-bottom:6px;font-size:12px;background:var(--panel2);align-items:center}
+  .drawer .apiRow .method{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;
+                          padding:1px 6px;border-radius:3px;font-size:10.5px}
+  .drawer .apiRow .method.get{background:#0c4a6e;color:#bae6fd}
+  .drawer .apiRow .method.post{background:#14532d;color:#bbf7d0}
+  .drawer .apiRow .url{flex:1;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drawer .apiRow .status{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:700;padding:1px 6px;border-radius:3px}
+  .drawer .apiRow .status.ok{background:#16a34a33;color:#86efac}
+  .drawer .apiRow .status.warn{background:#ca8a0433;color:#fcd34d}
+  .drawer .apiRow .status.err{background:#dc262633;color:#fca5a5}
+  .drawer .apiRow .ms{color:var(--muted);font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;white-space:nowrap}
+
+  .mockupTag{position:fixed;top:8px;right:8px;background:var(--warn);color:#000;
+             padding:4px 10px;border-radius:4px;font-size:11px;font-weight:700;z-index:99}
+</style>
+</head>
+<body>
+<div class="mockupTag">MOCKUP · USE CASE PLAYBACK CAMERA</div>
+
+<div class="topbar">
+  <a href="#" class="back">← Quay lại Sessions</a>
+  <div style="font-size:13px;font-weight:600">User Flow · Hành trình "Mở playback camera"</div>
+  <div class="actions">
+    <button class="btn" onclick="location.href='./mockup-journey.html'">↔ Đổi sang dạng list</button>
+  </div>
+</div>
+
+<div class="metaCard">
+  <div class="metaRow">
+    <div class="metaItem"><div class="k">Session ID</div><div class="v">0c58f18f-b9df-4490-a8eb-aecf365a372e</div></div>
+    <div class="metaItem"><div class="k">Tracking ID</div>
+      <div class="tidPill">a3c14e2f-bb87-4d2e-9912-1c79b8a09b8d 📋</div></div>
+    <div class="metaItem"><div class="k">User ID</div><div class="v">584252dd…</div></div>
+    <div class="metaItem"><div class="k">Platform</div><div class="v">iOS 26.5 · iPhone16,1</div></div>
+    <div class="metaItem"><div class="k">App</div><div class="v">FPT Life · 2.16.1</div></div>
+    <div class="actions">
+      <button class="btn">↻ Re-import</button>
+      <button class="btn danger">🗑 Xoá</button>
+    </div>
+  </div>
+</div>
+
+<div class="canvas" id="canvas">
+  <div class="floatbar">
+    <button onclick="zoom(-0.15)" title="Thu nhỏ">−</button>
+    <div class="zoom" id="zoomLbl">100%</div>
+    <button onclick="zoom(0.15)" title="Phóng to">+</button>
+    <div class="sep"></div>
+    <button onclick="reset()" title="Reset zoom & pan">⊙ Reset</button>
+    <div class="sep"></div>
+    <span style="color:var(--muted);font-size:11px">Cuộn = zoom · Kéo = pan · Click màn = chi tiết</span>
+  </div>
+
+  <div class="summary">
+    <div class="met"><div class="k">Tổng flow</div><div class="v" id="sumDur">12.4s</div></div>
+    <div class="met"><div class="k">Màn</div><div class="v" id="sumScr">5</div></div>
+    <div class="met"><div class="k">API call</div><div class="v ok" id="sumApi">18/18 ok</div></div>
+    <div class="met"><div class="k">Tap</div><div class="v" id="sumTap">4</div></div>
+    <div class="met"><div class="k">Lỗi</div><div class="v ok" id="sumErr">0</div></div>
+  </div>
+
+  <div class="legend">
+    <div class="lg"><div class="swatch ok"></div>API 2xx</div>
+    <div class="lg"><div class="swatch warn"></div>chậm (&gt;1s)</div>
+    <div class="lg"><div class="swatch err"></div>4xx/5xx</div>
+    <div class="lg"><span style="color:var(--muted)">→ tap dẫn sang màn kế</span></div>
+  </div>
+
+  <svg id="svg" viewBox="0 0 2400 720">
+    <defs>
+      <marker id="arrEnd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#60a5fa"/>
+      </marker>
+      <marker id="arrBranch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#f59e0b"/>
+      </marker>
+    </defs>
+    <g id="world"></g>
+  </svg>
+</div>
+
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="dh">
+    <div style="flex:1">
+      <h3 id="drawerTitle">Chi tiết</h3>
+      <div class="sub" id="drawerSub"></div>
+    </div>
+    <button onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="db" id="drawerBody"></div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+// USE CASE: User đăng nhập sẵn → mở app → tap An ninh →
+// chọn camera → bấm Phát lại → vào màn Playback
+// 5 màn, mỗi màn show 3-5 API và 1 tap dẫn sang màn kế tiếp
+// ─────────────────────────────────────────────────────────
+const SESSION = {
+  session_id: '0c58f18f-b9df-4490-a8eb-aecf365a372e',
+  tracking_id: 'a3c14e2f-bb87-4d2e-9912-1c79b8a09b8d',
+  user_id: '584252dd-c117-4e35-9bbf-fe034dde4fce',
+  platform: 'iOS 26.5 · iPhone16,1',
+  app_version: '2.16.1',
+};
+
+// Node model: id + col (cột x 0..N) + row (hàng y, 0 = main row, -1 = branch trên,
+// 1 = branch dưới). Edge model: from→to + label (tap action) + delay (s) +
+// optional branch:true (vẽ cong nhánh ngoài).
+const SCREENS = [
+  {
+    id:'sc_home', name:'HomeVC', col:0, row:0,
+    enter:'10:00:00.000', exit:'10:00:03.215', dur:3.21,
+    apis:[
+      { m:'GET', u:'/api/v3/home/feed', s:200, ms:412 },
+      { m:'GET', u:'/api/v3/user/profile', s:200, ms:110 },
+      { m:'GET', u:'/api/v3/notifications/unread', s:200, ms:89 },
+      { m:'GET', u:'/api/v3/banners/active', s:200, ms:142 },
+    ],
+  },
+  {
+    id:'sc_sec', name:'SecurityVC (An ninh tab)', col:1, row:0,
+    enter:'10:00:03.495', exit:'10:00:05.602', dur:2.11,
+    apis:[
+      { m:'GET', u:'/api/v3/cameras/list', s:200, ms:621 },
+      { m:'GET', u:'/api/v3/cameras/online-status', s:200, ms:198 },
+      { m:'POST', u:'/api/v3/mqtt/connect-info/v2/', s:200, ms:557 },
+    ],
+  },
+  // BRANCH B (nhánh dưới): user tap icon noti → list noti → tap noti camera
+  {
+    id:'sc_noti', name:'NotificationListVC', col:2, row:1, branch:'B',
+    enter:'10:00:05.715', exit:'10:00:07.090', dur:1.38,
+    apis:[
+      { m:'GET', u:'/api/v3/notifications?page=1', s:200, ms:534 },
+      { m:'GET', u:'/api/v3/notifications/preview', s:200, ms:198 },
+      { m:'POST', u:'/api/v3/notifications/mark-seen', s:200, ms:91 },
+    ],
+  },
+  // Main path tiếp tục
+  {
+    id:'sc_live', name:'LiveCameraVC', col:2, row:0,
+    enter:'10:00:05.912', exit:'10:00:09.483', dur:3.57,
+    apis:[
+      { m:'GET', u:'/api/v3/camera/{id}/info', s:200, ms:230 },
+      { m:'GET', u:'/api/v3/camera/{id}/events?limit=20', s:200, ms:1124, slow:true },
+      { m:'POST', u:'/api/v3/camera/{id}/stream/token', s:200, ms:381 },
+      { m:'POST', u:'/api/v3/camera/{id}/stream/start', s:200, ms:201 },
+    ],
+  },
+  {
+    id:'sc_event', name:'CameraEventsVC', col:3, row:0,
+    enter:'10:00:09.705', exit:'10:00:11.298', dur:1.59,
+    apis:[
+      { m:'GET', u:'/api/v3/camera/{id}/events?from=...&to=...', s:200, ms:489 },
+      { m:'GET', u:'/api/v3/camera/{id}/thumbnails', s:200, ms:287 },
+    ],
+  },
+  {
+    id:'sc_play', name:'PlaybackVC', col:4, row:0, isLast:true,
+    enter:'10:00:11.478', exit:'10:00:12.420', dur:0.94,
+    apis:[
+      { m:'GET', u:'/api/v3/event/{id}/playback-url', s:200, ms:198 },
+      { m:'GET', u:'/api/v3/event/{id}/meta', s:200, ms:112 },
+      { m:'POST', u:'/api/v3/event/{id}/playback/start', s:200, ms:241 },
+    ],
+  },
+];
+
+// EDGES: from id → to id, with tap label + delay between exit→enter
+const EDGES = [
+  // MAIN path A — Camera list flow
+  { from:'sc_home',  to:'sc_sec',   tap:'tap_tab_security',    lbl:'"An ninh"',           delay:0.28 },
+  { from:'sc_sec',   to:'sc_live',  tap:'tap_camera_item[0]',  lbl:'"Camera phòng khách"', delay:0.31 },
+  { from:'sc_live',  to:'sc_event', tap:'btn_playback',        lbl:'"Phát lại"',          delay:0.22 },
+  { from:'sc_event', to:'sc_play',  tap:'tap_event_item[2]',   lbl:'"Sự kiện 09:42"',     delay:0.18 },
+  // BRANCH B — Notification shortcut
+  { from:'sc_sec',   to:'sc_noti',  tap:'tap_noti_icon',       lbl:'"🔔 thông báo"',      delay:0.11, branch:true },
+  { from:'sc_noti',  to:'sc_play',  tap:'tap_noti_item',       lbl:'"Camera phát hiện chuyển động"', delay:0.39, branch:true },
+];
+
+// Aggregate summary metrics
+const TOTAL_API = SCREENS.reduce((a,s)=>a+s.apis.length, 0);
+const TOTAL_API_OK = SCREENS.reduce((a,s)=>a+s.apis.filter(x=>x.s>=200&&x.s<300).length, 0);
+const TOTAL_API_ERR = TOTAL_API - TOTAL_API_OK;
+const TOTAL_TAP = EDGES.length;
+const TOTAL_DUR = (
+  (new Date('2026-06-12 ' + SCREENS.find(s=>s.isLast).exit) -
+   new Date('2026-06-12 ' + SCREENS[0].enter)) / 1000
+).toFixed(1);
+document.getElementById('sumDur').textContent = TOTAL_DUR + 's';
+document.getElementById('sumScr').textContent = SCREENS.length + ' (1 nhánh)';
+document.getElementById('sumApi').textContent = `${TOTAL_API_OK}/${TOTAL_API} ok`;
+document.getElementById('sumApi').className = 'v ' + (TOTAL_API_ERR ? 'warn' : 'ok');
+document.getElementById('sumTap').textContent = TOTAL_TAP;
+document.getElementById('sumErr').textContent = TOTAL_API_ERR;
+document.getElementById('sumErr').className = 'v ' + (TOTAL_API_ERR ? 'err' : 'ok');
+
+// id lookup
+const byId = {}; SCREENS.forEach(s => { byId[s.id] = s; });
+// outgoing edges per node — for footer chip on card
+SCREENS.forEach(s => { s.outgoing = EDGES.filter(e => e.from === s.id); });
+
+// ─────────────────────────────────────────────────────────
+// LAYOUT — col → x, row → y
+// ─────────────────────────────────────────────────────────
+const NODE_W = 320;
+const NODE_BASE_H = 80;
+const NODE_API_H = 22;
+const NODE_FOOT_H = 30;
+function nodeH(s){
+  return NODE_BASE_H + (s.apis.length * NODE_API_H) + (s.outgoing.length ? NODE_FOOT_H * Math.min(s.outgoing.length,2) + 6 : 12);
+}
+const COL_W = NODE_W + 90;
+const ROW_H = 320;
+const ROW_Y_MAIN = 320;
+
+function layout(){
+  SCREENS.forEach(s => {
+    s.x = 80 + s.col * COL_W + NODE_W/2;
+    s.y = ROW_Y_MAIN + s.row * ROW_H;
+  });
+  const maxCol = Math.max(...SCREENS.map(s=>s.col));
+  const lastX = 80 + maxCol * COL_W + NODE_W + 80;
+  const maxRow = Math.max(...SCREENS.map(s=>s.row));
+  const maxH = Math.max(...SCREENS.map(nodeH));
+  const bottom = ROW_Y_MAIN + maxRow * ROW_H + maxH/2 + 80;
+  document.getElementById('svg').setAttribute('viewBox', `0 0 ${lastX} ${bottom}`);
+}
+layout();
+
+// ─────────────────────────────────────────────────────────
+// RENDER SVG
+// ─────────────────────────────────────────────────────────
+const svgNS = 'http://www.w3.org/2000/svg';
+const world = document.getElementById('world');
+function el(tag, attrs={}){
+  const e = document.createElementNS(svgNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function statusColor(s){
+  if (s >= 500) return '#ef4444';
+  if (s >= 400) return '#f59e0b';
+  return '#22c55e';
+}
+
+// Compute step labels: main path 1..N, branch row 1 = 'B1', 'B2' …
+const MAIN_ORDER = SCREENS.filter(s=>s.row===0).sort((a,b)=>a.col-b.col).map(s=>s.id);
+const BRANCH_ORDER = SCREENS.filter(s=>s.row!==0).sort((a,b)=>a.col-b.col).map(s=>s.id);
+const stepLabel = {};
+MAIN_ORDER.forEach((id, i) => { stepLabel[id] = String(i+1); });
+BRANCH_ORDER.forEach((id, i) => { stepLabel[id] = 'B' + (i+1); });
+
+function drawScreenCard(s){
+  const h = nodeH(s);
+  const x = s.x - NODE_W/2, y = s.y - h/2;
+  const g = el('g', { class:'nd', transform:`translate(${x},${y})` });
+
+  // background
+  const branchFill = s.row !== 0 ? '#1c1208' : '#0c1426';
+  const branchStroke = s.row !== 0 ? '#78350f' : '#334155';
+  const bg = el('rect', { x:0, y:0, width:NODE_W, height:h, rx:14,
+    fill:branchFill, stroke:branchStroke, 'stroke-width':1.5, class:'bg' });
+  g.appendChild(bg);
+
+  // step badge — round / wider for branch label
+  const lblTxt = stepLabel[s.id] || '?';
+  const isBranchBadge = lblTxt.startsWith('B');
+  const badgeW = isBranchBadge ? 28 : 26;
+  const badgeBg = el('rect', { x:5, y:8, width:badgeW, height:26, rx:13,
+    fill: isBranchBadge ? '#f59e0b' : '#3b82f6' });
+  g.appendChild(badgeBg);
+  const it = el('text', { x:5+badgeW/2, y:26, 'text-anchor':'middle', fill:'#fff',
+    'font-size':12, 'font-weight':800, 'font-family':'JetBrains Mono, monospace' });
+  it.textContent = lblTxt;
+  g.appendChild(it);
+
+  // name
+  const name = el('text', { x:42, y:23, fill:'#f1f5f9',
+    'font-size':13.5, 'font-weight':700, 'font-family':'JetBrains Mono, monospace' });
+  name.textContent = s.name.length>28?s.name.slice(0,26)+'…':s.name;
+  g.appendChild(name);
+
+  // dur (top right)
+  const dur = el('text', { x:NODE_W-14, y:23, 'text-anchor':'end',
+    fill: s.dur>2 ? '#fbbf24' : '#94a3b8',
+    'font-size':12, 'font-weight':700, 'font-family':'JetBrains Mono, monospace' });
+  dur.textContent = '⏱ ' + s.dur.toFixed(2) + 's';
+  g.appendChild(dur);
+
+  // sub line: enter→exit
+  const sub = el('text', { x:42, y:40, fill:'#94a3b8',
+    'font-size':10.5, 'font-family':'JetBrains Mono, monospace' });
+  sub.textContent = `${s.enter}  →  ${s.exit}`;
+  g.appendChild(sub);
+
+  // divider
+  g.appendChild(el('line', { x1:12, y1:54, x2:NODE_W-12, y2:54, stroke:'#1f2937', 'stroke-width':1 }));
+
+  // section label
+  const apiLbl = el('text', { x:14, y:68, fill:'#60a5fa',
+    'font-size':10, 'font-weight':700, 'font-family':'JetBrains Mono, monospace',
+    'letter-spacing':0.4 });
+  apiLbl.textContent = `🌐 ${s.apis.length} API CALL`;
+  g.appendChild(apiLbl);
+
+  // API rows
+  s.apis.forEach((a, ai) => {
+    const ry = 76 + ai * NODE_API_H;
+    const meth = el('text', { x:14, y:ry+10, fill: a.m==='POST'?'#bbf7d0':'#bae6fd',
+      'font-size':10, 'font-weight':800, 'font-family':'JetBrains Mono, monospace' });
+    meth.textContent = a.m;
+    g.appendChild(meth);
+
+    const url = el('text', { x:54, y:ry+10, fill:'#cbd5e1',
+      'font-size':10.5, 'font-family':'JetBrains Mono, monospace' });
+    let u = a.u; if (u.length > 28) u = u.slice(0,26)+'…';
+    url.textContent = u;
+    g.appendChild(url);
+
+    // status dot
+    const dot = el('circle', { cx:NODE_W-58, cy:ry+6, r:4, fill: statusColor(a.s) });
+    g.appendChild(dot);
+    const st = el('text', { x:NODE_W-48, y:ry+10, fill: statusColor(a.s),
+      'font-size':10, 'font-weight':700, 'font-family':'JetBrains Mono, monospace' });
+    st.textContent = a.s;
+    g.appendChild(st);
+    // ms
+    const ms = el('text', { x:NODE_W-12, y:ry+10, 'text-anchor':'end',
+      fill: a.slow?'#fbbf24':'#94a3b8',
+      'font-size':10, 'font-family':'JetBrains Mono, monospace' });
+    ms.textContent = a.ms + 'ms';
+    g.appendChild(ms);
+  });
+
+  // FOOT: list các tap dẫn ra (có thể 0/1/N)
+  let fy = 76 + s.apis.length * NODE_API_H + 8;
+  if (s.outgoing.length === 0) {
+    // Final goal flag
+    const goal = el('text', { x:NODE_W/2, y:fy+12, 'text-anchor':'middle',
+      fill:'#86efac', 'font-size':11.5, 'font-weight':700,
+      'font-family':'JetBrains Mono, monospace' });
+    goal.textContent = '🎯 Đích đến của flow';
+    g.appendChild(goal);
+  } else {
+    g.appendChild(el('line', { x1:12, y1:fy, x2:NODE_W-12, y2:fy, stroke:'#1f2937', 'stroke-width':1 }));
+    // 1 chip per outgoing tap
+    s.outgoing.forEach((e, ei) => {
+      const cy = fy + 8 + ei * 26;
+      const chipBg = e.branch ? '#78350f' : '#1e1b4b';
+      const chipStroke = e.branch ? '#f59e0b' : '#4338ca';
+      const chipFg = e.branch ? '#fde68a' : '#c7d2fe';
+      const tapBg = el('rect', { x:12, y:cy, width:NODE_W-24, height:22, rx:11,
+        fill:chipBg, stroke:chipStroke, 'stroke-width':1 });
+      g.appendChild(tapBg);
+      const tap = el('text', { x:NODE_W/2, y:cy+14.5, 'text-anchor':'middle',
+        fill:chipFg, 'font-size':10.5, 'font-weight':600,
+        'font-family':'JetBrains Mono, monospace' });
+      const txt = `${e.branch?'⤴':'👆'} ${e.tap} → ${e.lbl}`;
+      tap.textContent = txt.length > 50 ? txt.slice(0,48)+'…' : txt;
+      g.appendChild(tap);
+    });
+  }
+
+  g.addEventListener('click', (ev)=> {
+    ev.stopPropagation();
+    document.querySelectorAll('.nd.selected').forEach(n=>n.classList.remove('selected'));
+    g.classList.add('selected');
+    openDrawer(s);
+  });
+
+  world.appendChild(g);
+}
+
+// EDGES — render từ EDGES array, support branch curves
+EDGES.forEach(e => {
+  const a = byId[e.from], b = byId[e.to];
+  if (!a || !b) return;
+
+  const ha = nodeH(a), hb = nodeH(b);
+  // Anchor: nếu cùng row → đi ngang. Nếu khác row → đi từ bottom/top.
+  let x1, y1, x2, y2, path;
+  const stroke = e.branch ? '#f59e0b' : '#60a5fa';
+  const marker = e.branch ? 'url(#arrBranch)' : 'url(#arrEnd)';
+  const dash = e.branch ? '6 4' : '';
+
+  if (a.row === b.row && b.col > a.col){
+    // same row, simple horizontal arrow
+    x1 = a.x + NODE_W/2; y1 = a.y;
+    x2 = b.x - NODE_W/2; y2 = b.y;
+    path = `M ${x1} ${y1} L ${x2} ${y2}`;
+  } else if (b.row > a.row){
+    // going down to branch row: exit from bottom of a, enter top of b
+    x1 = a.x; y1 = a.y + ha/2;
+    x2 = b.x; y2 = b.y - hb/2;
+    // orthogonal then bezier curve into target
+    const midY = (y1 + y2) / 2;
+    path = `M ${x1} ${y1} C ${x1} ${midY+20}, ${x2} ${midY-20}, ${x2} ${y2}`;
+  } else if (b.row < a.row){
+    // going up
+    x1 = a.x; y1 = a.y - ha/2;
+    x2 = b.x; y2 = b.y + hb/2;
+    const midY = (y1 + y2) / 2;
+    path = `M ${x1} ${y1} C ${x1} ${midY-20}, ${x2} ${midY+20}, ${x2} ${y2}`;
+  } else {
+    // same row but b.col < a.col? skip
+    return;
+  }
+
+  const p = el('path', { d:path, stroke, 'stroke-width':2.5, 'stroke-dasharray':dash,
+    fill:'none', 'marker-end':marker });
+  world.appendChild(p);
+
+  // Label — show tap name + delay
+  const label = `${e.lbl} · ${e.delay}s`;
+  const w = Math.min(240, label.length * 6.5 + 16);
+  let lblX, lblY;
+  if (a.row === b.row){
+    lblX = (x1+x2)/2; lblY = y1 - 28;
+  } else {
+    // for branch arcs: place label at midpoint vertically, slightly offset
+    lblX = (x1+x2)/2;
+    lblY = (y1+y2)/2;
+  }
+  const bg = el('rect', { x:lblX - w/2, y:lblY - 12, width:w, height:24, rx:12,
+    fill:'#0c1426', stroke:e.branch?'#78350f':'#475569', 'stroke-width':1.2 });
+  world.appendChild(bg);
+  const t = el('text', { x:lblX, y:lblY+5, 'text-anchor':'middle',
+    fill:e.branch?'#fcd34d':'#dbeafe',
+    'font-size':10.5, 'font-family':'JetBrains Mono, monospace' });
+  t.textContent = label;
+  world.appendChild(t);
+});
+
+// NODES
+SCREENS.forEach((s) => drawScreenCard(s));
+
+// ─────────────────────────────────────────────────────────
+// ZOOM + PAN
+// ─────────────────────────────────────────────────────────
+const svg = document.getElementById('svg');
+const canvas = document.getElementById('canvas');
+const zoomLbl = document.getElementById('zoomLbl');
+
+let view = { x:0, y:0, scale:1 };
+function applyView(){
+  world.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.scale})`);
+  zoomLbl.textContent = Math.round(view.scale*100) + '%';
+}
+applyView();
+
+function zoom(d, cx, cy){
+  const old = view.scale;
+  const next = Math.max(0.2, Math.min(3, view.scale + d));
+  if (cx==null) { cx = canvas.clientWidth/2; cy = canvas.clientHeight/2; }
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const vx = (cx - rect.left) * (vb.width / rect.width);
+  const vy = (cy - rect.top) * (vb.height / rect.height);
+  view.x = vx - (vx - view.x) * (next / old);
+  view.y = vy - (vy - view.y) * (next / old);
+  view.scale = next;
+  applyView();
+}
+function reset(){ view = {x:0,y:0,scale:1}; applyView(); }
+
+canvas.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  zoom(e.deltaY > 0 ? -0.1 : 0.1, e.clientX, e.clientY);
+}, {passive:false});
+
+let drag = null;
+canvas.addEventListener('pointerdown', (e)=>{
+  if (e.target.closest('.nd')) return;
+  drag = { sx:e.clientX, sy:e.clientY, vx:view.x, vy:view.y };
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', (e)=>{
+  if (!drag) return;
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const scaleX = vb.width / rect.width, scaleY = vb.height / rect.height;
+  view.x = drag.vx + (e.clientX - drag.sx) * scaleX;
+  view.y = drag.vy + (e.clientY - drag.sy) * scaleY;
+  applyView();
+});
+canvas.addEventListener('pointerup', ()=>{ drag = null; canvas.classList.remove('dragging'); });
+canvas.addEventListener('dblclick', reset);
+canvas.addEventListener('click', (e)=>{ if (!e.target.closest('.nd')) closeDrawer(); });
+
+// ─────────────────────────────────────────────────────────
+// DRAWER
+// ─────────────────────────────────────────────────────────
+const drawer = document.getElementById('drawer');
+const scrim = document.getElementById('scrim');
+const title = document.getElementById('drawerTitle');
+const subL = document.getElementById('drawerSub');
+const body = document.getElementById('drawerBody');
+function closeDrawer(){
+  drawer.classList.remove('open');
+  scrim.classList.remove('open');
+  document.querySelectorAll('.nd.selected').forEach(n=>n.classList.remove('selected'));
+}
+function escHtml(s){ return String(s).replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+
+function openDrawer(s){
+  scrim.classList.add('open');
+  drawer.classList.add('open');
+  title.textContent = `Bước ${stepLabel[s.id]} · ${s.name}`;
+  subL.textContent = `${s.enter} → ${s.exit} · ${s.dur.toFixed(2)}s${s.row!==0?' · NHÁNH PHỤ':''}`;
+
+  const okCount = s.apis.filter(a=>a.s>=200&&a.s<300).length;
+  const slowCount = s.apis.filter(a=>a.ms>1000).length;
+  const errCount = s.apis.length - okCount;
+
+  const chips = [
+    `<span class="chip api">🌐 ${s.apis.length} API</span>`,
+    `<span class="chip" style="background:${errCount?'#7f1d1d':'#14532d'};color:${errCount?'#fecaca':'#bbf7d0'}">${okCount}/${s.apis.length} 2xx</span>`,
+  ];
+  if (slowCount) chips.push(`<span class="chip" style="background:#78350f;color:#fcd34d">⚠ ${slowCount} chậm</span>`);
+  if (s.outgoing.length) chips.push(`<span class="chip tap">👆 ${s.outgoing.length} tap dẫn ra</span>`);
+  if (s.row !== 0) chips.push(`<span class="chip" style="background:#78350f;color:#fde68a">⤴ nhánh phụ</span>`);
+
+  const totalApiMs = s.apis.reduce((a,x)=>a+x.ms,0);
+
+  const apiList = s.apis.map(a=>`
+    <div class="apiRow">
+      <span class="method ${a.m.toLowerCase()}">${a.m}</span>
+      <span class="url" title="${escHtml(a.u)}">${escHtml(a.u)}</span>
+      <span class="status ${a.s>=500?'err':(a.s>=400?'warn':'ok')}">${a.s}</span>
+      <span class="ms" style="${a.slow?'color:var(--warn);font-weight:700':''}">${a.ms}ms</span>
+    </div>
+  `).join('');
+
+  const tapList = s.outgoing.map(e=>`
+    <div class="apiRow" style="border-color:${e.branch?'#78350f':'#4338ca'}">
+      <span class="method" style="background:${e.branch?'#78350f':'#312e81'};color:${e.branch?'#fde68a':'#c7d2fe'}">TAP</span>
+      <span class="url">${escHtml(e.tap)} · ${escHtml(e.lbl)}</span>
+      <span class="ms">→ ${escHtml(byId[e.to].name.split(' ')[0])} · ${e.delay}s</span>
+    </div>
+  `).join('');
+
+  body.innerHTML = `
+    <div style="margin-bottom:12px">${chips.join('')}</div>
+
+    <div class="kv"><div class="k">Enter</div><div class="v">${escHtml(s.enter)}</div></div>
+    <div class="kv"><div class="k">Exit</div><div class="v">${escHtml(s.exit)}</div></div>
+    <div class="kv"><div class="k">Foreground</div><div class="v">${s.dur.toFixed(2)} giây</div></div>
+    <div class="kv"><div class="k">API total</div><div class="v">${totalApiMs}ms cộng dồn (${(totalApiMs/s.dur/10).toFixed(0)}% thời gian màn)</div></div>
+
+    <h4>🌐 API calls (${s.apis.length})</h4>
+    ${apiList}
+
+    ${s.outgoing.length ? `
+      <h4>👆 Tap dẫn ra (${s.outgoing.length})</h4>
+      ${tapList}
+    ` : `
+      <h4>🎯 Đích đến</h4>
+      <div style="color:var(--ok);font-size:12.5px;padding:8px 12px;background:#14532d33;border-radius:6px;border-left:3px solid var(--ok)">
+        Đây là màn cuối của flow "Mở playback camera". User có thể đến đây qua nhiều đường khác nhau (xem nhánh trên sơ đồ).
+      </div>
+    `}
+
+    ${slowCount ? `
+      <div class="insight" style="background:#78350f33;border-left-color:var(--warn);color:#fde68a">
+        ⚠ Có ${slowCount} API mất &gt;1 giây. QA có thể forward team backend kiểm tra hiệu năng các endpoint này.
+      </div>
+    ` : ''}
+  `;
+}
+
+document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeDrawer(); });
+</script>
+</body>
+</html>
