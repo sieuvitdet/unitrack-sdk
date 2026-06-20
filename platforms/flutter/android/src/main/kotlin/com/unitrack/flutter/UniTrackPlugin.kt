@@ -111,6 +111,38 @@ class UniTrackPlugin : FlutterPlugin, MethodCallHandler {
             // which the standard Flutter codec encodes as a Dart Map.
             "pendingEventCounts" -> result.success(UniTrack.pendingEventCounts())
 
+            // ── Provider Adapters (Phase 6) ──────────────────────────────
+            "pendingProviderRetryCount" ->
+                result.success(UniTrack.pendingProviderRetryCount())
+
+            "addHttpProvider" -> {
+                val fmtIdx = call.argument<Int>("format") ?: 0
+                val format = when (fmtIdx) {
+                    1 -> com.unitrack.sdk.providers.PayloadFormat.JSON_LINES
+                    2 -> com.unitrack.sdk.providers.PayloadFormat.JSON_ARRAY
+                    3 -> com.unitrack.sdk.providers.PayloadFormat.ELASTIC_BULK
+                    else -> com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE
+                }
+                @Suppress("UNCHECKED_CAST")
+                val headers = (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
+                    .mapValues { it.value?.toString() ?: "" }
+                UniTrack.addHttpProvider(
+                    id              = call.argument<String>("id") ?: "http",
+                    endpoint        = call.argument<String>("endpoint") ?: "",
+                    format          = format,
+                    headers         = headers,
+                    batchSize       = call.argument<Int>("batchSize") ?: 50,
+                    flushIntervalMs = (call.argument<Int>("flushIntervalMs") ?: 30_000).toLong(),
+                )
+                result.success(null)
+            }
+
+            "attachFirebaseAdapter" -> {
+                val a = app
+                if (a != null) UniTrack.attachFirebaseAdapter(a)
+                result.success(a != null)
+            }
+
             // Subscribe / unsubscribe the flush-success callback. Dart side
             // passes `enabled: true` after registering its onFlushCompleted
             // listener and `false` when clearing.

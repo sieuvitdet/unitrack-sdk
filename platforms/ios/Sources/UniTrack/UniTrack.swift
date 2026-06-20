@@ -444,6 +444,105 @@ public final class UniTrack {
         for p in shared.providers { action(p) }
     }
 
+    private static var pendingWorker: DispatchSourceTimer?
+
+    /// Ack-aware fan-out. Calls `provider.send()` on every registered provider:
+    ///   - .success → done
+    ///   - .retry   → enqueue in PendingQueue for exponential-backoff retry
+    ///   - .drop    → log and discard for that provider only
+    ///
+    /// Existing providers (Snowplow, Firebase) use the default `send()` impl
+    /// from the protocol extension — they call `track()` and return .success.
+    /// Custom HttpProvider overrides `send()` so UniTrack handles offline
+    /// retry for any backend that doesn't ship its own SDK queue.
+    private static func dispatchToProviders(_ name: String, _ props: [String: Any]) {
+        var retryIds: [String] = []
+        for p in shared.providers {
+            let r = p.send(name, props)
+            switch r {
+            case .success: break
+            case .retry:   retryIds.append(p.providerId)
+            case .drop:    NSLog("[UniTrack] provider %@ dropped event \"%@\"",
+                                 p.providerId, name)
+            }
+        }
+        if !retryIds.isEmpty {
+            PendingQueue.shared.enqueue(name: name, properties: props, providerIds: retryIds)
+        }
+    }
+
+    static func startPendingWorker() {
+        guard pendingWorker == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        t.schedule(deadline: .now() + 2, repeating: 2.0)
+        t.setEventHandler {
+            let q = PendingQueue.shared
+            q.trim()
+            let batch = q.peek(max: 50)
+            guard !batch.isEmpty else { return }
+            let providers = shared.providers
+            for row in batch {
+                var successful: [String] = []
+                var retrying:   [String] = []
+                var dropped:    [String] = []
+                let props = q.decodeProps(row)
+                for provider in providers {
+                    let bit = Int64(1) << q.bitFor(provider.providerId)
+                    if row.pendingMask & bit == 0 { continue }
+                    let r = provider.send(row.name, props)
+                    switch r {
+                    case .success: successful.append(provider.providerId)
+                    case .retry:   retrying.append(provider.providerId)
+                    case .drop:    dropped.append(provider.providerId)
+                    }
+                }
+                q.ack(rowId: row.rowId, successful: successful,
+                      retrying: retrying, dropped: dropped)
+            }
+        }
+        t.resume()
+        pendingWorker = t
+    }
+
+    /// Snapshot count of events waiting to retry. Demo/debug UIs.
+    @objc public static func pendingProviderRetryCount() -> Int {
+        PendingQueue.shared.count()
+    }
+
+    /// Convenience: attach the built-in `FirebaseAdapter` that stamps UniTrack
+    /// `session_id` onto every Firebase Analytics event via reflection — 0
+    /// import of Firebase in UniTrack core. App can be missing Firebase: this
+    /// call is a no-op then. App can add Firebase tomorrow: this call starts
+    /// working immediately, no rebuild.
+    ///
+    ///   UniTrack.attachFirebaseAdapter()
+    public static func attachFirebaseAdapter() {
+        if let a = FirebaseAdapter.create() { addProvider(a) }
+    }
+
+    /// Convenience: register a built-in `HttpProvider` in one call. Use this
+    /// for Kibana / ELK / OpenSearch / FPT internal backend — UniTrack ships
+    /// the transport + retry + batch logic, the app only configures endpoint.
+    ///
+    ///     UniTrack.addHttpProvider(
+    ///         id: "kibana",
+    ///         endpoint: URL(string: "https://kibana.fpt.vn/_bulk")!,
+    ///         format: .elasticBulk,
+    ///         headers: ["Authorization": "ApiKey ..."])
+    public static func addHttpProvider(
+        id: String,
+        endpoint: URL,
+        format: PayloadFormat = .jsonSingle,
+        headers: [String: String] = [:],
+        batchSize: Int = 50,
+        flushInterval: TimeInterval = 30
+    ) {
+        addProvider(HttpProvider(
+            id: id, endpoint: endpoint, format: format,
+            headers: headers, batchSize: batchSize, flushInterval: flushInterval
+        ))
+    }
+
     // ── W3C distributed tracing ────────────────────────────────────────────
     //
     // Apps install the tracing config from remote_config.tracing — same shape
@@ -514,7 +613,7 @@ public final class UniTrack {
                          provNames.isEmpty ? "(none)" : provNames)
         }
         // Forward to every registered provider (Snowplow, Firebase, …).
-        forEachProvider { $0.track(name, props) }
+        dispatchToProviders(name, props)
         guard let ctx = shared.context else { return }
         ut_track(ctx, name,
                  UniTrack.jsonString(from: props) ?? "{}")
@@ -564,7 +663,7 @@ public final class UniTrack {
                 "foreground_sec":  foregroundSec,
                 "is_exit_screen":  false,
             ]
-            forEachProvider { $0.track(shared.screenEndEventName, endPayload) }
+            dispatchToProviders(shared.screenEndEventName, endPayload)
         }
         // screen_view (legacy back-compat) — kept so older portal consumers
         // and the Snowplow native ScreenView call (above via setScreen) stay
@@ -573,7 +672,7 @@ public final class UniTrack {
             "screen":      name,
             "screen_name": name,
         ]
-        forEachProvider { $0.track("screen_view", viewPayload) }
+        dispatchToProviders("screen_view", viewPayload)
         if shared.screenLifecycleEnabled {
             var startPayload: [String: Any] = [
                 "screen":      name,
@@ -584,7 +683,7 @@ public final class UniTrack {
                 startPayload["from_screen"]          = prev
                 startPayload["previous_screen_name"] = prev
             }
-            forEachProvider { $0.track(shared.screenStartEventName, startPayload) }
+            dispatchToProviders(shared.screenStartEventName, startPayload)
         }
     }
 
@@ -766,6 +865,10 @@ public final class UniTrack {
 
         // Bring up any providers registered before initialize().
         for p in providers { p.initializeProvider() }
+
+        // Spin up the per-provider ack queue worker: polls every 2s, retries
+        // with exponential backoff (1s → 5min cap, max 10 retries, 7-day TTL).
+        UniTrack.startPendingWorker()
 
         // Pop any crash recovered at ut_init from the core. Core already
         // enqueued it to the offline queue (→ portal HTTP); this re-emits

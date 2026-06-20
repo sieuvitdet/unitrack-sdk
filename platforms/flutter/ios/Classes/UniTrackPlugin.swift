@@ -105,6 +105,34 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
         case "pendingEventCounts":
             result(UniTrack.pendingEventCounts())
 
+        // ── Provider Adapters (Phase 6) ──────────────────────────────────
+        case "pendingProviderRetryCount":
+            result(UniTrack.pendingProviderRetryCount())
+
+        case "addHttpProvider":
+            let id        = (args["id"] as? String) ?? "http"
+            let endpoint  = (args["endpoint"] as? String) ?? ""
+            let fmtIdx    = (args["format"] as? Int) ?? 0
+            let headers   = (args["headers"] as? [String: String]) ?? [:]
+            let batchSize = (args["batchSize"] as? Int) ?? 50
+            let flushMs   = (args["flushIntervalMs"] as? Int) ?? 30_000
+            let format: PayloadFormat = PayloadFormat(rawValue: fmtIdx) ?? .jsonSingle
+            if let url = URL(string: endpoint) {
+                UniTrack.addHttpProvider(
+                    id: id, endpoint: url, format: format,
+                    headers: headers, batchSize: batchSize,
+                    flushInterval: TimeInterval(flushMs) / 1000
+                )
+            }
+            result(nil)
+
+        case "attachFirebaseAdapter":
+            UniTrack.attachFirebaseAdapter()
+            // Echo back whether the adapter actually attached so Dart can
+            // surface a "Firebase not linked" log when the host app hasn't
+            // pulled in FIRAnalytics yet.
+            result(NSClassFromString("FIRAnalytics") != nil)
+
         // Subscribe / unsubscribe the flush-success callback. Dart toggles
         // this when its onFlushCompleted listener is set / cleared.
         case "setFlushCallbackEnabled":

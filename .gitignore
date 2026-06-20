@@ -44,6 +44,14 @@ node_modules/
 *.tgz
 dist/
 *.log
+package-lock.json
+
+# RN native sync artifacts (produced by platforms/react-native/ios/sync_native.sh).
+platforms/react-native/ios/Native/
+platforms/react-native/ios/include/
+
+# SPM resolution lock (regenerated on each resolve).
+platforms/ios/Package.resolved
 
 # Flutter / Dart
 .dart_tool/

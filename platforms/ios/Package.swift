@@ -66,7 +66,7 @@ let package = Package(
             // canImport at compile time — provided by the consuming app's
             // own Firebase setup (Pods or SPM, whichever the app picked).
             dependencies: ["UniTrack"],
-            path: "Sources/UniTrackFirebase"
+            path: "Providers/UniTrackFirebase/Sources"
         ),
         .target(
             name: "UniTrackSnowplow",
@@ -74,7 +74,7 @@ let package = Package(
                 "UniTrack",
                 .product(name: "SnowplowTracker", package: "snowplow-ios-tracker"),
             ],
-            path: "Sources/UniTrackSnowplow"
+            path: "Providers/UniTrackSnowplow/Sources"
         ),
     ],
     cxxLanguageStandard: .cxx17

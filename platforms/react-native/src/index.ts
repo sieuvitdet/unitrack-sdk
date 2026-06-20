@@ -49,6 +49,18 @@ interface NativeAPI {
   markSessionError(): Promise<void>;
   markSessionCrash(): Promise<void>;
   resetSessionStats(): Promise<void>;
+
+  // Provider Adapters (Phase 6).
+  addHttpProvider(opts: {
+    id: string;
+    endpoint: string;
+    format: number;
+    headers?: Record<string, string>;
+    batchSize: number;
+    flushIntervalMs: number;
+  }): Promise<void>;
+  attachFirebaseAdapter(): Promise<boolean>;
+  pendingProviderRetryCount(): Promise<number>;
 }
 
 const LINK_HINT =
@@ -85,6 +97,15 @@ export type EventProperties = Record<string, unknown>;
 import type { AnalyticsProvider } from './analyticsProvider';
 export { UniTrackRemoteConfig } from './remoteConfig';
 export type { AnalyticsProvider } from './analyticsProvider';
+
+/** HTTP payload format for the built-in HttpProvider. Indices map to the
+ *  native PayloadFormat enum (`PayloadFormat.JSON_SINGLE` = 0, …). */
+export enum PayloadFormat {
+  JsonSingle = 0,
+  JsonLines = 1,
+  JsonArray = 2,
+  ElasticBulk = 3,
+}
 
 class UniTrackClass {
   private initialized = false;
@@ -339,6 +360,49 @@ class UniTrackClass {
   markSessionError(): Promise<void>      { return native.markSessionError(); }
   markSessionCrash(): Promise<void>      { return native.markSessionCrash(); }
   resetSessionStats(): Promise<void>     { return native.resetSessionStats(); }
+
+  // ─── Provider Adapters (Phase 6) ───────────────────────────────────────
+  //
+  // Add HTTP backends (Kibana / ELK / FPT internal) or attach Firebase
+  // Analytics via reflection. UniTrack has 0 import on Firebase; the adapter
+  // is a runtime auto-detect via NSClassFromString / Class.forName.
+
+  /**
+   * Register a built-in HTTP provider. UniTrack handles transport, retry
+   * with exponential backoff, batching, and offline persistence — the app
+   * only configures the endpoint shape.
+   */
+  addHttpProvider(opts: {
+    id: string;
+    endpoint: string;
+    format?: PayloadFormat;
+    headers?: Record<string, string>;
+    batchSize?: number;
+    flushIntervalMs?: number;
+  }): Promise<void> {
+    return native.addHttpProvider({
+      id: opts.id,
+      endpoint: opts.endpoint,
+      format: (opts.format ?? PayloadFormat.JsonSingle) as number,
+      ...(opts.headers ? { headers: opts.headers } : {}),
+      batchSize: opts.batchSize ?? 50,
+      flushIntervalMs: opts.flushIntervalMs ?? 30000,
+    });
+  }
+
+  /**
+   * Attach the Firebase Adapter. Resolves to true if Firebase Analytics was
+   * found at runtime and the adapter is now active. False means the host
+   * hasn't linked Firebase — call again after they do, no rebuild needed.
+   */
+  attachFirebaseAdapter(): Promise<boolean> {
+    return native.attachFirebaseAdapter();
+  }
+
+  /** Snapshot of events waiting in the per-provider ack queue. Demo/debug. */
+  pendingProviderRetryCount(): Promise<number> {
+    return native.pendingProviderRetryCount();
+  }
 
   // --- semantic event helpers (Phase 3) ----------------------------------
   /** Notification received/opened/dismissed.

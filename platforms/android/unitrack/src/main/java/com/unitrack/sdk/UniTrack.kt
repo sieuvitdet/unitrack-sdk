@@ -8,6 +8,8 @@ import com.unitrack.sdk.lifecycle.ActivityTracker
 import com.unitrack.sdk.lifecycle.AppLifecycleObserver
 import com.unitrack.sdk.network.OkHttpTracker
 import com.unitrack.sdk.providers.AnalyticsProvider
+import com.unitrack.sdk.providers.PendingQueue
+import com.unitrack.sdk.providers.ProviderResult
 import com.unitrack.sdk.ui.ClickTracker
 import org.json.JSONObject
 
@@ -305,6 +307,139 @@ object UniTrack {
         }
     }
 
+    @Volatile private var pendingQueue: PendingQueue? = null
+    @Volatile private var pendingWorker: Thread? = null
+
+    /**
+     * Ack-aware fan-out. Calls `provider.send()` on every registered provider:
+     *   - SUCCESS → done
+     *   - RETRY   → enqueue into PendingQueue (per-provider bitmask) for retry
+     *   - DROP    → log and discard for that provider only
+     *
+     * Existing providers (Snowplow, Firebase) use the default `send()` impl
+     * which calls `track()` and returns SUCCESS → zero behaviour change for
+     * them. Custom HTTP providers (HttpProvider) override `send()` so we lo
+     * offline retry for any backend that doesn't bring its own SDK queue.
+     */
+    private fun dispatchToProviders(name: String, props: Map<String, Any?>) {
+        val retryIds = mutableListOf<String>()
+        for (p in providers) {
+            val r = try { p.send(name, props) } catch (e: Throwable) {
+                android.util.Log.w("UniTrack", "provider send failed: ${e.message}")
+                ProviderResult.DROP
+            }
+            when (r) {
+                ProviderResult.SUCCESS -> {}
+                ProviderResult.RETRY   -> retryIds.add(p.providerId)
+                ProviderResult.DROP    -> {
+                    android.util.Log.w("UniTrack", "provider ${p.providerId} dropped event \"$name\"")
+                }
+            }
+        }
+        if (retryIds.isNotEmpty()) {
+            pendingQueue?.enqueue(name, props, retryIds)
+            wakePendingWorker()
+        }
+    }
+
+    private fun ensurePendingQueue(app: Application) {
+        if (pendingQueue == null) {
+            synchronized(this) {
+                if (pendingQueue == null) {
+                    pendingQueue = PendingQueue(app)
+                    startPendingWorker()
+                }
+            }
+        }
+    }
+
+    private fun startPendingWorker() {
+        if (pendingWorker != null) return
+        val t = Thread({
+            while (initialized) {
+                try {
+                    Thread.sleep(2_000)
+                    val q = pendingQueue ?: continue
+                    q.trim()
+                    val batch = q.peek(50)
+                    if (batch.isEmpty()) continue
+                    for (p in batch) {
+                        val successful = mutableListOf<String>()
+                        val retrying   = mutableListOf<String>()
+                        val dropped    = mutableListOf<String>()
+                        var mask = p.pendingMask
+                        for (provider in providers) {
+                            val bit = 1L shl q.bitFor(provider.providerId)
+                            if (mask and bit == 0L) continue
+                            val r = try { provider.send(p.name, p.properties) } catch (_: Throwable) { ProviderResult.RETRY }
+                            when (r) {
+                                ProviderResult.SUCCESS -> successful.add(provider.providerId)
+                                ProviderResult.RETRY   -> retrying.add(provider.providerId)
+                                ProviderResult.DROP    -> dropped.add(provider.providerId)
+                            }
+                        }
+                        q.ack(p.rowId, successful, retrying, dropped, p.pendingMask, p.retryCount)
+                    }
+                } catch (ie: InterruptedException) {
+                    return@Thread
+                } catch (e: Throwable) {
+                    android.util.Log.w("UniTrack", "pending worker tick error: ${e.message}")
+                }
+            }
+        }, "ut-pending-worker").apply { isDaemon = true }
+        t.start()
+        pendingWorker = t
+    }
+
+    private fun wakePendingWorker() { pendingWorker?.interrupt() }
+
+    /** Snapshot count of events waiting to retry. For demo/debug UIs. */
+    @JvmStatic
+    fun pendingProviderRetryCount(): Int = pendingQueue?.count() ?: 0
+
+    /**
+     * Convenience: attach the built-in `FirebaseAdapter` that stamps UniTrack
+     * `session_id` onto every Firebase Analytics event via reflection — 0
+     * import of Firebase in UniTrack core. App can be missing Firebase: this
+     * call is a no-op then. App can add Firebase tomorrow: this call starts
+     * working immediately, no rebuild.
+     *
+     *   UniTrack.attachFirebaseAdapter(app)
+     */
+    @JvmStatic
+    fun attachFirebaseAdapter(app: Application) {
+        val adapter = com.unitrack.sdk.providers.FirebaseAdapter.create(app)
+        if (adapter != null) addProvider(adapter)
+    }
+
+    /**
+     * Convenience: register a built-in HttpProvider in one call. Use this for
+     * Kibana / ELK / OpenSearch / FPT internal backend — UniTrack ships the
+     * transport + retry + batch logic, the app only configures endpoint.
+     *
+     *   UniTrack.addHttpProvider(
+     *       id        = "kibana",
+     *       endpoint  = "https://kibana.fpt.vn/_bulk",
+     *       format    = PayloadFormat.ELASTIC_BULK,
+     *       headers   = mapOf("Authorization" to "ApiKey ..."))
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun addHttpProvider(
+        id: String,
+        endpoint: String,
+        format: com.unitrack.sdk.providers.PayloadFormat = com.unitrack.sdk.providers.PayloadFormat.JSON_SINGLE,
+        headers: Map<String, String> = emptyMap(),
+        batchSize: Int = 50,
+        flushIntervalMs: Long = 30_000,
+    ) {
+        addProvider(com.unitrack.sdk.providers.HttpProvider(
+            id = id, endpoint = endpoint, format = format,
+            headers = headers, batchSize = batchSize,
+            flushIntervalMs = flushIntervalMs,
+        ))
+    }
+
     @JvmStatic
     fun initialize(app: Application, config: UniTrackConfig) {
         if (initialized) {
@@ -347,6 +482,11 @@ object UniTrack {
         initialized = true
         appRef = app
 
+        // Bring up the per-provider ack queue. Background worker polls every
+        // 2s, drains events that pass next_retry_at, exponential backoff per
+        // provider id (1s → 5min cap, max 10 retries, 7-day TTL).
+        ensurePendingQueue(app)
+
         if (config.autoCapture) {
             if (config.trackScreens) ActivityTracker.install(app)
             if (config.trackTaps)    ClickTracker.install(app)
@@ -372,7 +512,7 @@ object UniTrack {
                 props["recovered_on_launch"] = true
                 if (providers.isNotEmpty()) {
                     Log.i("UniTrack", "fan-out recovered crash to ${providers.size} provider(s)")
-                    forEachProvider { it.track("crash", props) }
+                    dispatchToProviders("crash", props)
                 }
                 // Stash the JSON for the Flutter plugin to forward up to Dart
                 // (Flutter apps may host Dart-side providers that the native
@@ -590,7 +730,7 @@ object UniTrack {
             val provNames = providers.joinToString(",") { it::class.simpleName ?: "?" }
             log("UniTrack", "track event=\"$name\" props=${JSONObject(props)} → providers=[${if (provNames.isEmpty()) "(none)" else provNames}]")
         }
-        forEachProvider { it.track(name, props) }
+        dispatchToProviders(name, props)
         // Guard the native call: a tracking call can arrive before initialize()
         // finishes (e.g. RN's navigation tracker fires setScreen on first render
         // while initialize() is still in-flight). Calling JNI before
@@ -638,7 +778,7 @@ object UniTrack {
                     "foreground_sec"  to foregroundSec,
                     "is_exit_screen"  to false,
                 )
-                forEachProvider { it.track(screenEndEventName, endPayload) }
+                dispatchToProviders(screenEndEventName, endPayload)
             }
         }
         // screen_view (legacy back-compat) — kept so older portal consumers
@@ -648,7 +788,7 @@ object UniTrack {
             "screen"      to name,
             "screen_name" to name,
         )
-        forEachProvider { it.track("screen_view", viewPayload) }
+        dispatchToProviders("screen_view", viewPayload)
         if (screenLifecycleEnabled) {
             val startPayload = mutableMapOf<String, Any?>(
                 "screen"      to name,
@@ -660,7 +800,7 @@ object UniTrack {
                 startPayload["from_screen"]          = prev
                 startPayload["previous_screen_name"] = prev
             }
-            forEachProvider { it.track(screenStartEventName, startPayload) }
+            dispatchToProviders(screenStartEventName, startPayload)
         }
     }
 
