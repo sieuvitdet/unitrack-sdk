@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.1.0 — 2026-06-22
+
+Catch-up release đưa Flutter SDK lên ngang iOS 0.3.36 + Android 0.3.11.
+
+### Mới
+
+- **Built-in `HttpProvider`** — gửi event lên Kibana / ELK / backend FPT nội
+  bộ qua `addHttpProvider()` API. Portal Config tab là source of truth, app
+  không phải code tay. 4 PayloadFormat (JSON_SINGLE / JSON_LINES / JSON_ARRAY
+  / ELASTIC_BULK). Retry exponential backoff 1s → 5min, max 10 lần, TTL 7 ngày.
+- **Per-provider ack queue** — Mô hình B: event chỉ xoá khỏi queue khi tất cả
+  provider ack SUCCESS. Provider nào trả RETRY thì giữ lại, exponential backoff
+  per id. Snowplow / Firebase / Custom HTTP đều được retry chuẩn ngành.
+- **`FirebaseAdapter` qua reflection** — `attachFirebaseAdapter()` stamp
+  `session_id` vào mọi event Firebase Analytics qua `NSClassFromString` /
+  `Class.forName`. UniTrack 0 import Firebase: app chưa cài → no-op, cài sau
+  → bridge tự kích hoạt.
+- **W3C Trace Context auto-inject** — header `traceparent` chèn vào HTTP
+  request đi tới host trong allowlist Portal (fail-closed).
+- **Kill detection** — `clean_shutdown` flag persist vào session.json. Cold
+  start kế tiếp fire `session_ended` với reason `killed_recovered` ngay, không
+  đợi 30 phút timeout.
+
+### Bỏ
+
+- `tracking_id` / `currentTrackingId` API — `session_id` là khóa join duy nhất
+  giữa Portal / Snowplow / Firebase / custom backend. Apps gọi `currentTrackingId`
+  phải đổi sang `currentSessionId`.
+
+### Fix
+
+- `UniTrackConfigStream.ingest()` String index out-of-bounds crash khi SSE
+  chunk có unicode multi-byte. Đổi sang `components(separatedBy:)`.
+
+### Native sync
+
+10 file Swift + 3 file C++ trong `ios/Native/` đã sync với iOS 0.3.36 source.
+
 ## 1.0.0 — 2026-06-09
 
 Initial public release.
