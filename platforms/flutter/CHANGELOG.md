@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.3 — 2026-06-23
+
+### Fix
+
+`UniTrackRemoteConfig.snowplowEntities` luôn trả map rỗng dù Portal đã set
+entities. Lý do: getter yêu cầu `value is Map` nhưng Portal serialize entities
+thành `Map<String, String>` (entity short-name → iglu URI). Hậu quả:
+SnowplowProvider không build entity nào → log `contexts: []`.
+
+- Thêm getter mới `snowplowEntityURIs: Map<String, String>` đúng shape Portal.
+  App pass thẳng vào `SnowplowProvider(entities:)`.
+- `snowplowEntities` cũ marked `@Deprecated` — giữ để không vỡ consumer cũ
+  (camera demo) — nhưng tất cả call site nên migrate sang `snowplowEntityURIs`.
+
 ## 1.1.2 — 2026-06-22
 
 ### Breaking (Dart-only, minor — chỉ ảnh hưởng code gọi `defaultIgluSchema`)

@@ -112,6 +112,11 @@ class UniTrackRemoteConfig {
     return out;
   }
 
+  /// DEPRECATED — Portal serialize `snowplow.entities` thành
+  /// `Map<String, String>` (short-name → iglu URI hoặc short-name), không phải
+  /// nested map. Getter này rỗng với mọi config Portal hiện tại. Dùng
+  /// [snowplowEntityURIs] cho shape đúng. Giữ lại để không vỡ camera demo cũ.
+  @Deprecated('Use snowplowEntityURIs — Portal trả Map<String, String>')
   Map<String, Map<String, Object?>> get snowplowEntities {
     final raw = snowplow['entities'];
     if (raw is! Map) return const {};
@@ -119,6 +124,23 @@ class UniTrackRemoteConfig {
     for (final e in raw.entries) {
       if (e.key is String && e.value is Map) {
         out[e.key as String] = Map<String, Object?>.from(e.value as Map);
+      }
+    }
+    return out;
+  }
+
+  /// Auto-attach entity map từ Portal — `entity_short_name → iglu_uri_or_name`.
+  /// Portal lưu mỗi entry là string: hoặc full iglu URI (`iglu:vendor/.../1-0-0`)
+  /// hoặc just short-name (`user_context` — SDK sẽ resolve qua `iglu_vendor` +
+  /// `default_version`). Pass thẳng vào `SnowplowProvider(entities:)`.
+  Map<String, String> get snowplowEntityURIs {
+    final raw = snowplow['entities'];
+    if (raw is! Map) return const {};
+    final out = <String, String>{};
+    for (final e in raw.entries) {
+      if (e.key is String && e.value is String) {
+        final v = (e.value as String).trim();
+        if (v.isNotEmpty) out[e.key as String] = v;
       }
     }
     return out;
