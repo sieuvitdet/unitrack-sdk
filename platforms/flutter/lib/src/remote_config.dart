@@ -67,12 +67,32 @@ class UniTrackRemoteConfig {
     return const {};
   }
 
-  /// Default iglu schema URI for an event name — used by the portal when
-  /// auto-seeding the schemas map. Pattern matches the FTel convention
-  ///   iglu:vn.fpt.ftel.snowplow/<event_name>/jsonschema/1-0-0
-  /// Apps can override per-event via the snowplow.schemas map.
-  static String defaultIgluSchema(String eventName, {String version = '1-0-0'}) {
-    return 'iglu:vn.fpt.ftel.snowplow/$eventName/jsonschema/$version';
+  /// Iglu vendor string the portal wants this app's schemas to live under.
+  /// Sourced from `snowplow.iglu_vendor` on the wire. Empty when the operator
+  /// hasn't set it — caller must pass an explicit vendor to
+  /// [defaultIgluSchema] or to `SnowplowProvider(igluVendor: ...)`.
+  String get snowplowIgluVendor =>
+      (snowplow['iglu_vendor'] as String?)?.trim() ?? '';
+
+  /// Build the iglu schema URI for an event. Vendor lookup precedence:
+  ///   1. explicit [vendor] argument                   (highest)
+  ///   2. portal `snowplow.iglu_vendor`                (this instance)
+  ///   3. throws ArgumentError if neither is available (lowest)
+  ///
+  /// No hard-coded FTel default — the SDK is vendor-agnostic. Apps that ship
+  /// to multiple tenants resolve vendor at runtime from the portal; single-
+  /// tenant apps pass [vendor] inline.
+  String defaultIgluSchema(String eventName,
+      {String version = '1-0-0', String? vendor}) {
+    final v = (vendor != null && vendor.isNotEmpty)
+        ? vendor
+        : snowplowIgluVendor;
+    if (v.isEmpty) {
+      throw ArgumentError(
+          'iglu vendor not configured — set `snowplow.iglu_vendor` on the '
+          'portal, or pass `vendor:` to defaultIgluSchema()');
+    }
+    return 'iglu:$v/$eventName/jsonschema/$version';
   }
 
   /// Portal-defined Snowplow blueprints + entities + event mapping. See

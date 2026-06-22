@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.1.2 — 2026-06-22
+
+### Breaking (Dart-only, minor — chỉ ảnh hưởng code gọi `defaultIgluSchema`)
+
+`UniTrackRemoteConfig.defaultIgluSchema` không còn hard-code FTel vendor.
+
+**Trước:**
+```dart
+static String defaultIgluSchema(String eventName, {String version = '1-0-0'}) {
+  return 'iglu:vn.fpt.ftel.snowplow/$eventName/jsonschema/$version';
+}
+```
+
+**Sau** (instance method, vendor đọc từ portal hoặc tham số):
+```dart
+String defaultIgluSchema(String eventName,
+    {String version = '1-0-0', String? vendor}) { ... }
+```
+
+Vendor lookup precedence:
+1. tham số `vendor:` (explicit)
+2. `snowplow.iglu_vendor` từ Portal
+3. throw ArgumentError (không có fallback FTel)
+
+### Lý do
+
+SDK không nên biết tenant. Vendor là khái niệm của app/portal, không phải SDK.
+Apps đa tenant lấy vendor từ Portal; single-tenant pass inline.
+
+### Migration cho app FPT (vd MobiX, FPT Life)
+
+Đến khi Portal expose `snowplow.iglu_vendor`, app pass fallback:
+```dart
+final igluVendor = remoteCfg.snowplowIgluVendor.isNotEmpty
+    ? remoteCfg.snowplowIgluVendor
+    : 'vn.fpt.ftel.snowplow';
+remoteCfg.defaultIgluSchema(eventName, vendor: igluVendor);
+```
+
 ## 1.1.1 — 2026-06-22
 
 Hotfix release. 1.1.0 archive thiếu native source vì `flutter pub publish`
