@@ -147,13 +147,26 @@ public final class UniTrackConfigStream: NSObject {
 
     fileprivate func ingest(_ chunk: Data) {
         guard let text = String(data: chunk, encoding: .utf8) else { return }
-        // Accumulate against any incomplete line from the previous chunk.
+        // Accumulate against any incomplete line from the previous chunk, then
+        // split on \n. The trailing fragment (no \n yet) goes back into the
+        // buffer for the next chunk. Avoid String-index arithmetic — earlier
+        // version used `removeSubrange(startIndex...nlIdx)` which crashed on
+        // certain chunk boundaries (Swift String grapheme cluster + Substring
+        // backing storage shift). `components(separatedBy:)` is O(n) but
+        // entirely value-based and ASCII-safe for SSE wire format.
         bufferedLine += text
-        // Process every complete line; keep the trailing fragment in buffer.
-        while let nlIdx = bufferedLine.firstIndex(of: "\n") {
-            let line = String(bufferedLine[..<nlIdx])
-            bufferedLine.removeSubrange(bufferedLine.startIndex...nlIdx)
-            handleLine(line.trimmingCharacters(in: CharacterSet(charactersIn: "\r")))
+        let parts = bufferedLine.components(separatedBy: "\n")
+        // Last element is the trailing fragment (everything after the final
+        // \n, possibly empty if the chunk ended with \n). Stash it for the
+        // next ingest call.
+        bufferedLine = parts.last ?? ""
+        // Handle every complete line. dropLast drops the fragment we just
+        // stashed; remaining elements are complete lines (the \n itself is
+        // removed by components(separatedBy:)).
+        for line in parts.dropLast() {
+            // Strip trailing \r so CRLF wire endings produce clean strings.
+            let trimmed = line.hasSuffix("\r") ? String(line.dropLast()) : line
+            handleLine(trimmed)
         }
     }
 
