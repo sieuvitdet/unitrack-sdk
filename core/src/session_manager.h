@@ -12,6 +12,11 @@ enum class SessionEndReason {
     none,
     timeout,             // inactivity/background exceeded the session timeout
     manual_reset,        // identify reset() / explicit rotate()
+    killed_recovered,    // app bị kill (user swipe khỏi switcher / Force Stop);
+                         // phát hiện ở cold start kế tiếp qua clean_shutdown flag.
+                         // Session_ended được fire NGAY khi app mở lại — không
+                         // phải đợi 30 phút timeout. Khác `timeout` ở chỗ
+                         // background gap < sessionTimeoutMs.
 };
 
 // Snapshot returned when resolving the current session. If `rotated` is true,
@@ -76,6 +81,13 @@ public:
     // identify reset). The next resolve() reports the rotation with `reason`.
     void rotate(SessionEndReason reason = SessionEndReason::manual_reset);
 
+    // Mark "clean shutdown": app vào background hợp lệ (didEnterBackground /
+    // ProcessLifecycle ON_STOP). Ghi vào state file. Lần cold start sau,
+    // load_from() đọc flag này — nếu vẫn `false` (app bị kill trước khi save
+    // được), surfaces một pending boundary với reason killed_recovered để
+    // Tracker fire session_ended cho session đã chết.
+    void mark_clean_shutdown();
+
     void set_timeout_ms(int64_t ms);
 
 private:
@@ -84,6 +96,12 @@ private:
     int64_t        started_at_ms_    = 0;
     int64_t        last_activity_ms_ = 0;
     int64_t        timeout_ms_       = 30 * 60 * 1000;  // 30 min default
+    // True khi app vào background bình thường + save xong. Ghi vào state
+    // file. Cold start tiếp theo đọc lại: false = app bị kill (didEnter-
+    // Background không kịp / không chạy). Kết hợp với gap < timeout thì
+    // SDK fire session_ended ngay (reason=killed_recovered) thay vì đợi
+    // 30 phút timeout.
+    bool           clean_shutdown_   = false;
 
     // Persisted across launches via load_from + save_locked. session_index_
     // increments on every rotation (first install = 1). first_event_id_ is

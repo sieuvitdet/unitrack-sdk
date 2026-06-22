@@ -66,6 +66,13 @@ void SessionManager::load_from(const std::string& path) {
     int64_t saved_idx        = read_int_field(blob, "session_index");
     int64_t saved_started    = read_int_field(blob, "started_at_ms");
     int64_t saved_last_act   = read_int_field(blob, "last_activity_ms");
+    // clean_shutdown: 1 nếu app vào background hợp lệ trước khi process kết
+    // thúc. Read as int (0/1) vì JSON reader chỉ hỗ trợ int. Missing field
+    // (state file legacy) → treat as true để không emit phantom killed_recovered
+    // sau lần upgrade SDK đầu.
+    int64_t saved_clean      = read_int_field(blob, "clean_shutdown");
+    bool saved_clean_present = blob.find("\"clean_shutdown\":") != std::string::npos;
+    bool was_clean = !saved_clean_present || saved_clean != 0;
 
     if (saved_id.empty() || saved_idx <= 0) {
         // Corrupt or partial file — start fresh but keep index=1.
@@ -77,12 +84,27 @@ void SessionManager::load_from(const std::string& path) {
     // Resume the persisted session iff it was active within the timeout
     // window. Otherwise treat the gap as a fresh launch and bump the index.
     if (now - saved_last_act <= timeout_ms_) {
-        session_id_       = saved_id;
-        started_at_ms_    = saved_started ? saved_started : now;
-        last_activity_ms_ = saved_last_act;
-        session_index_    = saved_idx;
-        // No previous_id for a resumed session — we didn't actually rotate.
-        prev_id_.clear();
+        if (was_clean) {
+            // Normal resume: process kết thúc bình thường (background) trong
+            // timeout window. Tiếp tục session cũ, không rotate.
+            session_id_       = saved_id;
+            started_at_ms_    = saved_started ? saved_started : now;
+            last_activity_ms_ = saved_last_act;
+            session_index_    = saved_idx;
+            prev_id_.clear();
+        } else {
+            // Killed: clean_shutdown=false + gap dưới timeout = app bị kill
+            // (swipe khỏi switcher / Force Stop / OS reclaim). Rotate ngay
+            // + surface boundary để Tracker fire session_ended kèm reason
+            // killed_recovered. Không đợi 30 phút timeout.
+            prev_id_         = saved_id;
+            prev_started_ms_ = saved_started;
+            prev_ended_ms_   = saved_last_act;
+            prev_reason_     = SessionEndReason::killed_recovered;
+            pending_boundary_ = true;
+            session_index_   = saved_idx + 1;
+            // session_id_ giữ UUID mới từ ctor.
+        }
     } else {
         // Gap exceeded timeout → roll forward. The newly generated session_id_
         // in the ctor stays; record the prior as previous + bump index.
@@ -93,6 +115,9 @@ void SessionManager::load_from(const std::string& path) {
         pending_boundary_ = true;
         session_index_   = saved_idx + 1;
     }
+    // Reset clean_shutdown=false ngay khi mở app: nếu lần này app bị kill
+    // trước khi đến didEnterBackground, lần cold start kế tiếp sẽ detect.
+    clean_shutdown_ = false;
     save_locked();
 }
 
@@ -103,7 +128,8 @@ void SessionManager::save_locked() {
         << "\"session_index\":"          << session_index_        << ","
         << "\"started_at_ms\":"          << started_at_ms_        << ","
         << "\"last_activity_ms\":"       << last_activity_ms_     << ","
-        << "\"previous_session_id\":\""  << prev_id_              << "\"}";
+        << "\"previous_session_id\":\""  << prev_id_              << "\","
+        << "\"clean_shutdown\":"         << (clean_shutdown_ ? 1 : 0) << "}";
     // Write atomically: dump to .tmp then rename. Survives a kill mid-write.
     std::string tmp = persist_path_ + ".tmp";
     {
@@ -205,6 +231,12 @@ SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
         prev_reason_      = SessionEndReason::none;
     }
     return r;
+}
+
+void SessionManager::mark_clean_shutdown() {
+    std::lock_guard<std::mutex> lock(mu_);
+    clean_shutdown_ = true;
+    save_locked();
 }
 
 void SessionManager::mark_activity() {

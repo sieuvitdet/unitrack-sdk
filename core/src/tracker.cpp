@@ -305,9 +305,10 @@ void Tracker::log_crash(const std::string& crash_json) {
 
 const char* Tracker::session_end_reason_str(SessionEndReason r) {
     switch (r) {
-        case SessionEndReason::timeout:       return "timeout";
-        case SessionEndReason::manual_reset:  return "manual_reset";
-        case SessionEndReason::none:          return "none";
+        case SessionEndReason::timeout:           return "timeout";
+        case SessionEndReason::manual_reset:      return "manual_reset";
+        case SessionEndReason::killed_recovered:  return "killed_recovered";
+        case SessionEndReason::none:              return "none";
     }
     return "none";
 }
@@ -352,6 +353,12 @@ void Tracker::log_foreground() {
 void Tracker::log_background() {
     track("app_background", "{}");
     flush_now();
+    // Mark clean shutdown TRƯỚC khi process bị OS suspend / kill. Lần cold
+    // start sau, load_from() đọc lại flag này — nếu vẫn `false` chứng tỏ
+    // app bị kill trước khi vào background bình thường (user swipe khỏi
+    // switcher giữa lúc foreground, OS reclaim, crash). Fire session_ended
+    // ngay (reason=killed_recovered) thay vì đợi timeout.
+    session_.mark_clean_shutdown();
 }
 void Tracker::log_app_start(long cold_start_ms) {
     // Open the process's first session boundary (session_start) on launch.
