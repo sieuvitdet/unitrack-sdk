@@ -11,10 +11,13 @@ dist/
 core/third_party/sqlite3/sqlite3.c
 core/third_party/sqlite3/sqlite3.h
 
-# Auto-generated copy of the native SDK + C core for the iOS Flutter pod
-# (produced by platforms/flutter/ios/sync_native.sh — never commit; regenerate).
-platforms/flutter/ios/Native/
-platforms/flutter/ios/Classes/include/unitrack.h
+# Native SDK + C core vendored into the iOS Flutter pod via sync_native.sh.
+# Tracked in git because `flutter pub publish` filters by `git ls-files` —
+# untracked files NEVER end up in the published archive, even if .pubignore
+# wants to keep them. Re-run sync_native.sh whenever source iOS / core changes,
+# then commit the diff. Keep Pods/Podfile.lock ignored separately (above).
+# platforms/flutter/ios/Native/
+# platforms/flutter/ios/Classes/include/unitrack.h
 
 # iOS
 *.xcframework
@@ -47,8 +50,10 @@ dist/
 package-lock.json
 
 # RN native sync artifacts (produced by platforms/react-native/ios/sync_native.sh).
-platforms/react-native/ios/Native/
-platforms/react-native/ios/include/
+# Keep tracked in git so `npm publish` sees them (same reason as Flutter — npm
+# also respects .gitignore via the npm-packlist algorithm for npm 7+).
+# platforms/react-native/ios/Native/
+# platforms/react-native/ios/include/
 
 # SPM resolution lock (regenerated on each resolve).
 platforms/ios/Package.resolved

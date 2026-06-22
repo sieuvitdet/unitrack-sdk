@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.1 — 2026-06-22
+
+Hotfix release. 1.1.0 archive thiếu native source vì `flutter pub publish`
+lọc file qua `git ls-files` — folder `ios/Native/` + Android SDK source untracked
+nên không lên pub.dev, gây lỗi "Cannot find 'UniTrack' in scope" ở Xcode.
+
+### Fix
+
+- `ios/Native/` (Swift SDK + C++ core) giờ tracked trong git để `pub publish`
+  thấy.
+- Android SDK source vendored vào `android/unitrack_sdk/src/` — pod tự build
+  Kotlin + JNI/C++ thay vì trỏ ra `../../android/unitrack` (path đó không tồn
+  tại trong pub-cache consumer app).
+- Thêm `platforms/flutter/sync_native.sh` — chạy script này trước mỗi
+  `pub publish` để đồng bộ Native/ + unitrack_sdk/ với monorepo source.
+
 ## 1.1.0 — 2026-06-22
 
 Catch-up release đưa Flutter SDK lên ngang iOS 0.3.36 + Android 0.3.11.

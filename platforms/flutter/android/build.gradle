@@ -1,5 +1,5 @@
 group 'com.unitrack.flutter'
-version '1.0.0'
+version '1.1.1'
 
 buildscript {
     repositories {
@@ -22,10 +22,13 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 
-// The native Android SDK lives outside this plugin. Rather than depend on a
-// published Maven artifact (io.unitrack:sdk), we compile its Kotlin sources and
-// build its JNI/C++ core directly here, so the demo always uses the LOCAL SDK.
-def sdkRoot = file("${projectDir}/../../android/unitrack")
+// The native Android SDK source (Kotlin + JNI/C++) is VENDORED into this pod
+// at `unitrack_sdk/src/` by `tools/sync_flutter_android.sh`. Vendoring is the
+// only reliable way to ship the SDK on pub.dev — `../../android/unitrack`
+// only resolves inside this monorepo, not inside a consumer app's pub-cache.
+// Re-run the sync script after any Android core change, then `flutter pub
+// publish` will pick up the diff.
+def sdkRoot = file("${projectDir}/unitrack_sdk")
 
 android {
     namespace 'com.unitrack.flutter'

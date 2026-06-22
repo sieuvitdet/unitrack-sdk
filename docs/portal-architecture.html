@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniTrack Portal · Architecture Report</title>
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #1a1f2e;
+    --muted: #6b7384;
+    --accent: #5b8cff;
+    --green: #27d796;
+    --orange: #ffb454;
+    --red: #ff6b6b;
+    --line: #e4e7ee;
+    --code-bg: #1b2231;
+    --code-text: #e6e9ef;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+    max-width: 1080px; margin: 0 auto; padding: 40px 32px 80px;
+  }
+  h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  h1 .sub { font-size: 16px; color: var(--muted); font-weight: 400; display: block; margin-top: 6px; }
+  h2 { font-size: 22px; font-weight: 600; margin: 40px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 17px; font-weight: 600; margin: 24px 0 10px; color: var(--ink); }
+  p { margin-bottom: 12px; }
+  ul, ol { margin: 0 0 14px 24px; }
+  li { margin-bottom: 6px; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: #eef1f6; padding: 2px 6px; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 14px 18px; border-radius: 8px;
+    overflow-x: auto; margin: 12px 0;
+    font: 13px/1.5 "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; font-size: 13px; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left; padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    background: #eef1f6; font-weight: 600; color: var(--muted);
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 22px; margin: 14px 0;
+  }
+  .card.accent { border-left: 4px solid var(--accent); }
+  .card.green  { border-left: 4px solid var(--green); }
+  .card.orange { border-left: 4px solid var(--orange); }
+  .card.red    { border-left: 4px solid var(--red); }
+  .tag {
+    display: inline-block; padding: 2px 9px; border-radius: 12px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    background: var(--accent); color: #fff; margin-left: 6px;
+    vertical-align: middle;
+  }
+  .tag.green  { background: var(--green); color: #0a3f24; }
+  .tag.orange { background: var(--orange); color: #4a2d00; }
+  .tag.muted  { background: #cdd2dc; color: var(--ink); }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .meta {
+    color: var(--muted); font-size: 13px;
+    border-left: 3px solid var(--accent); padding-left: 12px;
+    margin-bottom: 24px;
+  }
+  .footer {
+    margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 13px; text-align: center;
+  }
+  .ascii {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 18px 22px; border-radius: 8px;
+    font: 12px/1.4 "SF Mono", Menlo, monospace;
+    white-space: pre; overflow-x: auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>
+  UniTrack Portal · Architecture Report
+  <span class="sub">Tài liệu kỹ thuật cho đội System / IT — bản chính thức gửi xin hạ tầng ISC</span>
+</h1>
+
+<div class="meta">
+  <b>Repo:</b> <span class="mono">github.com/sieuvitdet/unitrack-sdk</span> · path <span class="mono">portal/</span><br>
+  <b>Phiên bản:</b> 1.0.0 (production)<br>
+  <b>Ngày cập nhật:</b> 22/06/2026
+</div>
+
+<h2>1. Tổng quan</h2>
+
+<p>
+  UniTrack Portal là <b>CMS quản lý cấu hình cho các SDK tracking mobile</b>.
+  Khi app mobile (iOS / Android / Flutter / React Native) khởi động, SDK gọi
+  về Portal để lấy cấu hình: bật/tắt provider nào (Snowplow, Firebase, custom
+  HTTP), bật W3C tracing, cấu hình auto-capture. Toàn bộ flow event tracking
+  do SDK gửi thẳng tới các provider (Snowplow / Firebase / Kibana / backend
+  nội bộ), <b>Portal không lưu event của user</b>.
+</p>
+
+<div class="card accent">
+  <b>3 chức năng chính của Portal:</b>
+  <ol style="margin: 8px 0 0 24px;">
+    <li><b>Authentication / phân quyền</b> — user login, admin quản lý nhiều project</li>
+    <li><b>Quản lý / tạo project</b> — cấp API key cho từng app</li>
+    <li><b>Quản lý cấu hình SDK theo project</b> — sdk_config, snowplow, firebase, http_providers, W3C tracing</li>
+  </ol>
+</div>
+
+<h2>2. Stack công nghệ</h2>
+
+<table>
+  <thead>
+    <tr><th>Layer</th><th>Tech</th><th>Phiên bản</th><th>Ghi chú</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Backend</b></td>
+      <td>Node.js + <a href="https://expressjs.com">Express</a></td>
+      <td>Node ≥ 20 LTS, Express 4.21</td>
+      <td>1 dependency duy nhất (express). Không React/Next/Nest framework.</td>
+    </tr>
+    <tr>
+      <td><b>Frontend</b></td>
+      <td>HTML + CSS + JS thuần (vanilla)</td>
+      <td>—</td>
+      <td><b>Không phải Next.js / React / Vue.</b> Single-page HTML file ~5000 dòng, no build step, no CDN.</td>
+    </tr>
+    <tr>
+      <td><b>Database</b></td>
+      <td>SQLite</td>
+      <td>system 3.40+ (node:sqlite built-in)</td>
+      <td>1 file <span class="mono">events.db</span>, WAL mode. Không cần DB cluster.</td>
+    </tr>
+    <tr>
+      <td><b>Process manager</b></td>
+      <td>PM2</td>
+      <td>5.x</td>
+      <td>Auto-restart on crash, log rotation.</td>
+    </tr>
+    <tr>
+      <td><b>Reverse proxy</b></td>
+      <td>nginx</td>
+      <td>1.20+</td>
+      <td>HTTPS termination, SSE pass-through, gzip.</td>
+    </tr>
+    <tr>
+      <td><b>OS</b></td>
+      <td>Ubuntu 22.04 LTS / Debian 12</td>
+      <td>Linux</td>
+      <td>Bất kỳ distro nào support Node 20.</td>
+    </tr>
+    <tr>
+      <td><b>TLS</b></td>
+      <td>Let's Encrypt (certbot) hoặc cert ISC</td>
+      <td>—</td>
+      <td>Auto-renew.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card green">
+  <b>Tại sao stack tối giản này quan trọng cho hồ sơ hạ tầng:</b>
+  <ul style="margin: 8px 0 0 24px;">
+    <li>Không cần build pipeline / CI — deploy = <span class="mono">git pull && pm2 restart</span></li>
+    <li>Không cần Docker / Kubernetes — chạy thẳng trên 1 Linux VM</li>
+    <li>Không cần database tier riêng — SQLite file local đủ cho scope CMS</li>
+    <li>Không cần CDN — frontend là HTML tĩnh phục vụ qua nginx</li>
+    <li>App size: ~3 MB code + ~5 MB node_modules</li>
+  </ul>
+</div>
+
+<h2>3. Sơ đồ kiến trúc</h2>
+
+<div class="ascii">
+                       ┌────────────────────────────────────────┐
+                       │  Mobile Apps (iOS / Android / Flutter) │
+                       │  ─ UniTrack SDK gắn sẵn                │
+                       └────────────────┬───────────────────────┘
+                                        │
+              ┌─────────────────────────┼──────────────────────────┐
+              │                         │                          │
+              │ ① GET /config           │ ③ Event đi THẲNG         │
+              │   (API key + flavor)    │   tới provider           │
+              │                         │   (KHÔNG qua Portal)     │
+              ▼                         ▼                          ▼
+   ┌──────────────────┐         ┌────────────────┐         ┌────────────────┐
+   │  UniTrack        │         │   Snowplow     │         │  Firebase /    │
+   │  Portal          │         │   Collector    │         │  Kibana / ELK  │
+   │                  │         └────────────────┘         └────────────────┘
+   │  nginx :443      │
+   │  → Node :4010    │
+   │  → SQLite        │
+   │                  │
+   │  ② Trả config    │
+   │  + SSE realtime  │ ← Operator (Web admin) cấu hình ở đây
+   └──────────────────┘
+</div>
+
+<p style="margin-top: 10px;">
+  <b>Cốt lõi:</b> Portal chỉ phục vụ <b>cấu hình</b> (config). Event ingestion
+  của user đi <b>thẳng từ SDK</b> tới provider (Snowplow / Firebase / Kibana
+  nội bộ). Portal nhẹ, chịu tải thấp.
+</p>
+
+<h2>4. Source code structure</h2>
+
+<pre><code>portal/
+├── server.js                  # Express bootstrap, route mounting, PM2 entry
+├── package.json               # 1 dep: express ^4.21
+├── api.js                     # REST API: /api/projects/* (CRUD + config)
+├── auth.js                    # Login / signup / cookie session
+├── config.js                  # GET /config (app-facing, Bearer api_key)
+├── config_stream.js           # SSE /config-stream (realtime push)
+├── ingest.js                  # POST /v1/events (tùy chọn, debug only)
+├── snowplow.js                # POST /sp/&lt;key&gt;/... (Snowplow proxy)
+├── deliver.js                 # Telegram bot delivery (optional)
+├── db.js                      # SQLite schema + migrations + connection
+│
+├── public/                    # Frontend Web SPA
+│   ├── index.html             # ~5000 dòng HTML + CSS + JS thuần
+│   └── setup/firebase/        # 4 setup guide HTML cho dev tích hợp
+│       ├── ios.html
+│       ├── android.html
+│       ├── flutter.html
+│       └── react-native.html
+│
+└── data/
+    └── events.db              # SQLite (WAL mode)
+</code></pre>
+
+<h2>5. Database (SQLite)</h2>
+
+<p>
+  Portal dùng <b>1 file SQLite</b> tại <span class="mono">portal/data/events.db</span>,
+  truy cập qua Node 20 built-in module <span class="mono">node:sqlite</span>
+  (không cần native binding). WAL mode để concurrent read.
+</p>
+
+<h3>Tables chính</h3>
+
+<table>
+  <thead>
+    <tr><th>Table</th><th>Mục đích</th><th>Scope</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="mono">users</span></td>
+      <td>User login Portal (admin + project owner)</td>
+      <td>Auth</td>
+    </tr>
+    <tr>
+      <td><span class="mono">sessions</span></td>
+      <td>Cookie session login (KHÔNG phải session user-app)</td>
+      <td>Auth</td>
+    </tr>
+    <tr>
+      <td><span class="mono">projects</span></td>
+      <td>1 row / project. Mỗi project có api_key riêng (Bearer token)</td>
+      <td>Quản lý project</td>
+    </tr>
+    <tr>
+      <td><span class="mono">project_config</span></td>
+      <td>JSON config của từng project: sdk_config, snowplow, firebase, tracing, http_providers</td>
+      <td>Cấu hình SDK</td>
+    </tr>
+    <tr>
+      <td><span class="mono">events</span> <span class="tag muted">optional / debug</span></td>
+      <td>Lưu event app gửi về (debug mode, không bắt buộc — app default gửi thẳng provider)</td>
+      <td>Debug</td>
+    </tr>
+    <tr>
+      <td><span class="mono">app_sessions</span> <span class="tag muted">optional</span></td>
+      <td>Phái sinh từ events, reconstruct session để debug</td>
+      <td>Debug</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Schema example — project_config</h3>
+
+<pre><code>CREATE TABLE project_config (
+  project_id     INTEGER PRIMARY KEY,
+  endpoint       TEXT,                  -- UniTrack ingest endpoint
+  sdk_config     TEXT,                  -- JSON: batchSize, flushIntervalMs, autoCapture flags
+  snowplow       TEXT,                  -- JSON: {enabled, endpoint, appId, schemas}
+  firebase       TEXT,                  -- JSON: {enabled, options:{...}}
+  tracing        TEXT,                  -- JSON: {enabled, header_name, allowlist_hosts, sampled}
+  http_providers TEXT,                  -- JSON array: [{id, endpoint, format, headers, ...}]
+  version        INTEGER NOT NULL DEFAULT 1,
+  updated_at     INTEGER NOT NULL
+);
+</code></pre>
+
+<h3>Kích thước thực tế</h3>
+
+<ul>
+  <li><b>Hiện tại</b> (7 project, vài MB config): file events.db ~54 MB</li>
+  <li><b>Sau 1 năm</b> (15-20 project): ước tính ~100 MB nếu giữ debug mode</li>
+  <li><b>Sau 1 năm</b> (chỉ config, không debug): &lt;10 MB</li>
+</ul>
+
+<h2>6. API endpoints (Express routes)</h2>
+
+<h3>App-facing (SDK gọi)</h3>
+
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Mục đích</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="mono">GET</span></td>
+      <td><span class="mono">/event-tracking-mobile/config</span></td>
+      <td>Bearer api_key</td>
+      <td>SDK pull config khi cold start (ETag versioning)</td>
+    </tr>
+    <tr>
+      <td><span class="mono">GET</span></td>
+      <td><span class="mono">/event-tracking-mobile/config-stream</span></td>
+      <td>Bearer api_key</td>
+      <td>SSE stream — realtime push config_changed event</td>
+    </tr>
+    <tr>
+      <td><span class="mono">POST</span></td>
+      <td><span class="mono">/event-tracking-mobile/v1/events</span></td>
+      <td>Bearer api_key</td>
+      <td>Ingest event (debug mode only — production app gửi thẳng provider)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Admin-facing (Web UI gọi)</h3>
+
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Mục đích</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><span class="mono">/auth/login</span></td><td>Đăng nhập (cookie HttpOnly)</td></tr>
+    <tr><td>POST</td><td><span class="mono">/auth/logout</span></td><td>Đăng xuất</td></tr>
+    <tr><td>GET</td><td><span class="mono">/api/projects</span></td><td>List projects của user</td></tr>
+    <tr><td>POST</td><td><span class="mono">/api/projects</span></td><td>Tạo project mới (auto sinh api_key)</td></tr>
+    <tr><td>GET</td><td><span class="mono">/api/projects/:id/config</span></td><td>Đọc config</td></tr>
+    <tr><td>PUT</td><td><span class="mono">/api/projects/:id/config</span></td><td>Sửa config → bump version → SSE push</td></tr>
+    <tr><td>GET</td><td><span class="mono">/api/projects/:id/config/export</span></td><td>Export config JSON</td></tr>
+    <tr><td>POST</td><td><span class="mono">/api/projects/:id/config/import</span></td><td>Import config từ JSON</td></tr>
+  </tbody>
+</table>
+
+<h2>7. SSE Realtime Config Stream</h2>
+
+<p>
+  Khi operator sửa config ở Portal Web, SDK đang chạy trên app người dùng
+  cần biết để pull config mới — không phải đợi app restart. Portal dùng
+  <b>Server-Sent Events</b> (HTTP/1.1 streaming, không phải WebSocket) qua
+  endpoint <span class="mono">GET /config-stream</span>.
+</p>
+
+<h3>Wire format</h3>
+
+<pre><code>HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+
+event: hello
+data: {"project_id":4}
+
+event: config_changed
+data: {"version":21}
+
+: ping        ← heartbeat mỗi 25s, giữ connection sống
+
+event: config_changed
+data: {"version":22}
+</code></pre>
+
+<p>
+  SDK đọc stream này, gặp event <span class="mono">config_changed</span> thì
+  tự gọi lại <span class="mono">GET /config</span> với ETag — nếu version mới
+  thì pull về và apply.
+</p>
+
+<div class="card orange">
+  <b>Lưu ý vận hành SSE:</b>
+  <ul style="margin: 8px 0 0 24px;">
+    <li>nginx cần config <span class="mono">proxy_buffering off</span> + <span class="mono">proxy_read_timeout 86400s</span> cho path <span class="mono">/config-stream</span></li>
+    <li>HTTP/2 hoạt động tốt hơn HTTP/1.1 (multiplexing — nhiều SSE concurrent không tốn TCP connection)</li>
+    <li>Heartbeat <span class="mono">: ping</span> mỗi 25 giây giữ connection qua proxy idle timeout</li>
+  </ul>
+</div>
+
+<h2>8. Background services trong process Node</h2>
+
+<p>
+  Process <span class="mono">event-tracking-portal</span> spawn 2 thread con
+  (qua <span class="mono">setInterval</span>, không phải worker thread):
+</p>
+
+<table>
+  <thead><tr><th>Service</th><th>Tần suất</th><th>Mục đích</th><th>Bắt buộc?</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>Agent scheduler</b></td>
+      <td>Tick mỗi 10 phút</td>
+      <td>Cron daily 07:00 VN — chạy LLM analyze event của ngày hôm trước, gửi report Telegram</td>
+      <td>Optional (off mặc định)</td>
+    </tr>
+    <tr>
+      <td><b>Telegram bot</b></td>
+      <td>Long-poll 30s timeout</td>
+      <td>Nhận lệnh từ Telegram chat (vd <span class="mono">/report</span>, <span class="mono">/flows</span>) → trả report</td>
+      <td>Optional</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Outbound network requirements (cho 2 service trên)</h3>
+
+<ul>
+  <li><span class="mono">api.telegram.org:443</span> — bot polling + send message</li>
+  <li>LLM endpoint (vd <span class="mono">api.openai.com:443</span> hoặc LLM nội bộ FPT)</li>
+</ul>
+
+<p>
+  Nếu trung tâm không dùng tính năng AI report Telegram, có thể tắt 2 service
+  này và outbound firewall không cần whitelist 2 host trên.
+</p>
+
+<h2>9. Yêu cầu hạ tầng (gửi đội System / ISC)</h2>
+
+<div class="grid-2">
+
+  <div class="card accent">
+    <h3 style="margin-top: 0;">Server (1 instance)</h3>
+    <table style="font-size: 13px;">
+      <tr><td><b>CPU</b></td><td>2 vCPU (recommend 4 vCPU)</td></tr>
+      <tr><td><b>RAM</b></td><td>2 GB (recommend 4 GB)</td></tr>
+      <tr><td><b>Disk</b></td><td>20 GB SSD (recommend 50 GB)</td></tr>
+      <tr><td><b>Network</b></td><td>100 Mbps</td></tr>
+      <tr><td><b>OS</b></td><td>Ubuntu 22.04 LTS</td></tr>
+    </table>
+  </div>
+
+  <div class="card green">
+    <h3 style="margin-top: 0;">Network</h3>
+    <table style="font-size: 13px;">
+      <tr><td><b>Inbound</b></td><td>443 (HTTPS), 80 (Let's Encrypt), 22 (SSH whitelist)</td></tr>
+      <tr><td><b>Outbound</b></td><td>api.telegram.org, LLM endpoint (optional)</td></tr>
+      <tr><td><b>Domain</b></td><td>tracking.fpt.vn (hoặc subdomain ISC tự chọn)</td></tr>
+      <tr><td><b>TLS</b></td><td>Wildcard *.fpt.vn hoặc Let's Encrypt</td></tr>
+    </table>
+  </div>
+
+  <div class="card orange">
+    <h3 style="margin-top: 0;">Backup</h3>
+    <table style="font-size: 13px;">
+      <tr><td><b>Frequency</b></td><td>Daily 02:00 VN</td></tr>
+      <tr><td><b>Method</b></td><td><span class="mono">sqlite3 .backup</span> → gzip → S3/NFS ISC</td></tr>
+      <tr><td><b>Retention</b></td><td>30 ngày</td></tr>
+      <tr><td><b>Size</b></td><td>~5-50 MB / backup (nén gzip)</td></tr>
+      <tr><td><b>Restore test</b></td><td>Quarterly</td></tr>
+    </table>
+  </div>
+
+  <div class="card red">
+    <h3 style="margin-top: 0;">Monitoring + SLA</h3>
+    <table style="font-size: 13px;">
+      <tr><td><b>Uptime</b></td><td>≥ 99.5% / tháng</td></tr>
+      <tr><td><b>Metrics</b></td><td>CPU, RAM, disk, RPS ingest, latency p95</td></tr>
+      <tr><td><b>Dashboard</b></td><td>Grafana / Zabbix chuẩn ISC</td></tr>
+      <tr><td><b>Alert</b></td><td>PM2 crash > 3 lần/24h, disk > 80%</td></tr>
+      <tr><td><b>Log</b></td><td>PM2 rotating logs, retention 7 ngày</td></tr>
+    </table>
+  </div>
+
+</div>
+
+<h2>10. Deploy quy trình</h2>
+
+<h3>Lần đầu cài lên server ISC</h3>
+
+<pre><code># 1. Cài Node 20 + PM2 + nginx
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install nodejs nginx
+sudo npm install -g pm2
+
+# 2. Clone code
+git clone https://github.com/sieuvitdet/unitrack-sdk.git
+cd unitrack-sdk/portal
+npm install
+
+# 3. Set env vars (qua systemd hoặc .env)
+export PORT=4010
+export HOST=127.0.0.1
+export BASE_PATH=/event-tracking-mobile
+export ADMIN_EMAIL=admin@fpt.vn
+export ADMIN_PASS=&lt;random&gt;
+
+# 4. Start với PM2
+pm2 start server.js --name event-tracking-portal
+pm2 save
+pm2 startup    # auto-start khi reboot
+
+# 5. Config nginx reverse proxy 443 → 4010 (xem section 11)
+sudo certbot --nginx -d tracking.fpt.vn
+</code></pre>
+
+<h3>Lần update sau</h3>
+
+<pre><code>cd /root/event-tracking-portal
+git pull
+pm2 restart event-tracking-portal
+</code></pre>
+
+<p>
+  Không cần build step. Không cần migration thủ công (SQLite migration tự
+  chạy ở <span class="mono">db.js</span> lúc khởi động).
+</p>
+
+<h2>11. Nginx config mẫu</h2>
+
+<pre><code>server {
+    listen 443 ssl http2;
+    server_name tracking.fpt.vn;
+
+    ssl_certificate     /etc/letsencrypt/live/tracking.fpt.vn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tracking.fpt.vn/privkey.pem;
+
+    # Default — proxy Node port 4010
+    location / {
+        proxy_pass http://127.0.0.1:4010;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SSE config stream — buffering OFF, timeout cao
+    location /event-tracking-mobile/config-stream {
+        proxy_pass http://127.0.0.1:4010;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    # Rate limit ingest endpoint
+    location /event-tracking-mobile/v1/events {
+        limit_req zone=ingest burst=200 nodelay;
+        proxy_pass http://127.0.0.1:4010;
+    }
+}
+
+server {
+    listen 80;
+    server_name tracking.fpt.vn;
+    return 301 https://$host$request_uri;
+}
+
+http {
+    limit_req_zone $binary_remote_addr zone=ingest:10m rate=100r/s;
+}
+</code></pre>
+
+<h2>12. Security</h2>
+
+<table>
+  <thead><tr><th>Aspect</th><th>Implementation</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>Auth Web admin</b></td>
+      <td>Email + password (bcrypt hash), cookie session HttpOnly + Secure flag</td>
+    </tr>
+    <tr>
+      <td><b>API auth (SDK)</b></td>
+      <td>Per-project Bearer api_key (random 30+ char)</td>
+    </tr>
+    <tr>
+      <td><b>Secrets ở env</b></td>
+      <td>ADMIN_PASS, LLM_API_KEY qua systemd env, không commit code</td>
+    </tr>
+    <tr>
+      <td><b>Header values với placeholder</b></td>
+      <td>HttpProvider headers value <span class="mono">${ENV_*}</span> resolve runtime — secret không lưu Portal DB</td>
+    </tr>
+    <tr>
+      <td><b>Rate limit ingest</b></td>
+      <td>nginx <span class="mono">limit_req 100r/s</span> per IP</td>
+    </tr>
+    <tr>
+      <td><b>Firewall</b></td>
+      <td>iptables default deny inbound, whitelist 22/80/443</td>
+    </tr>
+    <tr>
+      <td><b>OS hardening</b></td>
+      <td>unattended-upgrades, fail2ban SSH, root login disabled</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>13. Câu hỏi cần xin từ ISC</h2>
+
+<ol>
+  <li>Cấp được Linux VM <b>2-4 vCPU / 2-4 GB RAM / 20-50 GB SSD</b> chạy 24/7?</li>
+  <li>Domain <b><span class="mono">tracking.fpt.vn</span></b> hoặc subdomain <span class="mono">*.ftel.vn</span> có sẵn cấp được không?</li>
+  <li>TLS cert wildcard có sẵn hay phải Let's Encrypt?</li>
+  <li>Backup storage chuẩn ISC: S3-compatible / NFS / rsync target?</li>
+  <li>Outbound firewall: <span class="mono">api.telegram.org</span> + LLM endpoint có phải xin rule riêng?</li>
+  <li>Monitoring dashboard chuẩn ISC (Grafana / Zabbix) wire vào thế nào?</li>
+</ol>
+
+<div class="footer">
+  UniTrack Portal · Internal Tech Reference · Generated 22/06/2026
+</div>
+
+</body>
+</html>
