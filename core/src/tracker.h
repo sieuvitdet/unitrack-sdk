@@ -48,14 +48,6 @@ public:
     // previous_session_id so backend can chain consecutive sessions.
     std::string previous_session_id()   { return session_.previous_session_id(); }
 
-    // tracking_id is minted 1:1 with session_id (fresh UUID on every
-    // rotation, including cold start, timeout, manual reset). It is stamped
-    // onto every outgoing Snowplow event so Portal can map
-    // user → session_id → tracking_id and pivot an operator lookup back to
-    // the full Snowplow event timeline.
-    std::string current_tracking_id()   { return session_.current_tracking_id(); }
-    std::string previous_tracking_id()  { return session_.previous_tracking_id(); }
-
     // Force a session rotation right now — bumps session_index, mints a
     // new UUID, records the closed session as previous. Apps call this on
     // logout / switch-account / "new conversation" boundaries when the

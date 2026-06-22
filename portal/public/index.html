@@ -299,9 +299,6 @@ let route = {name:'projects', pid:null, tab:'sessions'};
 let _suppressHashChange = false;
 function routeToHash(r){
   if(r.name==='cms') return '#/cms';
-  if(r.name==='journey' && r.pid && r.tid){
-    return `#/p/${r.pid}/journey/${encodeURIComponent(r.tid)}`;
-  }
   if(r.name==='project' && r.pid){
     let h = `#/p/${r.pid}`;
     if(r.tab && r.tab!=='sessions') h += `/${r.tab}`;
@@ -316,8 +313,6 @@ function hashToRoute(){
   if(m){
     const pid = parseInt(m[1], 10);
     const seg2 = m[2], seg3 = m[3];
-    // /p/<pid>/journey/<tid> — user-flow viewer cho 1 tracking_id
-    if(seg2 === 'journey' && seg3) return {name:'journey', pid, tid: decodeURIComponent(seg3)};
     // /p/<pid>/sessions/<sid> opens the IDE drawer for that session.
     if(seg2 === 'sessions' && seg3) return {name:'project', pid, tab:'sessions', openSid: decodeURIComponent(seg3)};
     if(seg2) return {name:'project', pid, tab: seg2};
@@ -356,7 +351,6 @@ $('#navCms').onclick=()=>go({name:'cms'});
 async function render(){
   try{
     if(route.name==='projects'){ $('#crumb').textContent=''; return await renderProjects(); }
-    if(route.name==='journey'){ return await renderJourney(); }
     if(route.name==='project'){ return await renderProject(); }
     if(route.name==='cms'){ $('#crumb').textContent='· CMS'; return await renderCMS(); }
   }catch(e){
@@ -394,404 +388,6 @@ async function renderCMS(){
           <td style="white-space:nowrap"><a class="btn ghost sm" onclick="go({name:'project',pid:${p.id}})">Mở</a></td>
         </tr>`).join(''):'<tr><td colspan=6 class=empty>Chưa có dự án.</td></tr>'}
       </tbody></table></div>`;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// User Flow viewer — page độc lập (route #/p/:pid/journey/:tid).
-// State A: chưa import JSON → upload area.
-// State B: đã có data → render flow chart ngang theo nhóm screen, mỗi screen
-//   list API + tap dẫn sang màn kế. Click screen → drawer chi tiết event.
-// Data nguồn: API /api/projects/:pid/journey/:tid (journey_meta + events).
-// Phase 1 này render linear flow group-by-screen, chưa branching.
-// ──────────────────────────────────────────────────────────────────────────
-
-const _jState = { pid:null, tid:null, sid:null, meta:null, screens:[], events:[], selScreen:null };
-
-function _jShortSid(s){ return s ? s.slice(0,8) : ''; }
-function _jFmtTime(ms){
-  if(!ms) return '—';
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`;
-}
-function _jFmtDur(ms){
-  if(ms == null) return '—';
-  const s = ms/1000;
-  if(s < 1) return s.toFixed(2)+'s';
-  if(s < 60) return s.toFixed(1)+'s';
-  return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
-}
-
-// Group events theo screen contiguous. Mỗi screen segment có:
-//   { screen, enter, exit, events:[...], apis:[...] }
-// Network event được đẩy vào màn liền trước (vd Snowplow `network_request`).
-function _jGroupByScreen(events){
-  const segs = [];
-  let cur = null;
-  for (const e of events){
-    const isScreen = e.event_name === 'screen_view' || e.event_name === 'screen_end' || e.event_name === 'screen_load_completed';
-    const sname = e.screen;
-    if (isScreen && sname){
-      if (!cur || cur.screen !== sname){
-        if (cur) cur.exit = e.ts;
-        cur = { screen:sname, enter:e.ts, exit:e.ts, events:[], apis:[], crash:false };
-        segs.push(cur);
-      } else {
-        cur.exit = e.ts;
-      }
-      cur.events.push(e);
-      continue;
-    }
-    // non-screen event → attach vào segment hiện tại (hoặc tạo "(unknown)" segment)
-    if (!cur){
-      cur = { screen:'(không xác định)', enter:e.ts, exit:e.ts, events:[], apis:[], crash:false };
-      segs.push(cur);
-    }
-    cur.exit = e.ts;
-    cur.events.push(e);
-    if (e.event_name === 'application_error' || e.event_name === 'crash') cur.crash = true;
-    if (e.event_name === 'network_request' || e.event_name === 'network_error'){
-      const p = e.props || {};
-      cur.apis.push({
-        m: (p.method || 'GET').toUpperCase(),
-        u: p.url || (p.host ? (p.host + (p.path||'')) : '(url thiếu)'),
-        s: p.status != null ? p.status : (p.status_code != null ? p.status_code : 0),
-        ms: p.duration_ms || 0,
-      });
-    }
-  }
-  return segs;
-}
-
-async function renderJourney(){
-  const { pid, tid } = route;
-  _jState.pid = pid; _jState.tid = tid;
-  $('#crumb').textContent = `· User Flow · ${_jShortSid(tid)}`;
-  // Page skeleton: topbar gọn + nội dung canvas + drawer right
-  $('#view').innerHTML = `
-    <div id="jPage" style="position:relative;min-height:calc(100vh - 80px)">
-      <div id="jTopbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-        <button class="btn ghost sm" onclick="go({name:'project',pid:${pid},tab:'sessions'})">← Sessions</button>
-        <div class="mono" style="background:var(--panel2);padding:6px 12px;border-radius:8px;border:1px solid var(--line);font-size:12px;display:inline-flex;align-items:center;gap:10px">
-          <span style="color:var(--danger);font-weight:700" title="tracking_id">${esc(tid)}</span>
-          <span class="muted">·</span>
-          <span class="muted" id="jUserLabel">…</span>
-        </div>
-        <div id="jZoom" style="display:none;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px">
-          <button class="btn ghost sm" id="jZout" style="padding:4px 10px">−</button>
-          <span class="mono" id="jZpct" style="padding:0 8px;font-size:12px;min-width:48px;text-align:center">100%</span>
-          <button class="btn ghost sm" id="jZin" style="padding:4px 10px">+</button>
-          <button class="btn ghost sm" id="jZreset" style="padding:4px 10px;margin-left:4px" title="Reset">⟳</button>
-          <button class="btn ghost sm" id="jFull" style="padding:4px 10px;margin-left:2px" title="Toàn màn hình">⛶</button>
-        </div>
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn ghost sm" id="jReimport" style="display:none">↻ Re-import</button>
-          <button class="btn ghost sm" id="jDelete" style="display:none;color:var(--danger)">🗑 Xoá</button>
-        </div>
-      </div>
-      <div id="jContent"></div>
-    </div>
-  `;
-  await _jLoad();
-}
-
-async function _jLoad(){
-  const { pid, tid } = _jState;
-  try {
-    const data = await api(`/api/projects/${pid}/journey/${encodeURIComponent(tid)}`);
-    _jState.meta = data.meta;
-    _jState.events = data.events || [];
-    _jState.screens = _jGroupByScreen(_jState.events);
-    _jRenderFilled();
-  } catch (err){
-    if (err && /404/.test(String(err.message||err))) _jRenderEmpty();
-    else _jRenderEmpty(String(err.message || err));
-  }
-}
-
-function _jRenderEmpty(errMsg){
-  $('#jUserLabel').textContent = '(chưa có data)';
-  const err = errMsg ? `<div style="background:#2a1620;border:1px solid var(--danger);color:var(--danger);padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:13px">⚠ ${esc(errMsg)}</div>` : '';
-  $('#jContent').innerHTML = `
-    ${err}
-    <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:40px;text-align:center;max-width:680px;margin:40px auto">
-      <div style="font-size:56px;margin-bottom:8px">📥</div>
-      <h3 style="margin:0 0 8px;font-size:18px">Chưa có dữ liệu hành trình</h3>
-      <p class="muted" style="margin:0 0 24px;font-size:13px;line-height:1.6">
-        Gửi <code class="mono" style="background:var(--panel2);padding:2px 6px;border-radius:4px;color:var(--danger)">${esc(_jState.tid)}</code> cho đội Snowplow.<br>
-        Họ sẽ trả lại file JSON (events query từ data lake) — upload file đó vào đây.
-      </p>
-      <label for="jFile" class="btn" style="cursor:pointer;display:inline-block">⬆ Chọn file JSON / NDJSON</label>
-      <input type="file" id="jFile" accept=".json,.ndjson,application/json,text/plain" style="display:none">
-      <div class="muted" style="font-size:11.5px;margin-top:16px;line-height:1.5">
-        Hỗ trợ JSON array hoặc NDJSON · tối đa 100MB · TTL 24h<br>
-        Portal validate tracking_id trong file phải khớp.
-      </div>
-    </div>
-  `;
-  $('#jFile').onchange = _jOnFile;
-}
-
-async function _jOnFile(ev){
-  const f = ev.target.files && ev.target.files[0];
-  if (!f) return;
-  const { pid, tid } = _jState;
-  $('#jContent').innerHTML = `<div class="empty" style="padding:60px"><div style="font-size:36px">⏳</div><div style="margin-top:8px">Đang upload ${esc(f.name)} (${(f.size/1024/1024).toFixed(1)}MB)…</div></div>`;
-  try {
-    const buf = await f.arrayBuffer();
-    const r = await fetch(`${BASE}/api/projects/${pid}/journey/import?tracking_id=${encodeURIComponent(tid)}`, {
-      method:'POST', headers:{ 'Content-Type':'application/json' }, body: buf,
-    });
-    // Parse response defensively — server có thể trả HTML lúc 413/502
-    const ctype = r.headers.get('content-type') || '';
-    let body, raw;
-    if (ctype.includes('application/json')) {
-      body = await r.json();
-    } else {
-      raw = await r.text();
-      try { body = JSON.parse(raw); } catch (_) { body = null; }
-    }
-    if (!r.ok) {
-      const msg = (body && (body.message || body.error))
-        || (r.status === 413 ? `File quá lớn (>${r.status === 413 ? '8MB' : '?'}). Hãy chia nhỏ file Snowplow trước khi upload.`
-            : (raw && raw.slice(0, 200)) || `HTTP ${r.status}`);
-      throw new Error(msg);
-    }
-    if (!body) throw new Error('Server trả về phản hồi không hợp lệ');
-    toast(`Imported ${body.imported} event${body.skipped?` · skip ${body.skipped}`:''}`);
-    await _jLoad();
-  } catch (err){
-    _jRenderEmpty(err.message || String(err));
-  }
-}
-
-function toast(msg){
-  let t = document.getElementById('jToast');
-  if (!t){
-    t = document.createElement('div');
-    t.id = 'jToast';
-    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);color:var(--accent);padding:10px 20px;border-radius:10px;z-index:50;font-size:13px;font-weight:600';
-    document.body.appendChild(t);
-  }
-  t.textContent = msg;
-  t.style.display = 'block';
-  clearTimeout(t._h);
-  t._h = setTimeout(()=>{ t.style.display='none'; }, 2200);
-}
-
-function _jRenderFilled(){
-  const { meta, screens, events } = _jState;
-  $('#jUserLabel').textContent = 'user ' + (meta.user_id || '—');
-  $('#jZoom').style.display = 'inline-flex';
-  $('#jReimport').style.display = '';
-  $('#jDelete').style.display = '';
-  $('#jReimport').onclick = ()=>_jRenderEmpty();
-  $('#jDelete').onclick = async ()=>{
-    if (!confirm('Xoá dữ liệu user-flow của tracking_id này?')) return;
-    await api(`/api/projects/${_jState.pid}/journey/${encodeURIComponent(_jState.tid)}`, { method:'DELETE' });
-    _jState.meta = null; _jState.events = []; _jState.screens = [];
-    _jRenderEmpty();
-  };
-
-  // Stats
-  const totalDurMs = (meta.ended_at_ms||0) - (meta.started_at_ms||0);
-  const apiCount = screens.reduce((a,s)=>a+s.apis.length,0);
-  const apiOk = screens.reduce((a,s)=>a+s.apis.filter(x=>x.s>=200&&x.s<300).length,0);
-  const apiErr = apiCount - apiOk;
-  const crashCount = screens.filter(s=>s.crash).length;
-
-  // Nodes: 1 card / screen group + connector tap label (nếu có element_key giữa screens)
-  let nodesHtml = '';
-  screens.forEach((s, i) => {
-    const apisHtml = s.apis.length
-      ? s.apis.slice(0, 6).map(a=>`
-          <div class="japi">
-            <span class="jmeth ${a.m==='POST'?'post':'get'}">${esc(a.m)}</span>
-            <span class="jurl" title="${esc(a.u)}">${esc(a.u.length>34?a.u.slice(0,32)+'…':a.u)}</span>
-            <span class="jdot" style="background:${a.s>=500?'#dc2626':(a.s>=400?'#f59e0b':(a.ms>1000?'#f59e0b':'#22c55e'))}"></span>
-            <span class="jms">${a.ms}ms</span>
-          </div>`).join('')
-        + (s.apis.length>6 ? `<div class="muted" style="font-size:11px;padding:4px 8px">…+${s.apis.length-6} API nữa</div>` : '')
-      : '<div class="muted" style="font-size:11px;padding:6px 8px">— không có API call —</div>';
-    const taps = s.events.filter(e=>e.event_name==='tap' || e.event_name==='click');
-    const lastTap = taps[taps.length-1];
-    const footer = i === screens.length-1
-      ? `<div class="jfoot dest">🎯 Màn cuối</div>`
-      : (lastTap
-          ? `<div class="jfoot">👆 ${esc(lastTap.element_key || lastTap.props?.element || 'tap')}</div>`
-          : `<div class="jfoot muted">navigate</div>`);
-    nodesHtml += `
-      <div class="jnode ${s.crash?'crash':''}" data-i="${i}">
-        <div class="jnode-h">
-          <div class="jnbadge">${i+1}</div>
-          <div class="jnname" title="${esc(s.screen)}">${esc(s.screen)}</div>
-          <div class="jndur">⏱ ${_jFmtDur(s.exit - s.enter)}</div>
-        </div>
-        <div class="jntime">${_jFmtTime(s.enter)} → ${_jFmtTime(s.exit)}</div>
-        <div class="jnstat">🌐 ${s.apis.length} API · 📺 ${s.events.length} event${s.crash?' · ⚠ crash':''}</div>
-        <div class="japis">${apisHtml}</div>
-        ${footer}
-      </div>
-    `;
-    if (i < screens.length-1){
-      const label = lastTap ? (lastTap.element_key || 'tap') : 'navigate';
-      nodesHtml += `<div class="jconn"><span class="jclbl">${esc(label)}</span><span class="jcarrow">→</span></div>`;
-    }
-  });
-
-  $('#jContent').innerHTML = `
-    <style>
-      .jstats{display:flex;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
-      .jstats .jstat{padding:2px 12px;border-right:1px solid var(--line)}
-      .jstats .jstat:last-child{border:none}
-      .jstats .jstat .k{color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:10px;font-weight:600}
-      .jstats .jstat .v{font-family:ui-monospace,monospace;font-size:14px;font-weight:700}
-      .jstats .jstat .v.ok{color:var(--accent2)} .jstats .jstat .v.err{color:var(--danger)}
-      .jcanvas{position:relative;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:auto;
-               min-height:560px;padding:24px;cursor:grab}
-      .jcanvas.fs{position:fixed;inset:0;z-index:50;border-radius:0;border:none;cursor:grab}
-      .jcanvas.dragging{cursor:grabbing}
-      .jtrack{display:flex;align-items:center;gap:0;transform-origin:left center;transition:transform .15s;padding:8px 0}
-      .jnode{flex:0 0 auto;width:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
-             padding:14px 16px;cursor:pointer;transition:transform .15s,border-color .15s,box-shadow .15s}
-      .jnode:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 4px 18px rgba(91,140,255,0.18)}
-      .jnode.sel{border-color:var(--warn);box-shadow:0 0 0 2px var(--warn)}
-      .jnode.crash{border-color:var(--danger)} .jnode.crash:hover{box-shadow:0 4px 18px rgba(255,107,107,0.22)}
-      .jnode-h{display:flex;align-items:center;gap:10px}
-      .jnbadge{width:26px;height:26px;border-radius:8px;background:var(--accent);color:#fff;font-weight:700;font-size:12px;
-               display:flex;align-items:center;justify-content:center;flex-shrink:0}
-      .jnode.crash .jnbadge{background:var(--danger)}
-      .jnname{flex:1;font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace}
-      .jndur{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--warn);font-weight:600;flex-shrink:0}
-      .jntime{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted);margin-top:6px}
-      .jnstat{font-size:11px;color:var(--muted);margin-top:6px}
-      .japis{margin-top:10px;display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);padding-top:8px}
-      .japi{display:flex;align-items:center;gap:8px;padding:3px 0;font-family:ui-monospace,monospace;font-size:11px}
-      .jmeth{font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:3px;width:34px;text-align:center;flex-shrink:0}
-      .jmeth.get{background:rgba(91,140,255,.18);color:#79c0ff}
-      .jmeth.post{background:rgba(255,107,107,.18);color:#ffa3a3}
-      .jurl{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-      .jdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-      .jms{color:var(--muted);font-size:10.5px;flex-shrink:0;min-width:42px;text-align:right}
-      .jfoot{margin-top:10px;padding:6px 10px;background:var(--panel2);border-radius:8px;font-size:11px;font-weight:600;
-             text-align:center;font-family:ui-monospace,monospace;color:var(--accent2)}
-      .jfoot.dest{color:var(--accent2);background:rgba(39,215,150,.10)}
-      .jfoot.muted{color:var(--muted)}
-      .jconn{flex:0 0 auto;width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
-      .jclbl{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted);background:var(--panel);padding:2px 8px;border-radius:6px;border:1px solid var(--line);max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .jcarrow{color:var(--accent);font-size:22px;font-weight:300}
-    </style>
-    <div class="jstats">
-      <div class="jstat"><div class="k">Tổng flow</div><div class="v">${_jFmtDur(totalDurMs)}</div></div>
-      <div class="jstat"><div class="k">Màn</div><div class="v">${screens.length}</div></div>
-      <div class="jstat"><div class="k">Events</div><div class="v">${events.length}</div></div>
-      <div class="jstat"><div class="k">API call</div><div class="v ${apiErr?'err':'ok'}">${apiOk}/${apiCount}${apiErr?' err':''}</div></div>
-      <div class="jstat"><div class="k">Crash</div><div class="v ${crashCount?'err':'ok'}">${crashCount}</div></div>
-      <div class="jstat" style="margin-left:auto"><div class="k">Platform</div><div class="v" style="font-size:12px">${esc(meta.platform || '—')}</div></div>
-    </div>
-    <div class="jcanvas" id="jCanvas">
-      <div class="jtrack" id="jTrack">${nodesHtml || '<div class="empty">Không có màn nào</div>'}</div>
-    </div>
-  `;
-
-  // Wire interactions
-  document.querySelectorAll('#jTrack .jnode').forEach(el => {
-    el.onclick = ()=>{
-      document.querySelectorAll('.jnode.sel').forEach(n=>n.classList.remove('sel'));
-      el.classList.add('sel');
-      _jOpenScreenDrawer(+el.dataset.i);
-    };
-  });
-  _jWireZoomPan();
-}
-
-function _jWireZoomPan(){
-  const track = document.getElementById('jTrack');
-  const canvas = document.getElementById('jCanvas');
-  let zoom = 1;
-  const apply = ()=>{
-    track.style.transform = `scale(${zoom})`;
-    document.getElementById('jZpct').textContent = Math.round(zoom*100)+'%';
-  };
-  $('#jZin').onclick = ()=>{ zoom = Math.min(1.6, +(zoom+0.1).toFixed(2)); apply(); };
-  $('#jZout').onclick = ()=>{ zoom = Math.max(0.5, +(zoom-0.1).toFixed(2)); apply(); };
-  $('#jZreset').onclick = ()=>{ zoom = 1; apply(); canvas.scrollLeft = 0; };
-  $('#jFull').onclick = ()=>{
-    canvas.classList.toggle('fs');
-    $('#jFull').textContent = canvas.classList.contains('fs') ? '⤡' : '⛶';
-  };
-  canvas.addEventListener('wheel', (e)=>{
-    if (!(e.ctrlKey||e.metaKey)) return;
-    e.preventDefault();
-    zoom = Math.min(1.6, Math.max(0.5, +(zoom - Math.sign(e.deltaY)*0.1).toFixed(2)));
-    apply();
-  }, { passive:false });
-  // Drag to pan
-  let drag = null;
-  canvas.addEventListener('pointerdown', (e)=>{
-    if (e.target.closest('.jnode')) return;
-    drag = { sx:e.clientX, sy:e.clientY, sl:canvas.scrollLeft, st:canvas.scrollTop };
-    canvas.setPointerCapture(e.pointerId);
-    canvas.classList.add('dragging');
-  });
-  canvas.addEventListener('pointermove', (e)=>{
-    if (!drag) return;
-    canvas.scrollLeft = drag.sl - (e.clientX - drag.sx);
-    canvas.scrollTop = drag.st - (e.clientY - drag.sy);
-  });
-  canvas.addEventListener('pointerup', ()=>{ drag=null; canvas.classList.remove('dragging'); });
-}
-
-function _jOpenScreenDrawer(idx){
-  const s = _jState.screens[idx];
-  if (!s) return;
-  // dùng drawer chung có sẵn (id="drawer")
-  const drawer = document.getElementById('drawer');
-  const scrim = document.getElementById('scrim');
-  if (!drawer || !scrim) return;
-  const eventsHtml = s.events.map(e=>`
-    <div style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--panel2)">
-      <div style="display:flex;align-items:center;gap:8px;font-size:12px">
-        <span class="mono" style="font-weight:700;color:${e.event_name==='application_error'?'var(--danger)':'var(--accent2)'}">${esc(e.event_name)}</span>
-        <span class="muted mono" style="font-size:11px;margin-left:auto">${_jFmtTime(e.ts)}</span>
-      </div>
-      ${e.element_key ? `<div class="mono muted" style="font-size:11px;margin-top:3px">${esc(e.element_key)}</div>` : ''}
-      ${Object.keys(e.props||{}).length ? `<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--muted);font-size:11px">properties</summary><pre style="margin:6px 0 0;font-size:10.5px;max-height:160px">${esc(JSON.stringify(e.props, null, 2))}</pre></details>` : ''}
-    </div>
-  `).join('');
-  $('#drawer .dh').innerHTML = `
-    <div style="flex:1">
-      <div style="font-size:15px;font-weight:700">${esc(s.screen)}</div>
-      <div class="muted mono" style="font-size:11px;margin-top:2px">${_jFmtTime(s.enter)} → ${_jFmtTime(s.exit)} · ${_jFmtDur(s.exit-s.enter)}</div>
-    </div>
-    <button>✕</button>
-  `;
-  $('#drawer .db').innerHTML = `
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <span class="badge">🌐 ${s.apis.length} API</span>
-      <span class="badge" style="background:#1d2a1f;color:var(--accent2)">📺 ${s.events.length} event</span>
-      ${s.crash ? `<span class="badge crash">⚠ crash</span>` : ''}
-    </div>
-    ${s.apis.length ? `
-      <h4 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)">API calls (${s.apis.length})</h4>
-      <div style="margin-bottom:14px">${s.apis.map(a=>`
-        <div style="display:flex;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;font-size:12px;font-family:ui-monospace,monospace;align-items:center">
-          <span class="jmeth ${a.m==='POST'?'post':'get'}" style="font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:3px;width:34px;text-align:center">${esc(a.m)}</span>
-          <span style="flex:1;word-break:break-all">${esc(a.u)}</span>
-          <span style="font-weight:700;color:${a.s>=400?'var(--danger)':'var(--accent2)'}">${a.s||'—'}</span>
-          <span class="muted" style="min-width:50px;text-align:right">${a.ms}ms</span>
-        </div>
-      `).join('')}</div>
-    ` : ''}
-    <h4 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)">Events (${s.events.length})</h4>
-    ${eventsHtml}
-  `;
-  drawer.classList.add('open');
-  scrim.classList.add('open');
-  // wire close
-  $('#drawer .dh button').onclick = ()=>{
-    drawer.classList.remove('open'); scrim.classList.remove('open');
-    document.querySelectorAll('.jnode.sel').forEach(n=>n.classList.remove('sel'));
-  };
 }
 
 async function renderProjects(){
@@ -3027,7 +2623,7 @@ async function renderWireframe(pid){
   } else {
     const sessResp = await api(`/api/projects/${pid}/sessions${qs}`).catch(()=>({sessions:[]}));
     const sessions = (sessResp.sessions||[]).slice(0, 200);
-    rightTitle = 'Sessions — click để replay';
+    rightTitle = 'Sessions — click để xem chi tiết';
     rightBody = sessions.length ? sessions.map(s=>{
       const dot = s.crashed ? '#dc2626' : (s.ended_reason==='inferred_terminate' ? '#f59e0b' : '#5b8cff');
       return `<div class="wf-sess" data-sid="${esc(s.session_id)}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px">
@@ -3101,9 +2697,10 @@ async function renderWireframe(pid){
         <div style="padding:10px 12px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);background:var(--panel2)">${rightTitle}</div>
         <div id="wfSessList">${rightBody}</div>
       </div>
-      <!-- Replay control bar — ALWAYS visible at the bottom of the grid (full
-           width across both columns). Disabled when no session is selected. -->
-      <div id="wfCtrl" style="grid-column:1/-1;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:12px;flex-wrap:wrap">
+      <!-- Replay control bar — ẨN ĐỂ DEMO SẠCH. Element vẫn render để
+           replay engine không lỗi NPE khi truy cập wfPlay/wfSeek/wfNow,
+           chỉ giấu khỏi UI thuyết trình. -->
+      <div id="wfCtrl" style="display:none;grid-column:1/-1;background:var(--panel);border-top:1px solid var(--line);padding:10px 14px;gap:10px;align-items:center;font-size:12px;flex-wrap:wrap">
         <button class="btn sm" id="wfPlay" style="min-width:64px" disabled>▶ Play</button>
         <span id="wfTime" class="mono muted" style="min-width:90px">0.0s / 0.0s</span>
         <input id="wfSeek" type="range" min="0" max="1000" value="0" style="flex:1;min-width:160px" disabled/>
@@ -3894,27 +3491,16 @@ async function renderSessions(pid){
     </div>
     ${userCard}
     <div style="max-height:54vh;overflow:auto"><table>
-      <thead><tr><th>Session ID</th><th>Tracking ID</th><th>User ID</th><th>Timestamp</th><th>Platform</th><th>User Flow</th></tr></thead>
+      <thead><tr><th>Session ID</th><th>User ID</th><th>Timestamp</th><th>Platform</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`
         <tr class="click sess" data-sid="${esc(r.session_id)}">
           <td class="mono" style="color:var(--accent2)" title="${esc(r.session_id)}">${shortSid(r.session_id)}</td>
-          <td class="mono" title="${esc(r.tracking_id||'(SDK cũ chưa có tracking_id)')}" style="font-size:11px;color:${r.tracking_id?'var(--danger)':'var(--muted)'}">${
-            r.tracking_id
-              ? `<span style="cursor:pointer" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(r.tracking_id)}').then(()=>this.textContent='✓ copied').then(()=>setTimeout(()=>this.textContent='${shortSid(r.tracking_id)} 📋',1200))" title="Click để copy ${esc(r.tracking_id)}">${shortSid(r.tracking_id)} 📋</span>`
-              : '—'
-          }</td>
           <td class="mono muted" style="font-size:11px">${esc(r.user_id||'—')}</td>
           <td class="mono muted">${r.started_at?fmtTime(r.started_at):'—'}</td>
           <td class="muted">${esc(r.platform)||'—'}</td>
-          <td>${r.tracking_id
-              ? `<button class="btn sm jbtn" data-tid="${esc(r.tracking_id)}" data-sid="${esc(r.session_id)}" onclick="event.stopPropagation()">🛤 User Flow</button>`
-              : '<span class="muted" style="font-size:11px">—</span>'}</td>
-        </tr>`).join(''):'<tr><td colspan=6 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
+        </tr>`).join(''):'<tr><td colspan=4 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
       </tbody></table></div>`;
   document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionIDE(pid,tr.dataset.sid));
-  document.querySelectorAll('.jbtn').forEach(b=>{
-    b.onclick=(ev)=>{ ev.stopPropagation(); go({name:'journey', pid, tid:b.dataset.tid, sid:b.dataset.sid}); };
-  });
   const sel=document.getElementById('userSelect');
   if(sel) sel.onchange=()=>{ _userFilter=sel.value; renderSessions(pid); };
 }
@@ -4193,17 +3779,16 @@ async function openSessionIDE(pid, sid){
   ov.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
       <b>Session ${shortSid(sid)}</b>
-      <span id="ideTrackingId" class="muted mono" style="font-size:11px"></span>
       <span class="muted" style="font-size:12px" id="ideMeta"></span>
       <span id="ideCrashBadge"></span>
       <input id="ideSearch" placeholder="🔎 Tìm màn / API / element / lỗi…" style="margin-left:auto;width:320px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 12px;font-size:12px">
       <!-- Layout button removed — wireframe capture is parked. -->
       <button class="btn ghost sm" id="ideClose">✕ Đóng</button>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px">
-      <!-- Replay controls — drive the middle timeline at user-chosen speed.
-           Auto speed picks a target total of ~12s so even a 3-hour session is
-           watchable; raw "real time" is in the dropdown if you want it. -->
+    <!-- Replay controls — ẨN ĐỂ DEMO SẠCH. Element vẫn render trong DOM
+         để replay engine (idePlay/ideSeek/ideNow handler) không lỗi NPE
+         khi click vào row, chỉ giấu khỏi UI thuyết trình. -->
+    <div style="display:none;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px">
       <button class="btn sm" id="idePlay" style="min-width:74px" disabled>▶ Play</button>
       <button class="btn ghost sm" id="ideStop" disabled>⏹</button>
       <label style="display:flex;align-items:center;gap:5px">Tốc độ
@@ -4763,35 +4348,6 @@ async function renderIDEMain(pid, sid){
   document.getElementById('ideMeta').textContent =
     (ideAppName ? ideAppName + ' · ' : '')
     + `${segs.length} màn · ${fmtDur(s.duration_ms)} · ${s.ended_reason}`;
-
-  // Tracking ID badge — SDK 0.3.31/0.3.7+ stamps this UUID on every Snowplow
-  // payload. QA copies it from here and pastes into the Snowplow query (the
-  // mapping endpoint that the data team owns) to pull the full event timeline
-  // for this exact session. Click → copy to clipboard.
-  const tidEl = document.getElementById('ideTrackingId');
-  if (tidEl) {
-    if (s.tracking_id) {
-      tidEl.innerHTML = `<span title="Click để copy tracking_id ${esc(s.tracking_id)}"
-            style="cursor:pointer;background:var(--danger)18;color:var(--danger);
-                   border:1px solid var(--danger)55;padding:3px 9px;border-radius:14px;
-                   font-size:11px;font-weight:600">
-          tracking_id <span style="opacity:.6">·</span> ${esc(s.tracking_id)} 📋
-        </span>`;
-      tidEl.firstElementChild.onclick = () => {
-        navigator.clipboard.writeText(s.tracking_id).then(() => {
-          const sp = tidEl.querySelector('span');
-          const old = sp.innerHTML;
-          sp.textContent = '✓ đã copy tracking_id';
-          setTimeout(() => { sp.innerHTML = old; }, 1400);
-        });
-      };
-    } else {
-      tidEl.innerHTML = `<span style="color:var(--muted);font-size:11px"
-          title="SDK cũ chưa stamp tracking_id — cập nhật iOS ≥ 0.3.31 / Android ≥ 0.3.7">
-          tracking_id chưa có (SDK cũ)
-        </span>`;
-    }
-  }
 
   // Crash/bug badge in the header — click toggles the "only buggy screens" filter.
   const badge = document.getElementById('ideCrashBadge');

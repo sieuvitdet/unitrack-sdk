@@ -31,8 +31,8 @@ const BASE_PATH = process.env.BASE_PATH || '/event-tracking-mobile';
 
 const app = express();
 app.set('trust proxy', true);
-// 100MB cho journey import (file Snowplow atomic.events full session). Ingest
-// path bình thường vẫn batch nhỏ <100KB nên giới hạn rộng không tăng rủi ro.
+// Ingest payload thường <100KB, nhưng giữ giới hạn rộng phòng app gửi batch
+// burst lớn (vd offline replay) — vẫn an toàn vì auth check rồi mới parse.
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: false }));  // for the no-JS login form
 
@@ -95,17 +95,4 @@ app.listen(PORT, HOST, () => {
     scheduler.start();
     telegramBot.start();   // command bot (/report, /flows, ...) via long-poll
   }
-  // Journey TTL cleanup: dọn import hết hạn 24h. Mỗi 1h. Chạy ngay lần đầu
-  // để xoá entries cũ còn dư từ lần khởi động trước.
-  const journey = require('./journey');
-  const prune = () => {
-    try {
-      const n = journey.pruneExpired();
-      if (n > 0) console.log(`[journey] pruned ${n} expired imports`);
-    } catch (err) {
-      console.warn('[journey] prune failed:', err.message);
-    }
-  };
-  prune();
-  setInterval(prune, 60 * 60 * 1000);
 });

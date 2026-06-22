@@ -267,22 +267,6 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeRotateSession(
     ut_rotate_session(ctx_of(p));
 }
 
-// tracking_id 1:1 với session_id — stamp lên mọi event Snowplow để Portal
-// pivot lookup ngược về Snowplow timeline.
-JNIEXPORT jstring JNICALL
-Java_com_unitrack_sdk_bridge_NativeBridge_nativeCurrentTrackingId(
-    JNIEnv* env, jobject, jlong p) {
-    const char* s = ut_current_tracking_id(ctx_of(p));
-    return env->NewStringUTF(s ? s : "");
-}
-
-JNIEXPORT jstring JNICALL
-Java_com_unitrack_sdk_bridge_NativeBridge_nativePreviousTrackingId(
-    JNIEnv* env, jobject, jlong p) {
-    const char* s = ut_previous_tracking_id(ctx_of(p));
-    return env->NewStringUTF(s ? s : "");
-}
-
 JNIEXPORT jstring JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativePendingEventCounts(
     JNIEnv* env, jobject, jlong p) {

@@ -12,7 +12,6 @@ const { publishConfigChanged } = require('./config_stream');
 const { reconstructSessions, computeFlows, computeFlowGraph, runCycle,
         DEFAULT_ANALYSIS_PROMPT, DEFAULT_REPORT_PROMPT } = require('./agent');
 const { deliver } = require('./deliver');
-const journey = require('./journey');
 
 // Ownership guard for project routes: admin can touch any project; a normal
 // user only their own. Attaches req.project. Use as middleware on /projects/:id*.
@@ -1061,50 +1060,6 @@ router.get('/cms/overview', requireAdmin, (_req, res) => {
     naming_warnings: rows.reduce((s, r) => s + r.naming_warnings, 0),
   };
   res.json({ totals, projects: rows });
-});
-
-// ── Journey (user-flow imports từ Snowplow export) ─────────────────────────
-// QA copy tracking_id từ tab Sessions → gửi đội Snowplow → đội query trả về
-// JSON. QA upload file đó vào endpoint dưới đây. Mỗi tracking_id lưu tạm 24h
-// rồi cron tự dọn (xem journey.pruneExpired ở server.js).
-//
-// POST   /api/projects/:id/journey/import?tracking_id=X  (raw body: JSON/NDJSON)
-// GET    /api/projects/:id/journey/:tid                  (meta + events)
-// DELETE /api/projects/:id/journey/:tid
-
-const journeyRawBody = express.raw({
-  type: ['application/json', 'application/x-ndjson', 'text/plain', '*/*'],
-  limit: '100mb',
-});
-
-router.post('/projects/:id/journey/import', ownProject, journeyRawBody, (req, res) => {
-  const trackingId = String(req.query.tracking_id || '').trim();
-  if (!trackingId) {
-    return res.status(400).json({ error: 'missing_tracking_id' });
-  }
-  try {
-    const out = journey.importJourney(trackingId, req.body, +req.params.id);
-    res.json(out);
-  } catch (err) {
-    console.error('[journey:import] failed', err);
-    res.status(400).json({ error: 'import_failed', message: err.message || String(err) });
-  }
-});
-
-router.get('/projects/:id/journey/:tid', ownProject, (req, res) => {
-  const out = journey.getJourney(req.params.tid);
-  if (!out) return res.status(404).json({ error: 'not_found' });
-  // Cross-check project: nếu meta.project_id khác /:id thì 404 — tránh
-  // user A bóc journey của project B qua URL.
-  if (out.meta.project_id && out.meta.project_id !== +req.params.id) {
-    return res.status(404).json({ error: 'not_found' });
-  }
-  res.json(out);
-});
-
-router.delete('/projects/:id/journey/:tid', ownProject, (req, res) => {
-  journey.deleteJourney(req.params.tid);
-  res.json({ ok: true });
 });
 
 module.exports = router;

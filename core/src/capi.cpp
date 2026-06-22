@@ -208,25 +208,6 @@ const char* ut_previous_session_id(ut_context* ctx) {
     return buf.c_str();
 }
 
-// UUID minted 1:1 with the active session id. Bindings stamp this on every
-// outgoing Snowplow payload so Portal's mapping (user → session_id →
-// tracking_id) can route operator lookups back to the full event timeline.
-// Thread-local buffer like the other string getters.
-const char* ut_current_tracking_id(ut_context* ctx) {
-    thread_local std::string buf;
-    if (!ctx || !ctx->tracker) { buf.clear(); return ""; }
-    buf = ctx->tracker->current_tracking_id();
-    return buf.c_str();
-}
-
-// Previous session's tracking id — empty on the very first session.
-const char* ut_previous_tracking_id(ut_context* ctx) {
-    thread_local std::string buf;
-    if (!ctx || !ctx->tracker) { buf.clear(); return ""; }
-    buf = ctx->tracker->previous_tracking_id();
-    return buf.c_str();
-}
-
 // Force-rotate the active session. Bumps session_index, mints a new UUID,
 // stamps the just-closed session as previous_session_id. Bindings call
 // this on logout / switch-account / app-level "new context" boundaries —

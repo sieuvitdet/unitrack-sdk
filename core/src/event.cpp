@@ -44,12 +44,6 @@ std::string Event::to_json() const {
     if (!first_event_id.empty()) {
         o << "\"first_event_id\":"; escape_json(o, first_event_id); o << ',';
     }
-    if (!tracking_id.empty()) {
-        o << "\"tracking_id\":"; escape_json(o, tracking_id); o << ',';
-    }
-    if (!previous_tracking_id.empty()) {
-        o << "\"previous_tracking_id\":"; escape_json(o, previous_tracking_id); o << ',';
-    }
     if (!user_id.empty()) {
         o << "\"user_id\":"; escape_json(o, user_id);    o << ',';
     }

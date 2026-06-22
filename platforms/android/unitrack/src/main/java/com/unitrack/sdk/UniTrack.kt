@@ -597,21 +597,6 @@ object UniTrack {
         if (initialized) NativeBridge.rotateSession()
     }
 
-    /** tracking_id — UUID minted 1:1 with currentSessionId(). A fresh UUID is
-     *  generated on every rotation (cold start, timeout, manual rotateSession),
-     *  persisted alongside the session id, and stamped on every Snowplow
-     *  payload so Portal's mapping (user → session_id → tracking_id) can
-     *  pivot a lookup back to the full Snowplow event timeline. */
-    @JvmStatic
-    fun currentTrackingId(): String =
-        if (initialized) NativeBridge.currentTrackingId() else ""
-
-    /** tracking_id of the previous (just-closed) session — empty on the very
-     *  first session after install. */
-    @JvmStatic
-    fun previousTrackingId(): String =
-        if (initialized) NativeBridge.previousTrackingId() else ""
-
     /** Snapshot of events still sitting in the offline queue, grouped by raw
      *  event_name. Used by demo / debug UIs that show "Saved 3 ev_click,
      *  2 ev_result" while the device is offline. Empty map before init or

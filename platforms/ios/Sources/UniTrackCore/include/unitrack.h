@@ -239,18 +239,6 @@ UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
  * so analytics can tell timeout vs. manual rotations apart. */
 UT_EXPORT void ut_rotate_session(ut_context* ctx);
 
-/* tracking_id — a UUID minted 1:1 with session_id (fresh on every rotation,
- * including cold start, timeout, and manual reset). Bindings stamp this on
- * every outgoing Snowplow event so Portal's lightweight map (user →
- * session_id → tracking_id) can pivot a Portal lookup back to the full
- * Snowplow event timeline. Same thread-local buffer convention as
- * ut_current_session_id. Empty when ctx is null. */
-UT_EXPORT const char* ut_current_tracking_id(ut_context* ctx);
-
-/* Previous session's tracking_id — empty on the very first session after
- * install. */
-UT_EXPORT const char* ut_previous_tracking_id(ut_context* ctx);
-
 /* Snapshot of the offline queue grouped by event_name. Returns a JSON object
  * string like {"ev_click":3,"ev_result":2}. Empty queue or null ctx → "{}".
  * Same thread-local buffer convention as ut_current_session_id — caller must

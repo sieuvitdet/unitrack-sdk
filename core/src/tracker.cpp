@@ -105,8 +105,6 @@ Event Tracker::build_event(const std::string& name, const std::string& props_jso
     e.session_index         = ss.index;
     e.previous_session_id   = ss.previous_id;
     e.first_event_id        = ss.first_event_id;
-    e.tracking_id           = ss.tracking_id;
-    e.previous_tracking_id  = ss.previous_tracking_id;
 
     std::lock_guard<std::mutex> lock(state_mu_);
     e.user_id          = user_id_;

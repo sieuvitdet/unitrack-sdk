@@ -187,35 +187,11 @@ db.exec(`
     updated_at     INTEGER NOT NULL
   );
 
-  -- Journey imports: dữ liệu QA upload từ đội Snowplow để dựng user-flow.
-  -- Mỗi tracking_id một bộ event tạm, TTL 24h. Snowplow là source-of-truth,
-  -- Portal chỉ giữ vừa đủ để render flow trong session debug.
-  CREATE TABLE IF NOT EXISTS journey_meta (
-    tracking_id    TEXT PRIMARY KEY,
-    project_id     INTEGER,
-    session_id     TEXT,
-    user_id        TEXT,
-    platform       TEXT,
-    app_version    TEXT,
-    event_count    INTEGER,
-    started_at_ms  INTEGER,           -- min(ts) trong file
-    ended_at_ms    INTEGER,           -- max(ts) trong file
-    imported_at    INTEGER NOT NULL,  -- epoch ms upload time
-    expires_at     INTEGER NOT NULL,  -- imported_at + 24h
-    source         TEXT,              -- 'snowplow_export'
-    notes          TEXT
-  );
-  CREATE TABLE IF NOT EXISTS journey_events (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    tracking_id    TEXT NOT NULL,
-    ts             INTEGER NOT NULL,      -- epoch ms
-    event_name     TEXT NOT NULL,
-    screen         TEXT,
-    element_key    TEXT,
-    props_json     TEXT
-  );
-  CREATE INDEX IF NOT EXISTS idx_journey_events_tid_ts ON journey_events(tracking_id, ts);
-  CREATE INDEX IF NOT EXISTS idx_journey_meta_expires  ON journey_meta(expires_at);
+  -- Journey + tracking_id (đã loại bỏ): trước đây Portal giữ user-flow import
+  -- từ Snowplow để debug. Sau khi SDK bỏ tracking_id, tính năng này không còn
+  -- — schema cũ (journey_meta, journey_events, app_sessions.tracking_id) GIỮ
+  -- LẠI ở production DB cho backward-compat nhưng KHÔNG được app/server ghi
+  -- thêm dữ liệu mới. Có thể drop tay sau 1 vài release stable.
 `);
 
 // 2) Migrate pre-existing single-table databases: add any missing columns.
