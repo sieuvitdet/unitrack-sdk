@@ -14,7 +14,19 @@ const projByKey = db.prepare('SELECT * FROM projects WHERE api_key = ?');
 
 const parse = (s, fallback) => {
   if (s == null || s === '') return fallback;
-  try { return JSON.parse(s); } catch (_) { return fallback; }
+  let saved;
+  try { saved = JSON.parse(s); } catch (_) { return fallback; }
+  // Shallow-merge default INTO saved so fields added to the default template
+  // AFTER the row was first written still surface in the response. Concrete
+  // example: `snowplow.iglu_vendor` được thêm vào default block lúc Sprint X
+  // — pid được tạo trước Sprint X lưu DB không có key này, nếu chỉ trả về
+  // saved thuần thì app sẽ luôn thấy iglu_vendor = undefined dù default có.
+  // Saved values WIN over default (operator's explicit choice respected).
+  if (saved && typeof saved === 'object' && !Array.isArray(saved) &&
+      fallback && typeof fallback === 'object' && !Array.isArray(fallback)) {
+    return { ...fallback, ...saved };
+  }
+  return saved;
 };
 
 // Per-flavor overrides live inside any block under the reserved key
