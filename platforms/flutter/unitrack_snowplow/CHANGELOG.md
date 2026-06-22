@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.1 — 2026-06-22
+
+Parity fix với iOS + Android Snowplow providers — Flutter trước đây không build
+`application_context` entity và không stamp `session_id` vào `core_action`, dù
+Portal config có entities map đầy đủ. Hậu quả: payload Snowplow chỉ có
+`event.data` + `user_context`, thiếu `application_context` + thiếu join key
+session.
+
+### Fix
+
+- `_buildContexts` giờ build `application_context` entity từ cache
+  `UniTrack.applicationContext()` (bundle / version / device_name / network /
+  platform — auto-collect ở core, app không phải feed).
+- `core_action` entity bổ sung `action_name`, `start_time`, `session_id` —
+  khớp shape Android `SnowplowProvider.kt:240-256`.
+- Cache `_appCtxCache` + `_sessionIdCache` refresh ở `init()` + fire-and-forget
+  trên mỗi `track()` để `_buildContexts` giữ sync (đối xứng iOS/Android dùng
+  native sync getter).
+
+### Yêu cầu
+
+- `unitrack ^1.1.1` (cần `currentSessionId()` + `applicationContext()` APIs).
+
 ## 1.0.0 — 2026-06-09
 
 Initial public release.

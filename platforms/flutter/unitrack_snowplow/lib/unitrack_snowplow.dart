@@ -141,6 +141,32 @@ class SnowplowProvider extends AnalyticsProvider {
 
   SnowplowTracker? _tracker;
 
+  /// Cached snapshot of `UniTrack.applicationContext()` (bundle/version/
+  /// device_name/...). Loaded at init + after each setUser call. Static-ish
+  /// values — refreshing per-event would force every track() async. iOS +
+  /// Android providers do the same: sync getter, value cached in native side.
+  Map<String, Object?> _appCtxCache = const {};
+
+  /// Cached current session_id. Updated at init + onTrack hooks. The C++ core
+  /// owns rotation; we mirror the value here so `_buildContexts` stays sync.
+  String _sessionIdCache = '';
+
+  Future<void> _refreshAppCtxCache() async {
+    try {
+      _appCtxCache = await UniTrack.instance.applicationContext();
+    } catch (_) {
+      _appCtxCache = const {};
+    }
+  }
+
+  Future<void> _refreshSessionCache() async {
+    try {
+      _sessionIdCache = await UniTrack.instance.currentSessionId();
+    } catch (_) {
+      _sessionIdCache = '';
+    }
+  }
+
   @override
   Future<void> init() async {
     if (endpoint.isEmpty) {
@@ -148,9 +174,14 @@ class SnowplowProvider extends AnalyticsProvider {
       return;
     }
     await _rebuildTracker();
+    // Warm caches AFTER tracker so first event already has full contexts.
+    await _refreshAppCtxCache();
+    await _refreshSessionCache();
     debugPrint('[unitrack_snowplow] tracker ready ($endpoint, appId=$appId, '
         'vendor=${igluVendor ?? "—"}, version=$defaultVersion, '
-        'entities=${_entities.keys.toList()..sort()})');
+        'entities=${_entities.keys.toList()..sort()}, '
+        'app_ctx_keys=${_appCtxCache.keys.toList()..sort()}, '
+        'session_id=$_sessionIdCache)');
   }
 
   Future<void> _rebuildTracker() async {
@@ -284,14 +315,38 @@ class SnowplowProvider extends AnalyticsProvider {
         if (uri != null) {
           // core_action carries event meta only — the business name lives in
           // `event.data.event_name`, not duplicated here.
+          final now = DateTime.now().toUtc().toIso8601String();
           final data = <String, Object?>{
-            'timestamp': DateTime.now().toUtc().toIso8601String(),
+            'action_name': eventName,
+            'timestamp':   now,
+            // start_time mirrors iOS — the event was created on the client at
+            // this instant. Kept alongside `timestamp` so existing downstream
+            // queries don't break.
+            'start_time':  now,
           };
           if (screen != null && screen.isNotEmpty)         data['screen'] = screen;
           if (elementKey != null && elementKey.isNotEmpty) data['element_key'] = elementKey;
+          // session_id — single join key shared với Portal + custom HTTP
+          // providers. C++ core đã stamp lên event.data; mirror vào entity để
+          // operator filter Snowplow theo session_id một bước.
+          if (_sessionIdCache.isNotEmpty) data['session_id'] = _sessionIdCache;
           out.add(SelfDescribing(
             schema: uri,
             data: data.map((k, v) => MapEntry(k, v ?? '')),
+          ));
+        }
+      }
+      // application_context — built from cached UniTrack.applicationContext()
+      // (bundle / version / device_name / platform / network / ...). Parity
+      // với iOS + Android Snowplow providers; the integrator only registers
+      // the schema in portal entities map.
+      final appRaw = _entities['application_context'];
+      if (appRaw != null && _appCtxCache.isNotEmpty) {
+        final uri = _normalizeEntityURI(appRaw);
+        if (uri != null) {
+          out.add(SelfDescribing(
+            schema: uri,
+            data: _appCtxCache.map((k, v) => MapEntry(k, v ?? '')),
           ));
         }
       }
@@ -579,6 +634,11 @@ class SnowplowProvider extends AnalyticsProvider {
   void track(String name, Map<String, Object?> properties) {
     final t = _tracker;
     if (t == null) return;
+    // Session can rotate mid-run (timeout / explicit rotateSession). Refresh
+    // cache fire-and-forget — first event after rotation may use the stale
+    // id, but subsequent events catch up. Acceptable trade-off vs making the
+    // hot path async.
+    unawaited(_refreshSessionCache());
     // Caller already fired the event into Snowplow directly and only wants
     // the portal mirror — drop the Snowplow leg here.
     if (properties['_skip_snowplow'] == true) {
