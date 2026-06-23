@@ -160,20 +160,31 @@ class UniTrackRemoteConfig {
 
   /// Raw `snowplow.options` map from the portal (Snowplow TrackerConfiguration
   /// flags: base64Encoding, platformContext, applicationContext, sessionContext,
-  /// screenContext, lifecycleAutotracking, screenEngagementAutotracking).
+  /// screenContext, lifecycleAutotracking, screenEngagementAutotracking, ...).
   ///
   /// Returns an empty map when the operator didn't override anything — callers
   /// fall back to their own defaults (matching Snowplow's recommended setup).
-  /// Defensive read: each value is coerced to bool only when explicitly true /
-  /// false on the wire so a typo doesn't silently flip a flag.
+  /// Defensive read: accept true/false directly, plus 1/0 and "true"/"false"
+  /// strings — Portal UI uses checkboxes (clean bool), but some operator
+  /// edits raw JSON and may type "true" instead of true.
   Map<String, bool> get snowplowOptions {
     final raw = snowplow['options'];
     if (raw is! Map) return const {};
     final out = <String, bool>{};
     for (final e in raw.entries) {
-      if (e.key is String && (e.value == true || e.value == false)) {
-        out[e.key as String] = e.value as bool;
+      if (e.key is! String) continue;
+      final v = e.value;
+      bool? coerced;
+      if (v == true || v == false) {
+        coerced = v as bool;
+      } else if (v is num) {
+        coerced = v != 0;
+      } else if (v is String) {
+        final s = v.trim().toLowerCase();
+        if (s == 'true' || s == '1' || s == 'yes')  coerced = true;
+        if (s == 'false' || s == '0' || s == 'no')  coerced = false;
       }
+      if (coerced != null) out[e.key as String] = coerced;
     }
     return out;
   }
@@ -227,11 +238,16 @@ class UniTrackRemoteConfig {
         _cache[apiKey] ?? fallback ?? _builtinDefault());
   }
 
+  /// Built-in fallback config khi cold start network fail + cache trống +
+  /// app không pass `fallback`. App nên LUÔN pass `fallback` với endpoint
+  /// thật trong `UniTrackRemoteConfig.fetch(..., fallback: ...)` — built-in
+  /// này empty endpoint nên SDK no-op cho đến lần fetch sau thành công.
+  /// (Tránh hard-code endpoint FTel-specific ở SDK level.)
   static Map<String, dynamic> _builtinDefault() => {
         'version': 0,
-        'endpoint': 'https://mobix.asia/event-tracking-mobile/v1/events',
+        'endpoint': '',  // app phải pass `fallback` hoặc đợi fetch thành công
         'sdk_config': {
-          'batchSize': 10, 'flushIntervalMs': 3000, 'autoCapture': true,
+          'batchSize': 50, 'flushIntervalMs': 5000, 'autoCapture': true,
           'trackScreens': true, 'trackTaps': true, 'trackNetwork': true,
         },
         // Default ON so a fetch timeout doesn't silently mute every provider —

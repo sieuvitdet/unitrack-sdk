@@ -3,7 +3,7 @@ description: >-
   Snowplow provider for UniTrack. Forwards UniTrack events to a Snowplow
   collector with built-in convention layer, auto-attached user_context and
   application_context entities, and per-event Iglu schema resolution.
-version: 1.0.1
+version: 1.1.0
 homepage: https://github.com/sieuvitdet/unitrack-sdk
 repository: https://github.com/sieuvitdet/unitrack-sdk
 issue_tracker: https://github.com/sieuvitdet/unitrack-sdk/issues
@@ -22,8 +22,9 @@ dependencies:
   flutter:
     sdk: flutter
   # UniTrack core (provides AnalyticsProvider interface + UniTrack.track facade).
-  # 1.1.1 needed for `currentSessionId()` + `applicationContext()` cache APIs.
-  unitrack: ^1.1.1
+  # 1.2.0 needed for `UniTrackRemoteConfig.snowplowEntityURIs` (fromPortal()
+  # factory đọc field này) + `UniTrackConfig.fromMap`.
+  unitrack: ^1.2.0
   # Snowplow Flutter tracker — used to package + forward events to the
   # configured collector. Wide range to keep the host app's choice flexible.
   snowplow_tracker: '>=0.7.0 <2.0.0'

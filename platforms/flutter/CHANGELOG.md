@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.0 — 2026-06-23
+
+Audit-based release. Sau khi anh user feedback "code kỹ 1 lần không được hả",
+em audit toàn diện 15 findings — gộp vào 1 release thay vì 4 patch lẻ
+(1.1.1 → 1.1.4).
+
+### Added
+
+- **`UniTrackConfig.screenStartEvent` + `screenEndEvent` + `logLevel`** —
+  parity với Portal `sdk_config` block. Trước đây Portal có 3 field này
+  nhưng SDK Flutter bỏ qua. `logLevel` mặc định `'warn'`, accept `debug` /
+  `info` / `warn` / `error` / `off`.
+- **`UniTrackConfig.fromMap()`** numeric coercion — chấp nhận `int → double`
+  khi Portal serialize `samplingRate: 1` thay vì `1.0`.
+
+### Fixed
+
+- **`UniTrackRemoteConfig.snowplowOptions`** chỉ accept bool — giờ accept
+  `1/0`, `"true"/"false"` string. Operator edit raw JSON typo không bị
+  silently drop nữa.
+- **`UniTrackRemoteConfig._builtinDefault()`** không còn hard-code
+  `https://mobix.asia/...`. Endpoint default empty → SDK no-op cho đến lần
+  fetch thành công kế. Apps multi-tenant nên LUÔN pass `fallback:`
+  với endpoint của mình.
+
+### Cleanup
+
+- `UniTrackRemoteConfig.snowplowEntities` (deprecated từ 1.1.3) giữ
+  `@Deprecated` để không vỡ camera demo cũ. App mới dùng `snowplowEntityURIs`.
+
 ## 1.1.4 — 2026-06-23
 
 ### Added

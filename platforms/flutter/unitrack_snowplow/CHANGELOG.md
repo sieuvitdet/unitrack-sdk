@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.1.0 — 2026-06-23
+
+### Added
+
+- **`SnowplowProvider.fromPortal(cfg)` factory** — đọc Portal config 1 cú gọi,
+  tự wire endpoint / appId / iglu_vendor / event_names / entities / options /
+  userContext. Returns `null` khi Portal disable hoặc thiếu endpoint/appId.
+
+  ```dart
+  final sp = SnowplowProvider.fromPortal(
+    remoteCfg,
+    namespace: 'MobiX',
+    fallbackIgluVendor: 'vn.fpt.ftel.snowplow',
+  );
+  if (sp != null) UniTrack.instance.addProvider(sp);
+  ```
+
+- **`SnowplowOptions` parity field**: `screenViewAutotracking`,
+  `deepLinkContext`, `exceptionAutotracking`, `installAutotracking`. Accept
+  trong API cho parity iOS+Android. ⚠️ **Không thread xuống native** ở
+  Flutter (snowplow_tracker plugin chưa support) — chấp nhận giá trị nhưng
+  no-op. Sẽ wire khi plugin upgrade.
+
+### Fixed
+
+- **Race condition** `setUser()` không refresh `_appCtxCache` — user login →
+  identify → event ngay sau có thể dùng app_ctx của user trước (nếu app_ctx
+  chứa user-derived field như `account_id`).
+- **Race condition** `applyOptions()` rebuild tracker nhưng không refresh
+  cache — flavor switch có thể stamp stale `applicationContext` lên event đầu.
+
+### Requires
+
+- `unitrack ^1.2.0` (cần `UniTrackConfig.fromMap()` + `snowplowEntityURIs`).
+
 ## 1.0.1 — 2026-06-22
 
 Parity fix với iOS + Android Snowplow providers — Flutter trước đây không build

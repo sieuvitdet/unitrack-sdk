@@ -58,6 +58,21 @@ class UniTrackConfig {
   /// `sdk_config.screen_load_event`.
   final String screenLoadEvent;
 
+  /// Boundary event fired when a screen becomes visible. Empty string disables
+  /// the event. Renameable via portal `sdk_config.screen_start_event`.
+  /// Parity với iOS Config.screenStartEvent + Android UniTrackConfig.screenStartEvent.
+  final String screenStartEvent;
+
+  /// Boundary event fired when a screen is dismissed. Empty string disables.
+  /// Renameable via portal `sdk_config.screen_end_event`.
+  /// Parity với iOS Config.screenEndEvent + Android UniTrackConfig.screenEndEvent.
+  final String screenEndEvent;
+
+  /// Native log level: 'debug' | 'info' | 'warn' | 'error' | 'off'. Driven by
+  /// portal `sdk_config.logLevel`. Native side filters log output dựa trên
+  /// level — Dart layer cũng dùng (verboseLogging chỉ điều khiển Dart log).
+  final String logLevel;
+
   const UniTrackConfig({
     this.endpoint,
     this.batchSize = 50,
@@ -70,6 +85,9 @@ class UniTrackConfig {
     this.journeyCapture = true,
     this.sessionTimeoutMs = 1800000,
     this.screenLoadEvent = 'screen_load_completed',
+    this.screenStartEvent = '',
+    this.screenEndEvent = '',
+    this.logLevel = 'warn',
   });
 
   Map<String, dynamic> toMap() => {
@@ -84,6 +102,9 @@ class UniTrackConfig {
         'journeyCapture': journeyCapture,
         'sessionTimeoutMs': sessionTimeoutMs,
         'screenLoadEvent': screenLoadEvent,
+        'screenStartEvent': screenStartEvent,
+        'screenEndEvent': screenEndEvent,
+        'logLevel': logLevel,
       };
 
   /// Build [UniTrackConfig] từ Map remote — vd `UniTrackRemoteConfig.sdkConfig`.
@@ -101,6 +122,20 @@ class UniTrackConfig {
         final v = m[k];
         if (v is T) return v;
       }
+      // Defensive numeric coercion — Portal/JSON có thể serialize int thành
+      // double và ngược lại. Tránh fallback im lặng làm operator confused.
+      if (T == double) {
+        for (final k in keys) {
+          final v = m[k];
+          if (v is num) return v.toDouble() as T;
+        }
+      }
+      if (T == int) {
+        for (final k in keys) {
+          final v = m[k];
+          if (v is num) return v.toInt() as T;
+        }
+      }
       return fallback;
     }
     return UniTrackConfig(
@@ -115,6 +150,9 @@ class UniTrackConfig {
       journeyCapture:   pick<bool>(['journeyCapture', 'journey_capture'], true),
       sessionTimeoutMs: pick<int>(['sessionTimeoutMs', 'session_timeout_ms'], 1800000),
       screenLoadEvent:  pick<String>(['screenLoadEvent', 'screen_load_event'], 'screen_load_completed'),
+      screenStartEvent: pick<String>(['screenStartEvent', 'screen_start_event'], ''),
+      screenEndEvent:   pick<String>(['screenEndEvent', 'screen_end_event'], ''),
+      logLevel:         pick<String>(['logLevel', 'log_level'], 'warn'),
     );
   }
 }

@@ -54,6 +54,65 @@ class SnowplowProvider extends AnalyticsProvider {
         _eventNames = Map<String, String>.from(eventNames),
         _entities = Map<String, String>.from(entities);
 
+  /// Build [SnowplowProvider] hoàn chỉnh từ Portal config — đọc endpoint,
+  /// appId, iglu_vendor, event_names, entities, options, default_version
+  /// trong 1 cú gọi. App pattern:
+  ///
+  ///     final cfg = await UniTrackRemoteConfig.fetch(...);
+  ///     final sp = SnowplowProvider.fromPortal(
+  ///       cfg,
+  ///       namespace: 'MobiX',
+  ///       fallbackIgluVendor: 'vn.fpt.ftel.snowplow',  // optional
+  ///     );
+  ///     if (sp != null) UniTrack.instance.addProvider(sp);
+  ///
+  /// Returns `null` khi `snowplow.enabled=false`, hoặc khi endpoint/appId
+  /// rỗng — app khỏi phải tự check.
+  static SnowplowProvider? fromPortal(
+    UniTrackRemoteConfig cfg, {
+    required String namespace,
+    String? fallbackIgluVendor,
+    String? portalMirrorEndpoint,
+    String? portalMirrorApiKey,
+  }) {
+    if (!cfg.snowplowEnabled) return null;
+    final sp = cfg.snowplow;
+    final ep = (sp['endpoint'] as String?)?.trim() ?? '';
+    final aid = (sp['appId'] as String?)?.trim() ?? '';
+    if (ep.isEmpty || aid.isEmpty) return null;
+
+    final vendor = cfg.snowplowIgluVendor.isNotEmpty
+        ? cfg.snowplowIgluVendor
+        : (fallbackIgluVendor ?? '');
+    final version = (sp['default_version'] as String?) ?? '1-0-0';
+    final eventNames = (sp['event_names'] is Map)
+        ? Map<String, String>.from(
+            (sp['event_names'] as Map).map((k, v) =>
+                MapEntry(k.toString(), v.toString())))
+        : <String, String>{};
+
+    final provider = SnowplowProvider(
+      endpoint: ep,
+      appId: aid,
+      namespace: namespace,
+      igluVendor: vendor.isEmpty ? null : vendor,
+      defaultVersion: version,
+      eventNames: eventNames,
+      entities: cfg.snowplowEntityURIs,
+      userContext: (sp['userContext'] is Map)
+          ? Map<String, Object?>.from(sp['userContext'] as Map)
+          : null,
+      portalEndpoint: portalMirrorEndpoint,
+      portalApiKey: portalMirrorApiKey,
+    );
+    // applyOptions là async — fire-and-forget. provider.init() (gọi tự động
+    // khi UniTrack.initialize fan-out) sẽ rebuild tracker với options mới
+    // trước khi event đầu tiên fire.
+    final opts = cfg.snowplowOptions;
+    if (opts.isNotEmpty) provider.applyOptions(opts);
+    return provider;
+  }
+
   /// When set, every event tracked through Snowplow is ALSO mirrored to the
   /// UniTrack portal (tagged provider=snowplow) — so the session IDE shows
   /// exactly what Snowplow received, side-by-side with the unitrack event.
@@ -134,9 +193,18 @@ class SnowplowProvider extends AnalyticsProvider {
       screenContext:                overrides['screenContext']                ?? cur.screenContext,
       lifecycleAutotracking:        overrides['lifecycleAutotracking']        ?? cur.lifecycleAutotracking,
       screenEngagementAutotracking: overrides['screenEngagementAutotracking'] ?? cur.screenEngagementAutotracking,
+      screenViewAutotracking:       overrides['screenViewAutotracking']       ?? cur.screenViewAutotracking,
+      deepLinkContext:              overrides['deepLinkContext']              ?? cur.deepLinkContext,
+      exceptionAutotracking:        overrides['exceptionAutotracking']        ?? cur.exceptionAutotracking,
+      installAutotracking:          overrides['installAutotracking']          ?? cur.installAutotracking,
     );
     debugPrint('[unitrack_snowplow] options updated: $overrides — rebuilding tracker');
     await _rebuildTracker();
+    // Refresh caches sau rebuild — flavor switch có thể đổi cả endpoint lẫn
+    // application_context (vd bundle/version). Tránh stale data trên event
+    // đầu tiên sau applyOptions.
+    await _refreshAppCtxCache();
+    await _refreshSessionCache();
   }
 
   SnowplowTracker? _tracker;
@@ -628,6 +696,10 @@ class SnowplowProvider extends AnalyticsProvider {
     for (final e in traits.entries) {
       userContext[e.key] = e.value;
     }
+    // Refresh app context cache — identity change có thể tác động vài field
+    // ở native applicationContext (vd account_id qua getRemoteValue). Tránh
+    // event ngay sau identify() vẫn dùng app_ctx của user trước.
+    await _refreshAppCtxCache();
   }
 
   @override
@@ -741,7 +813,15 @@ class SnowplowProvider extends AnalyticsProvider {
 /// Snowplow TrackerConfiguration flags the developer can toggle. Defaults
 /// match Snowplow's recommended mobile setup. Mirrors SnowplowOptions on
 /// iOS and Android.
+///
+/// **Flutter giới hạn**: `snowplow_tracker` Dart lib (mọi version ≤1.x) chỉ
+/// expose 7 field đầu xuống native qua `TrackerConfiguration`. 4 field còn
+/// lại — `screenViewAutotracking`, `deepLinkContext`, `exceptionAutotracking`,
+/// `installAutotracking` — chấp nhận ở đây cho API parity với iOS + Android
+/// (Portal config gửi sẽ không error), nhưng **không** thread xuống native
+/// — do snowplow_tracker plugin chưa support. Khi plugin upgrade sẽ wire.
 class SnowplowOptions {
+  // ── Native-active flags ───────────────────────────────────────────────
   final bool base64Encoding;
   final bool platformContext;
   final bool applicationContext;
@@ -749,6 +829,16 @@ class SnowplowOptions {
   final bool screenContext;
   final bool lifecycleAutotracking;
   final bool screenEngagementAutotracking;
+
+  // ── API-parity-only flags (no native thread on Flutter yet) ──────────
+  /// iOS + Android only. Flutter snowplow_tracker chưa expose.
+  final bool screenViewAutotracking;
+  /// iOS + Android only. Flutter snowplow_tracker chưa expose.
+  final bool deepLinkContext;
+  /// Android only (Native crash capture). Flutter chưa thread.
+  final bool exceptionAutotracking;
+  /// Android only (App install attribution). Flutter chưa thread.
+  final bool installAutotracking;
 
   const SnowplowOptions({
     this.base64Encoding = true,
@@ -758,5 +848,9 @@ class SnowplowOptions {
     this.screenContext = true,
     this.lifecycleAutotracking = true,
     this.screenEngagementAutotracking = true,
+    this.screenViewAutotracking = false,
+    this.deepLinkContext = false,
+    this.exceptionAutotracking = false,
+    this.installAutotracking = false,
   });
 }

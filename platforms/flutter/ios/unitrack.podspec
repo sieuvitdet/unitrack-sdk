@@ -3,7 +3,7 @@ Pod::Spec.new do |s|
   # No separate 'UniTrack' pod exists (this pod vendors the native Swift SDK +
   # C++ core directly), so the module name stays 'unitrack' — which is what
   # Flutter's GeneratedPluginRegistrant imports.
-  s.version          = '1.1.4'
+  s.version          = '1.2.0'
   s.summary          = 'UniTrack — universal mobile analytics SDK for Flutter.'
   s.description      = 'Auto-capture screens, taps, network, crashes, OOM, JSON errors.'
   s.homepage         = 'https://github.com/sieuvitdet/unitrack-sdk'
