@@ -32,12 +32,17 @@ class FirebaseAdapter private constructor(
 
     @Volatile private var lastStampedSessionId: String? = null
 
-    override fun initialize(app: Application) { /* Firebase brought up by host */ }
+    override fun initialize(app: Application) {
+        // Set default params NGAY khi adapter attach — kể cả khi event đầu tiên
+        // chưa fire qua UniTrack.track(). App gọi logEvent thẳng (bypass
+        // UniTrack) từ đây sẽ có session_id ngay.
+        maybeStampSessionGlobals()
+    }
 
     override fun track(name: String, properties: Map<String, Any?>) {
         if (!isEnabled()) return
         try {
-            maybeStampUserProperty()
+            maybeStampSessionGlobals()
             val bundle = toBundle(properties)
             // Mirror session_id at event level too so per-event analyses
             // (vd funnel widgets) don't depend on user-property joins.
@@ -62,18 +67,37 @@ class FirebaseAdapter private constructor(
         } catch (e: Throwable) {
             Log.w(TAG, "setUser reflection failed: ${e.message}")
         }
+        // Identity đổi (login/logout) — re-stamp default params để session_id
+        // không stale ở event app gọi logEvent thẳng sau đó.
+        lastStampedSessionId = null
+        maybeStampSessionGlobals()
     }
 
     override fun setScreen(name: String) { /* setScreen propagates via track(screen_view) */ }
 
-    private fun maybeStampUserProperty() {
+    private fun maybeStampSessionGlobals() {
         try {
             val sid = com.unitrack.sdk.UniTrack.currentSessionId()
             if (sid.isEmpty() || sid == lastStampedSessionId) return
+            val idx = com.unitrack.sdk.UniTrack.sessionIndex()
+            // 1) user_property — Firebase attribute session-level cho audience.
             val setProp = firebaseClass.getMethod("setUserProperty", String::class.java, String::class.java)
             setProp.invoke(firebaseInstance, "ut_session_id", sid)
-            val idx = com.unitrack.sdk.UniTrack.sessionIndex()
             setProp.invoke(firebaseInstance, "ut_session_index", idx.toString())
+            // 2) setDefaultEventParameters — Firebase tự merge vào MỌI event sau
+            //    đây (cả app gọi logEvent thẳng bypass UniTrack). Yêu cầu
+            //    Firebase Android SDK 21.0.0+. Older SDK → NoSuchMethodException
+            //    swallow → no-op an toàn.
+            try {
+                val setDefaults = firebaseClass.getMethod("setDefaultEventParameters", Bundle::class.java)
+                val defaults = Bundle().apply {
+                    putString("session_id", sid)
+                    putLong("session_index", idx.toLong())
+                }
+                setDefaults.invoke(firebaseInstance, defaults)
+            } catch (_: NoSuchMethodException) {
+                Log.w(TAG, "setDefaultEventParameters not available — Firebase SDK < 21.0.0?")
+            }
             lastStampedSessionId = sid
         } catch (_: Throwable) { /* swallow */ }
     }

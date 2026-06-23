@@ -38,11 +38,16 @@ public final class FirebaseAdapter: NSObject, AnalyticsProvider {
         super.init()
     }
 
-    public func initializeProvider() { /* Firebase brought up by host */ }
+    public func initializeProvider() {
+        // Set default params NGAY khi adapter attach — kể cả khi event đầu tiên
+        // chưa fire qua UniTrack.track(). App gọi `Analytics.logEvent` thẳng
+        // (bypass UniTrack) từ đây sẽ có session_id ngay.
+        maybeStampSessionGlobals()
+    }
 
     public func track(_ name: String, _ properties: [String: Any]) {
         guard isEnabled() else { return }
-        maybeStampUserProperty()
+        maybeStampSessionGlobals()
         var params = properties.mapValues { coerce($0) }
         params["session_id"] = UniTrack.currentSessionId() as NSString
         invokeLogEvent(name: sanitize(name), params: params)
@@ -58,22 +63,42 @@ public final class FirebaseAdapter: NSObject, AnalyticsProvider {
                               arg1: String(describing: v) as NSString,
                               arg2: sanitize(k) as NSString)
         }
+        // Identity đổi (login/logout) — re-stamp default params để session_id
+        // không stale. UniTrack core có thể rotate session khi identity đổi
+        // tuỳ business logic; gọi maybeStampSessionGlobals() đảm bảo Firebase
+        // pick up giá trị mới.
+        lastStampedSessionId = nil  // force re-stamp
+        maybeStampSessionGlobals()
     }
 
     public func setScreen(_ name: String) { /* propagated via track(screen_view) */ }
 
     // MARK: - private
 
-    private func maybeStampUserProperty() {
+    private func maybeStampSessionGlobals() {
         let sid = UniTrack.currentSessionId()
         guard !sid.isEmpty, sid != lastStampedSessionId else { return }
-        let sel = NSSelectorFromString("setUserPropertyString:forName:")
-        invokeClassMethod(selector: sel,
+        // 1) user_property — Firebase attribute mọi event session-level. Persist
+        //    qua restart, dùng cho audience / segment.
+        let setProp = NSSelectorFromString("setUserPropertyString:forName:")
+        invokeClassMethod(selector: setProp,
                           arg1: sid as NSString,
                           arg2: "ut_session_id" as NSString)
-        invokeClassMethod(selector: sel,
+        invokeClassMethod(selector: setProp,
                           arg1: String(UniTrack.sessionIndex()) as NSString,
                           arg2: "ut_session_index" as NSString)
+        // 2) defaultEventParameters — Firebase tự merge vào MỌI event sau đây
+        //    (cả event app gọi `Analytics.logEvent` thẳng, bypass UniTrack).
+        //    Yêu cầu Firebase iOS SDK 8.4+. Bằng cách check `responds(to:)`
+        //    bên `invokeClassMethod` — older SDK no-op không crash.
+        let setDefault = NSSelectorFromString("setDefaultEventParameters:")
+        let defaults: [String: Any] = [
+            "session_id":    sid as NSString,
+            "session_index": NSNumber(value: UniTrack.sessionIndex()),
+        ]
+        invokeClassMethod(selector: setDefault,
+                          arg1: NSDictionary(dictionary: defaults),
+                          arg2: nil)
         lastStampedSessionId = sid
     }
 

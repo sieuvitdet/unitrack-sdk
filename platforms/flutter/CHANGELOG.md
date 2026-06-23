@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.1 — 2026-06-23
+
+### FirebaseAdapter — stamp session_id qua `setDefaultEventParameters`
+
+Trước đây UniTrack chỉ stamp `session_id` vào `params` khi event đi qua
+`UniTrack.track()` — app gọi `FirebaseAnalytics.logEvent()` thẳng (bypass
+UniTrack, vd Firebase Performance, Crashlytics auto-events) thì event đó
+KHÔNG có `session_id` ở params.
+
+Fix: adapter giờ gọi `setDefaultEventParameters({session_id, session_index})`
+ở 3 hook:
+- `initialize()` — khi attach
+- `setUser()` — khi identity đổi
+- `track()` — khi session_id đổi (detect qua `lastStampedSessionId`)
+
+Firebase tự merge default params vào **MỌI event** (kể cả app gọi
+`logEvent()` thẳng) → 100% event Firebase có `session_id` UniTrack để
+analyst join cross-provider.
+
+Yêu cầu Firebase SDK:
+- iOS: 8.4+ (responds-to check — older SDK no-op an toàn).
+- Android: 21.0.0+ (NoSuchMethodException swallow — older SDK no-op).
+
 ## 1.2.0 — 2026-06-23
 
 Audit-based release. Sau khi anh user feedback "code kỹ 1 lần không được hả",
