@@ -1258,11 +1258,6 @@ async function renderConfig(pid, mountSel){
         </div>
       </details>
 
-      <!-- Per-flavor override (dev/staging/beta/prod) — typed fields per block. -->
-      <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Override 4 flavor dev/staging/beta/production. Field trống = inherit base.">
-        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">🌐 Per-flavor override</summary>
-        <div style="margin-top:8px">${flavorOverrideHtml('Sp', sp)}</div>
-      </details>
       </div><!-- /Snowplow Details -->
 
       <!-- ─────── FIREBASE GUIDE (Always visible — Provider toggle ở Providers cluster trên) ─────── -->
@@ -2134,7 +2129,11 @@ async function renderConfig(pid, mountSel){
       options: spOpts };
     if (iosOv) snowplow.ios     = iosOv;
     if (andOv) snowplow.android = andOv;
-    const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
+    // Per-flavor override (snowplow.flavor_overrides) UI đã bỏ — Per-platform
+    // đã superset (mỗi platform có 4 flavor riêng). Inputs `cfSpOv_*` không
+    // còn render → collectFlavorOverrides('Sp') sẽ trả null an toàn dù không
+    // gọi. Giữ commented làm reference.
+    // const spOv = collectFlavorOverrides('Sp'); if (spOv) snowplow.flavor_overrides = spOv;
 
     const firebase = { enabled:$('#cfFbOn').checked,
       options:{ appId:$('#cfFbApp').value.trim(), gcmSenderId:$('#cfFbSender').value.trim(), apiKey:$('#cfFbKey').value.trim(),
