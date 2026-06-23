@@ -211,6 +211,51 @@ UT_EXPORT const char* ut_version(void);
  * the SDK; caller must NOT free. */
 UT_EXPORT const char* ut_pop_recovered_crash(ut_context* ctx);
 
+/* Read-only view of the active session id (UUID v4). Lives in a thread-local
+ * buffer; the next call on the same thread overwrites it. Returns "" if ctx
+ * is null. Used by bindings that need to stamp session_id onto app-side
+ * events (vd iOS AppLifecycleObserver firing session_ended after foreground
+ * rotation). Cheap — pure read under a single mutex. */
+UT_EXPORT const char* ut_current_session_id(ut_context* ctx);
+
+/* Lifetime session counter — persists across launches via session.json.
+ * 1 on first install, +1 per timeout-driven rotation. Apps stamp this as
+ * `session_index` on session_started events so they don't have to maintain
+ * their own counter (which would reset to 1 each launch). Returns 0 when
+ * ctx is null. */
+UT_EXPORT int64_t ut_current_session_index(ut_context* ctx);
+
+/* UUID of the session that just closed; empty on the very first session
+ * after install. Apps stamp this as `previous_session_id` on session_started
+ * events so backends can chain consecutive sessions for a user. Same
+ * thread-local buffer convention as ut_current_session_id. */
+UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
+
+/* Force a session rotation right now: bumps session_index, mints a new UUID,
+ * records the just-closed session as previous_session_id. Apps call this on
+ * logout / switch-account / app-level "new context" boundaries when the
+ * timeout-based rotation (30 min default) isn't enough. No-op when ctx is
+ * null. The next session_end fired by the SDK carries reason=manual_reset
+ * so analytics can tell timeout vs. manual rotations apart. */
+UT_EXPORT void ut_rotate_session(ut_context* ctx);
+
+/* Snapshot of the offline queue grouped by event_name. Returns a JSON object
+ * string like {"ev_click":3,"ev_result":2}. Empty queue or null ctx → "{}".
+ * Same thread-local buffer convention as ut_current_session_id — caller must
+ * NOT free; next call on the same thread overwrites it. Useful for demo UIs
+ * showing what's still pending while the device is offline. */
+UT_EXPORT const char* ut_pending_event_counts(ut_context* ctx);
+
+/* Flush-success callback. Registered once per ut_context; fires from the
+ * worker thread after each successful batch upload. counts_json is the
+ * per-event_name breakdown of THAT batch (vd `{"ev_click":3,"ev_result":2}`).
+ * Pointer is owned by the SDK and only valid for the duration of the call —
+ * bindings must copy if they need to keep it. Pass fn=NULL to clear. */
+typedef void (*ut_flush_success_fn)(const char* counts_json, void* userdata);
+UT_EXPORT void ut_set_flush_callback(ut_context* ctx,
+                                     ut_flush_success_fn fn,
+                                     void* userdata);
+
 #ifdef __cplusplus
 }
 #endif

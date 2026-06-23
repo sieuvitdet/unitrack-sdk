@@ -1,6 +1,6 @@
 {
   "name": "@unitrack/react-native",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "UniTrack — universal mobile analytics SDK for React Native. Auto-captures screens, taps, network, crashes, OOM, JSON parse errors with persistent offline queue, session journey, and W3C trace propagation.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

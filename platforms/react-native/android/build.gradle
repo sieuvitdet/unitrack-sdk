@@ -32,5 +32,7 @@ dependencies {
     // UniTrack Android SDK — published to JitPack from the same monorepo.
     // Pinned to the tag that ships the matching API surface; bump together
     // with the npm package version.
-    implementation 'com.github.sieuvitdet:unitrack-sdk:0.3.3'
+    // Bump kèm FirebaseAdapter setDefaultEventParameters. Yêu cầu app side
+    // Firebase Android SDK 21.0.0+ (older SDK → no-op an toàn qua reflection).
+    implementation 'com.github.sieuvitdet:unitrack-sdk:0.3.37'
 }

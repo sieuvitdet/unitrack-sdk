@@ -106,6 +106,16 @@ public final class UniTrack {
     private var screenEndEventName:   String = "screen_view"
     private var screenLifecycleEnabled: Bool = true
 
+    // App-supplied closure invoked once each time the app comes back to
+    // foreground AND the throttle window has elapsed (default 5 min). Used by
+    // the app integration layer (vd FSDKTracking) to re-fetch portal remote
+    // config without baking the fetch URL/api_key into the SDK core. The
+    // SDK itself stays scoped to "track events"; what to refresh on
+    // foreground is a host decision.
+    fileprivate var appForegroundHandler: (() -> Void)?
+    fileprivate var foregroundThrottleSec: TimeInterval = 5 * 60
+    fileprivate var lastForegroundCallback: Date?
+
     // MARK: - Session helpers (used by AppLifecycleObserver + app code)
 
     /// Current session id (UUID v4). Empty before initialize().
@@ -197,6 +207,38 @@ public final class UniTrack {
             else { return }
             h(obj)
         }, unmanaged)
+    }
+
+    /// Register a closure invoked when the app comes back to foreground.
+    /// Used by host integrations to refresh portal remote config (or any other
+    /// startup-bound resource) without baking the fetch into the SDK core.
+    ///
+    /// Throttled by `throttleSeconds` (default 5 min) so a user that taps in
+    /// and out of the app every 30 seconds doesn't trigger N config fetches.
+    /// The first foreground after `initialize()` does NOT fire (cold start
+    /// already fetched). Subsequent didBecomeActive events trigger only when
+    /// at least `throttleSeconds` have passed since the previous callback.
+    ///
+    /// Pass `handler = nil` to clear. Set on the main thread.
+    public static func onAppForeground(throttleSeconds: TimeInterval = 5 * 60,
+                                       _ handler: (() -> Void)?) {
+        shared.appForegroundHandler   = handler
+        shared.foregroundThrottleSec  = throttleSeconds
+        shared.lastForegroundCallback = Date()   // seed so the cold-start foreground doesn't fire
+    }
+
+    /// Internal hook called by AppLifecycleObserver from the didBecomeActive
+    /// notification. Public so the observer can reach it from another file in
+    /// the same module — apps don't need to call this.
+    public static func _fireForegroundIfThrottleElapsed() {
+        guard let handler = shared.appForegroundHandler else { return }
+        let now = Date()
+        if let last = shared.lastForegroundCallback,
+           now.timeIntervalSince(last) < shared.foregroundThrottleSec {
+            return
+        }
+        shared.lastForegroundCallback = now
+        handler()
     }
 
     /// When the active session started (monotonic clock-based). Nil before init.
@@ -329,10 +371,168 @@ public final class UniTrack {
         }
     }
 
+    /// Drop every registered provider. Call this before re-adding providers
+    /// when the host re-reads portal config (vd flavor switch, SSE-driven
+    /// realtime refresh). Without it, a re-init would leave the OLD
+    /// SnowplowProvider/FirebaseProvider in the fan-out list alongside the
+    /// new one and every event would land twice — once at the old endpoint,
+    /// once at the new one.
+    public static func removeAllProviders() {
+        shared.providers.removeAll()
+    }
+
+    /// Hot-reload the screen-lifecycle wire-event names (screenStartEvent,
+    /// screenEndEvent, screenLoadEvent). UniTrack.initialize() is guarded
+    /// `!isInitialized`, so when realtime config changes these wire names
+    /// the binding-layer caches stay frozen unless we override them here.
+    /// The C++ core's own copies (used by the HTTP queue) keep the cold-
+    /// start values — fully resetting the core mid-flight risks dropping
+    /// queued events, which the operator rarely wants. The provider
+    /// fan-out path (Snowplow/Firebase) reads these caches AT FIRE TIME,
+    /// so post-refresh events land under the new names on the providers.
+    ///
+    /// Pass nil for any field to keep its current value. Empty string ""
+    /// resets to the default ("screen_view" / "screen_load_completed").
+    public static func applyHotConfig(screenStartEvent: String? = nil,
+                                      screenEndEvent:   String? = nil,
+                                      screenLoadEvent:  String? = nil) {
+        if let v = screenStartEvent {
+            shared.screenStartEventName = v.isEmpty ? "screen_view" : v
+        }
+        if let v = screenEndEvent {
+            shared.screenEndEventName   = v.isEmpty ? "screen_view" : v
+        }
+        if let v = screenLoadEvent {
+            UniTrack.screenLoadEventName = v.isEmpty ? "screen_load_completed" : v
+        }
+        UniTrack.log("[UniTrack] hot-config screen events → start=%@ end=%@ load=%@",
+                     shared.screenStartEventName,
+                     shared.screenEndEventName,
+                     UniTrack.screenLoadEventName)
+    }
+
+    /// Remove a single registered provider by identity. Useful when only one
+    /// provider needs re-creating (vd just Firebase changed). Compares with
+    /// ObjectIdentifier so an app can hold the original instance handle and
+    /// pass it back without an Equatable conformance on the protocol.
+    public static func removeProvider(_ provider: AnalyticsProvider) {
+        shared.providers.removeAll { ObjectIdentifier($0) == ObjectIdentifier(provider) }
+    }
+
     // Run a closure against every provider, isolating failures so one bad
     // provider never breaks the main pipeline.
     private static func forEachProvider(_ action: (AnalyticsProvider) -> Void) {
         for p in shared.providers { action(p) }
+    }
+
+    private static var pendingWorker: DispatchSourceTimer?
+
+    /// Ack-aware fan-out. Calls `provider.send()` on every registered provider:
+    ///   - .success → done
+    ///   - .retry   → enqueue in PendingQueue for exponential-backoff retry
+    ///   - .drop    → log and discard for that provider only
+    ///
+    /// Existing providers (Snowplow, Firebase) use the default `send()` impl
+    /// from the protocol extension — they call `track()` and return .success.
+    /// Custom HttpProvider overrides `send()` so UniTrack handles offline
+    /// retry for any backend that doesn't ship its own SDK queue.
+    private static func dispatchToProviders(_ name: String, _ props: [String: Any]) {
+        var retryIds: [String] = []
+        for p in shared.providers {
+            let r = p.send(name, props)
+            switch r {
+            case .success: break
+            case .retry:   retryIds.append(p.providerId)
+            case .drop:    NSLog("[UniTrack] provider %@ dropped event \"%@\"",
+                                 p.providerId, name)
+            }
+        }
+        if !retryIds.isEmpty {
+            PendingQueue.shared.enqueue(name: name, properties: props, providerIds: retryIds)
+        }
+    }
+
+    static func startPendingWorker() {
+        guard pendingWorker == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        t.schedule(deadline: .now() + 2, repeating: 2.0)
+        t.setEventHandler {
+            let q = PendingQueue.shared
+            q.trim()
+            let batch = q.peek(max: 50)
+            guard !batch.isEmpty else { return }
+            let providers = shared.providers
+            for row in batch {
+                var successful: [String] = []
+                var retrying:   [String] = []
+                var dropped:    [String] = []
+                let props = q.decodeProps(row)
+                for provider in providers {
+                    let bit = Int64(1) << q.bitFor(provider.providerId)
+                    if row.pendingMask & bit == 0 { continue }
+                    let r = provider.send(row.name, props)
+                    switch r {
+                    case .success: successful.append(provider.providerId)
+                    case .retry:   retrying.append(provider.providerId)
+                    case .drop:    dropped.append(provider.providerId)
+                    }
+                }
+                q.ack(rowId: row.rowId, successful: successful,
+                      retrying: retrying, dropped: dropped)
+            }
+        }
+        t.resume()
+        pendingWorker = t
+    }
+
+    /// Snapshot count of events waiting to retry. Demo/debug UIs.
+    @objc public static func pendingProviderRetryCount() -> Int {
+        PendingQueue.shared.count()
+    }
+
+    /// IDs of every registered HttpProvider — used by the remote-config
+    /// reconciler (UniTrackRemoteConfig.applyHttpProviders) to compute the
+    /// diff against Portal's desired list. Non-HttpProvider providers
+    /// (Snowplow, Firebase, app-supplied) are excluded.
+    public static func registeredHttpProviderIds() -> [String] {
+        shared.providers.compactMap { ($0 as? HttpProvider)?.providerId }
+    }
+
+    /// Remove a provider whose providerId matches `id`. Used by the
+    /// reconciler to drop providers no longer in Portal config + replace
+    /// providers whose endpoint/headers/format changed (remove + add).
+    /// No-op if no match — idempotent.
+    public static func removeProvider(byId id: String) {
+        shared.providers.removeAll { $0.providerId == id }
+    }
+
+    /// Convenience: attach the built-in `FirebaseAdapter` that stamps UniTrack
+    /// `session_id` onto every Firebase Analytics event via reflection — 0
+    /// import of Firebase in UniTrack core. App can be missing Firebase: this
+    /// call is a no-op then. App can add Firebase tomorrow: this call starts
+    /// working immediately, no rebuild.
+    ///
+    ///   UniTrack.attachFirebaseAdapter()
+    public static func attachFirebaseAdapter() {
+        if let a = FirebaseAdapter.create() { addProvider(a) }
+    }
+
+    /// Register a built-in `HttpProvider`. Internal — call site is the remote
+    /// config reconciler (`UniTrackRemoteConfig.applyHttpProviders`). Portal
+    /// is the only source of truth for custom HTTP backends so app code never
+    /// needs (and isn't allowed) to wire one by hand.
+    internal static func addHttpProvider(
+        id: String,
+        endpoint: URL,
+        format: PayloadFormat = .jsonSingle,
+        headers: [String: String] = [:],
+        batchSize: Int = 50,
+        flushInterval: TimeInterval = 30
+    ) {
+        addProvider(HttpProvider(
+            id: id, endpoint: endpoint, format: format,
+            headers: headers, batchSize: batchSize, flushInterval: flushInterval
+        ))
     }
 
     // ── W3C distributed tracing ────────────────────────────────────────────
@@ -405,7 +605,7 @@ public final class UniTrack {
                          provNames.isEmpty ? "(none)" : provNames)
         }
         // Forward to every registered provider (Snowplow, Firebase, …).
-        forEachProvider { $0.track(name, props) }
+        dispatchToProviders(name, props)
         guard let ctx = shared.context else { return }
         ut_track(ctx, name,
                  UniTrack.jsonString(from: props) ?? "{}")
@@ -455,7 +655,7 @@ public final class UniTrack {
                 "foreground_sec":  foregroundSec,
                 "is_exit_screen":  false,
             ]
-            forEachProvider { $0.track(shared.screenEndEventName, endPayload) }
+            dispatchToProviders(shared.screenEndEventName, endPayload)
         }
         // screen_view (legacy back-compat) — kept so older portal consumers
         // and the Snowplow native ScreenView call (above via setScreen) stay
@@ -464,7 +664,7 @@ public final class UniTrack {
             "screen":      name,
             "screen_name": name,
         ]
-        forEachProvider { $0.track("screen_view", viewPayload) }
+        dispatchToProviders("screen_view", viewPayload)
         if shared.screenLifecycleEnabled {
             var startPayload: [String: Any] = [
                 "screen":      name,
@@ -475,7 +675,7 @@ public final class UniTrack {
                 startPayload["from_screen"]          = prev
                 startPayload["previous_screen_name"] = prev
             }
-            forEachProvider { $0.track(shared.screenStartEventName, startPayload) }
+            dispatchToProviders(shared.screenStartEventName, startPayload)
         }
     }
 
@@ -614,7 +814,22 @@ public final class UniTrack {
 
         if config.autoCapture {
             if config.trackScreens         { ViewControllerSwizzler.install() }
-            if config.trackTaps            { ControlSwizzler.install() }
+            // Auto-instrument every WKWebView: swizzle init to inject a
+            // tracking JS + script message handler. Every web view (in-app
+            // browser, third-party SDK shell) starts emitting click +
+            // navigate events to UniTrack without per-call wiring.
+            UniTrackWebView.install()
+            if config.trackTaps            {
+                ControlSwizzler.install()
+                // Many screens use UITapGestureRecognizer on a plain UIView
+                // instead of a UIControl (custom card, image, label). Those
+                // never go through UIApplication.sendAction so ControlSwizzler
+                // misses them. GestureRecognizerSwizzler closes the gap by
+                // swizzling UIGestureRecognizer.setState — only tap recognizers
+                // reaching .recognized fire a click event, so pan/pinch/swipe
+                // recognizers stay silent.
+                GestureRecognizerSwizzler.install()
+            }
             if config.trackNetwork {
                 UniTrackURLProtocol.install()
                 // Don't capture the SDK's own uploads (avoids a feedback loop:
@@ -642,6 +857,10 @@ public final class UniTrack {
 
         // Bring up any providers registered before initialize().
         for p in providers { p.initializeProvider() }
+
+        // Spin up the per-provider ack queue worker: polls every 2s, retries
+        // with exponential backoff (1s → 5min cap, max 10 retries, 7-day TTL).
+        UniTrack.startPendingWorker()
 
         // Pop any crash recovered at ut_init from the core. Core already
         // enqueued it to the offline queue (→ portal HTTP); this re-emits

@@ -32,6 +32,11 @@ enum AppLifecycleObserver {
             // the core rotates internally + we fire session_ended for the
             // closed session before session_started for the new one.
             emitSessionBoundariesIfNeeded()
+            // Notify any host that registered onAppForeground — typically used
+            // to refresh portal remote config so a user who just minimised the
+            // app picks up new portal settings without killing + relaunching.
+            // The fire is throttled (default 5 min) inside the SDK.
+            UniTrack._fireForegroundIfThrottleElapsed()
         }
         nc.addObserver(forName: UIApplication.didEnterBackgroundNotification,
                        object: nil, queue: .main) { _ in
