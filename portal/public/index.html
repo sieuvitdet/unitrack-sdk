@@ -3862,8 +3862,14 @@ async function openSessionIDE(pid, sid){
     // Stop any running replay so its animation frames don't keep firing after
     // the overlay is hidden (cheap leak otherwise — RAF survives display:none).
     ideReplayCleanup();
+    ideAutoRefreshStop();
     ov.style.display = 'none';
   };
+  // Auto-refresh polling: pull session detail mỗi 3s để live-tail event mới
+  // (anh demo offline → online flush, không phải bấm ⟳ Refresh thủ công).
+  // Pause khi tab background (visibilitychange) — tránh tốn pin / 4G.
+  ideAutoRefreshStart(pid, sid);
+  document.addEventListener('visibilitychange', _ideVisibilityHandler);
   // Layout dialog wiring removed with the button — wireframe capture is
   // parked, openLayoutDialog/renderWireframeSvg/endpoint kept dormant in
   // case we revisit, but no UI surfaces them anymore.
@@ -4015,6 +4021,57 @@ function _renderFlatEventRow(e) {
     <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(screen)}">${esc(screen)}</div>
     <div style="text-align:right">${status}</div>
   </div>`;
+}
+
+// ── Auto-refresh polling (live-tail) ─────────────────────────────────────
+// State sống ở module scope — chỉ 1 timer chạy 1 lúc cho session detail
+// hiện tại. Re-render đè innerHTML nên scroll position bị reset; em snapshot
+// scrollTop trước render + restore sau, anh không bị nhảy về top mỗi 3s.
+let _ideAutoRefreshTimer = null;
+let _ideAutoRefreshPid = null;
+let _ideAutoRefreshSid = null;
+let _ideAutoRefreshLastCount = 0;
+
+function ideAutoRefreshStart(pid, sid) {
+  ideAutoRefreshStop();   // idempotent — clear cũ trước khi start mới
+  _ideAutoRefreshPid = pid;
+  _ideAutoRefreshSid = sid;
+  _ideAutoRefreshLastCount = 0;
+  _ideAutoRefreshTimer = setInterval(_ideAutoRefreshTick, 3000);
+}
+
+function ideAutoRefreshStop() {
+  if (_ideAutoRefreshTimer) { clearInterval(_ideAutoRefreshTimer); _ideAutoRefreshTimer = null; }
+  _ideAutoRefreshPid = null; _ideAutoRefreshSid = null;
+  document.removeEventListener('visibilitychange', _ideVisibilityHandler);
+}
+
+async function _ideAutoRefreshTick() {
+  const pid = _ideAutoRefreshPid, sid = _ideAutoRefreshSid;
+  if (!pid || !sid) return;
+  // Pause khi tab background — visibilitychange handler dưới đã clear timer.
+  if (document.hidden) return;
+  // Pause khi user đang gõ search — tránh re-render xoá keyword đang nhập.
+  const searchEl = document.getElementById('ideSearch');
+  if (searchEl && document.activeElement === searchEl) return;
+  try {
+    const fresh = await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`);
+    const newCount = (fresh.journey || []).length;
+    // Chỉ re-render khi count thay đổi — tránh repaint vô ích.
+    if (newCount === _ideAutoRefreshLastCount) return;
+    _ideAutoRefreshLastCount = newCount;
+    // Snapshot scrollTop trước, restore sau.
+    const listEl = document.getElementById('ideList');
+    const scrollTop = listEl ? listEl.scrollTop : 0;
+    renderSessionOutline(pid, sid, fresh, (_ideState && _ideState.sessions) || []);
+    if (listEl) listEl.scrollTop = scrollTop;
+  } catch (_) { /* silent: portal có thể restart, đợi tick sau */ }
+}
+
+function _ideVisibilityHandler() {
+  // Khi tab visible lại, fire 1 tick ngay để bắt event đã accumulate khi
+  // tab ở background — không phải chờ thêm 3s.
+  if (!document.hidden && _ideAutoRefreshTimer) _ideAutoRefreshTick();
 }
 
 // Restore the flat session list inside the left sidebar (used by the
