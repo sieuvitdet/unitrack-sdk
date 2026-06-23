@@ -85,6 +85,38 @@ class UniTrackConfig {
         'sessionTimeoutMs': sessionTimeoutMs,
         'screenLoadEvent': screenLoadEvent,
       };
+
+  /// Build [UniTrackConfig] từ Map remote — vd `UniTrackRemoteConfig.sdkConfig`.
+  /// Field missing/sai type → fallback default trong constructor. Portal đang
+  /// gửi snake_case + một số camelCase mixed; chấp nhận cả 2 cho mỗi field.
+  ///
+  ///     final cfg = await UniTrackRemoteConfig.fetch(...);
+  ///     await UniTrack.instance.initialize(
+  ///       apiKey,
+  ///       config: UniTrackConfig.fromMap(cfg.sdkConfig),
+  ///     );
+  factory UniTrackConfig.fromMap(Map<String, dynamic> m, {String? endpoint}) {
+    T pick<T>(List<String> keys, T fallback) {
+      for (final k in keys) {
+        final v = m[k];
+        if (v is T) return v;
+      }
+      return fallback;
+    }
+    return UniTrackConfig(
+      endpoint:         endpoint,
+      batchSize:        pick<int>(['batchSize', 'batch_size'], 50),
+      flushIntervalMs:  pick<int>(['flushIntervalMs', 'flush_interval_ms'], 5000),
+      samplingRate:     pick<double>(['samplingRate', 'sampling_rate'], 1.0),
+      autoCapture:      pick<bool>(['autoCapture', 'auto_capture'], true),
+      trackScreens:     pick<bool>(['trackScreens', 'track_screens'], true),
+      trackTaps:        pick<bool>(['trackTaps', 'track_taps'], true),
+      trackNetwork:     pick<bool>(['trackNetwork', 'track_network'], true),
+      journeyCapture:   pick<bool>(['journeyCapture', 'journey_capture'], true),
+      sessionTimeoutMs: pick<int>(['sessionTimeoutMs', 'session_timeout_ms'], 1800000),
+      screenLoadEvent:  pick<String>(['screenLoadEvent', 'screen_load_event'], 'screen_load_completed'),
+    );
+  }
 }
 
 class UniTrack {

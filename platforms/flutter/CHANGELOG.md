@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.4 — 2026-06-23
+
+### Added
+
+`UniTrackConfig.fromMap()` factory — build config từ `remoteCfg.sdkConfig` Map
+(Portal sdk_config block). App không phải lặp lại default hard-code khi cấu
+hình autoCapture/trackScreens/trackTaps/trackNetwork ở Portal.
+
+```dart
+final remoteCfg = await UniTrackRemoteConfig.fetch(...);
+await UniTrack.instance.initialize(
+  apiKey,
+  config: UniTrackConfig.fromMap(remoteCfg.sdkConfig),
+);
+```
+
+Chấp nhận cả `snake_case` (Portal default) lẫn `camelCase` cho mỗi field. Field
+thiếu/sai type tự fallback default constructor.
+
 ## 1.1.3 — 2026-06-23
 
 ### Fix
