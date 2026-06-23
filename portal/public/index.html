@@ -1079,12 +1079,6 @@ async function renderConfig(pid, mountSel){
         </div>
       </details>
 
-      <!-- userContext seed key=value — gắn vào user_context entity. -->
-      <details style="margin-top:14px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:10px 12px" title="Seed cố định gắn vào user_context entity ngoài giá trị app set qua identify()">
-        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">👤 userContext seed (key=value)</summary>
-        <textarea id="cfSpCtx" style="width:100%;height:64px;margin-top:8px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
-      </details>
-
       <!-- Convention layer: map kind → wire event name. SDK build iglu URI
            từ vendor/version đã set ở Snowplow Details. -->
       <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Map convention kind (click/result/screen_view/crash/api/session) → tên event tuỳ project">
@@ -2133,7 +2127,6 @@ async function renderConfig(pid, mountSel){
     const andOv = collectPlatform('And');
 
     const snowplow = { enabled:$('#cfSpOn').checked, endpoint:$('#cfSpEp').value.trim(), appId:$('#cfSpApp').value.trim(),
-      userContext: parseKV('#cfSpCtx'),
       iglu_vendor:     $('#cfSpIgluVendor').value.trim() || undefined,
       default_version: $('#cfSpDefVersion').value.trim() || undefined,
       event_names:     eventNames,
