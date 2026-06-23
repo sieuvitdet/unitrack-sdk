@@ -3846,12 +3846,14 @@ async function openSessionIDE(pid, sid){
       <input id="ideSeek" type="range" min="0" max="100" value="0" step="0.1" disabled style="flex:1;accent-color:var(--accent)">
       <span id="ideNow" class="muted mono" style="min-width:120px;text-align:right">— chọn play để chạy lại session —</span>
     </div>
-    <div style="display:grid;grid-template-columns:260px 1fr 380px;overflow:hidden">
-      <div id="ideList" style="border-right:1px solid var(--line);overflow:auto;background:var(--panel)"></div>
-      <div id="ideMain" style="overflow:auto;background:var(--bg);position:relative"></div>
-      <div id="ideDetail" style="border-left:1px solid var(--line);overflow:auto;background:var(--panel);padding:16px">
-        <div class="muted" style="font-size:12px">Bấm một màn ở giữa để xem chi tiết event / network của màn đó.</div>
-      </div>
+    <!-- Session detail layout — FULL WIDTH event list (refactor cho demo offline
+         event). Middle + right pane bị ẩn display:none nhưng giữ DOM để replay
+         engine + handler cũ không null-pointer. Anh muốn xem flat event timeline
+         newest-first + total count để watch offline → online flush. -->
+    <div style="display:grid;grid-template-columns:1fr;overflow:hidden">
+      <div id="ideList" style="overflow:auto;background:var(--panel)"></div>
+      <div id="ideMain" style="display:none"></div>
+      <div id="ideDetail" style="display:none"></div>
     </div>`;
   // Switch the overlay to 3-row grid (header / replay bar / panes) — replay
   // bar was added between, so the grid template needs the extra row.
@@ -3888,83 +3890,131 @@ async function openSessionIDE(pid, sid){
   await renderIDEMain(pid, sid);
 }
 
-// Build the left sidebar outline for the CURRENT session: one collapsible
-// block per screen with the time range, duration, and a compact summary of
-// each event that fired on that screen. Reuses buildSessionTree() so the
-// outline stays in lockstep with the middle pane's timeline.
+// Flat event list — sidebar chiếm full màn hình, newest event ở top, header
+// hiển N event tổng. Dùng cho demo offline event: app fire event lúc mất
+// mạng → khi online flush, anh refresh thấy event mới xuất hiện ở top.
+//
+// Trước đây sidebar gom event theo screen (collapsible block). Anh chuyển
+// sang flat view để debug từng event 1 — phù hợp test pipeline ingest +
+// offline flush (per-event visibility).
 function renderSessionOutline(pid, sid, session, allSessions){
   const listEl = document.getElementById('ideList');
   if(!listEl) return;
   const journey = (session && Array.isArray(session.journey)) ? session.journey : [];
-  const segs = buildSessionTree(journey);
+
+  // Sort newest-first by `ts` (event timestamp). Fallback giữ thứ tự server
+  // trả về khi thiếu ts. Server thường trả chronological ASC nên reverse().
+  const events = journey.slice().sort((a, b) => {
+    const ta = a && (a.ts || a.timestamp || 0);
+    const tb = b && (b.ts || b.timestamp || 0);
+    return tb - ta;
+  });
+
+  const crashCount = events.filter(e => e && (e.event_name === 'crash' ||
+    e.event_name === 'application_error' || e.event_name === 'json_parse_error')).length;
+  const netCount = events.filter(e => e && e.event_name === 'network_request').length;
 
   const headHtml = `
-    <div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;background:var(--panel)">
-      <button class="btn ghost sm" id="ideBackList" title="Danh sách session" style="padding:4px 8px;font-size:11px">← Danh sách</button>
-      <span class="mono" style="color:var(--accent2);font-size:12px">${shortSid(sid)}</span>
-      ${session && session.crashed ? '<span style="color:var(--danger)">⚠</span>' : ''}
-      <span class="muted" style="font-size:11px;margin-left:auto">${segs.length} màn</span>
-    </div>`;
-
-  const MAX_SHOWN = 6;
-  // Reverse so the NEWEST screen sits at the top of the sidebar — matches the
-  // way an IDE log pane shows recent activity first. data-seg keeps the
-  // ORIGINAL chronological index so clicking still maps to the right segs[i]
-  // and the middle pane scrollIntoView lands on the correct card.
-  const orderedSegs = segs.map((seg, idx) => ({ seg, idx })).reverse();
-  const screenBlocksHtml = orderedSegs.length ? orderedSegs.map(({ seg, idx }) => {
-    const dur = (seg.started_at && seg.ended_at) ? (seg.ended_at - seg.started_at) : 0;
-    const range = (seg.started_at && seg.ended_at)
-      ? `${fmtTime(seg.started_at)} → ${fmtTime(seg.ended_at)}`
-      : '';
-    const shown = seg.actions.slice(0, MAX_SHOWN);
-    const overflow = seg.actions.length - shown.length;
-    const actionLinesHtml = shown.map(a => {
-      if(a.standaloneNet){
-        const net = a.networks[0];
-        const path = net && net.url ? (()=>{ try{return new URL(net.url).pathname;}catch(_){return net.url;}})() : '(no url)';
-        return `<div style="font-size:11px;color:var(--muted);padding:2px 0">• network <span class="mono" style="color:var(--text)">${esc(net?.method||'')} ${esc(path)}</span> <span style="color:${statusColor(net?.status)}">${net?.status??''}</span></div>`;
-      }
-      const tapLabel = a.element_key ? ` <span class="mono" style="color:var(--text)">${esc(a.element_key)}</span>` : '';
-      const netSuffix = (a.networks && a.networks.length) ? ` <span class="muted">+${a.networks.length} net</span>` : '';
-      const navLine = a.navigatesTo
-        ? `<div style="font-size:10px;color:var(--accent2);padding:1px 0 1px 12px">↳ ${esc(a.navigatesTo)}</div>`
-        : '';
-      return `<div style="font-size:11px;color:var(--muted);padding:2px 0">• ${esc(a.event_name)}${tapLabel}${netSuffix}${navLine}</div>`;
-    }).join('');
-    const overflowHtml = overflow > 0 ? `<div class="muted" style="font-size:10px;padding:2px 0;font-style:italic">+${overflow} event nữa</div>` : '';
-    const dot = seg.crashed ? '#dc2626' : (seg.passive ? '#94a3b8' : '#5b8cff');
-    return `<div class="ide-outline-seg" data-seg="${idx}" style="padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer">
-      <div style="display:flex;gap:6px;align-items:center">
-        <span style="color:${dot}">📱</span>
-        <span class="mono" style="color:var(--text);font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(seg.screen)}">${esc(seg.screen)}</span>
-        <span class="muted" style="font-size:10px">${dur ? fmtDur(dur) : ''}</span>
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;background:var(--panel);position:sticky;top:0;z-index:5">
+      <button class="btn ghost sm" id="ideBackList" title="Danh sách session">← Danh sách</button>
+      <div>
+        <div class="mono" style="color:var(--accent2);font-size:13px;font-weight:600">${shortSid(sid)}</div>
+        <div class="muted" style="font-size:10px;margin-top:2px">${session && session.user_id ? esc(session.user_id) : '—'} · ${session && session.platform ? esc(session.platform) : '—'}</div>
       </div>
-      ${range ? `<div class="muted" style="font-size:10px;margin-top:2px">${range}</div>` : ''}
-      <div style="margin-top:6px">${actionLinesHtml || '<div class="muted" style="font-size:11px;padding:2px 0;font-style:italic">• chỉ đi qua, không tương tác</div>'}${overflowHtml}</div>
+      <div style="display:flex;gap:18px;margin-left:auto;align-items:center">
+        <div style="text-align:right">
+          <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Tổng event</div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent2)">${events.length}</div>
+        </div>
+        ${netCount ? `<div style="text-align:right">
+          <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Network</div>
+          <div style="font-size:16px;font-weight:600">${netCount}</div>
+        </div>` : ''}
+        ${crashCount ? `<div style="text-align:right">
+          <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Lỗi</div>
+          <div style="font-size:16px;font-weight:600;color:var(--danger)">${crashCount}</div>
+        </div>` : ''}
+        <button class="btn ghost sm" id="ideRefresh" title="Pull thêm event mới từ server (anh đang demo offline → online flush)">⟳ Refresh</button>
+      </div>
     </div>`;
-  }).join('') : '<div class="empty" style="font-size:12px;padding:14px">Không có màn nào trong session</div>';
 
-  listEl.innerHTML = headHtml + screenBlocksHtml;
+  // Sticky column header — giúp scan cột khi list dài.
+  const tableHeadHtml = `
+    <div class="mono" style="display:grid;grid-template-columns:120px 140px 1fr 180px 80px;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:78px;z-index:4;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
+      <div>Time</div><div>Event</div><div>Detail</div><div>Screen</div><div style="text-align:right">Status</div>
+    </div>`;
 
-  // Back to flat session list.
+  const rowsHtml = events.length ? events.map(e => _renderFlatEventRow(e)).join('')
+    : '<div class="empty" style="font-size:12px;padding:24px;text-align:center">Session chưa có event nào</div>';
+
+  listEl.innerHTML = headHtml + tableHeadHtml + rowsHtml;
+
   const backBtn = document.getElementById('ideBackList');
   if(backBtn) backBtn.onclick = ()=> renderSessionListInOutline(pid, sid, allSessions);
 
-  // Clicking a screen scrolls the middle pane to the matching .ide-row card.
-  // Middle cards carry data-i (segment index) — renderIDEMain renders in the
-  // same segs[] order so the indices line up 1:1. Highlight the clicked
-  // outline entry so the operator doesn't lose context after scroll.
-  listEl.querySelectorAll('.ide-outline-seg').forEach(el => {
-    el.onclick = () => {
-      const idx = el.dataset.seg;
-      const main = document.getElementById('ideMain');
-      const row = main && main.querySelector(`.ide-row[data-i="${idx}"]`);
-      if(row) row.scrollIntoView({behavior:'smooth', block:'start'});
-      listEl.querySelectorAll('.ide-outline-seg').forEach(x => x.style.background = '');
-      el.style.background = 'var(--panel2)';
-    };
-  });
+  const refreshBtn = document.getElementById('ideRefresh');
+  if(refreshBtn) refreshBtn.onclick = async () => {
+    refreshBtn.disabled = true; refreshBtn.textContent = '⏳ Đang pull…';
+    try {
+      const fresh = await api(`/api/projects/${pid}/sessions/${encodeURIComponent(sid)}`);
+      renderSessionOutline(pid, sid, fresh, allSessions);
+      toast(`Đã pull ${(fresh.journey||[]).length} event`);
+    } catch(e) {
+      toast('Pull thất bại: ' + (e.message||e), 'err');
+      refreshBtn.disabled = false; refreshBtn.textContent = '⟳ Refresh';
+    }
+  };
+}
+
+// Render 1 row trong flat event list. Mỗi event = 1 row monospace, color
+// theo type (network status / crash / click / screen_view). Click để
+// expand JSON props inline.
+function _renderFlatEventRow(e) {
+  if (!e) return '';
+  const name = e.event_name || e.name || '(unknown)';
+  const ts = e.ts || e.timestamp || 0;
+  const time = ts ? fmtTime(ts) : '—';
+  const screen = e.screen || e.screen_name || '—';
+  const props = e.properties || e.props || {};
+
+  // Per-type detail + status pill
+  let detail = '', status = '', accent = 'var(--text)';
+  if (name === 'network_request') {
+    const url = props.url || e.url || '';
+    let path = url; try { path = new URL(url).pathname; } catch(_) {}
+    detail = `<span class="muted">${esc(props.method || 'GET')}</span> ${esc(path)}`;
+    const code = props.status || e.status;
+    status = code ? `<span style="color:${statusColor(code)}">${code}</span>` : '';
+    accent = 'var(--muted)';
+  } else if (name === 'click') {
+    detail = props.element_key
+      ? `<span style="color:var(--accent)">${esc(props.element_key)}</span>`
+      : '(no element_key)';
+  } else if (name === 'screen_view' || name === 'screen_load_completed') {
+    detail = `→ ${esc(screen)}`;
+    if (props.load_ms) status = `<span class="muted">${props.load_ms}ms</span>`;
+    accent = 'var(--accent2)';
+  } else if (name === 'crash' || name === 'application_error' || name === 'json_parse_error') {
+    detail = esc(props.message || props.error || '(no message)');
+    status = '<span style="color:var(--danger)">✕</span>';
+    accent = 'var(--danger)';
+  } else {
+    // Generic — show first meaningful prop after stripping internals.
+    const interesting = Object.entries(props)
+      .filter(([k]) => !k.startsWith('_') && k !== 'session_id' && k !== 'screen')
+      .slice(0, 2)
+      .map(([k, v]) => `<span class="muted">${esc(k)}=</span>${esc(String(v).slice(0, 40))}`)
+      .join(' ');
+    detail = interesting || '<span class="muted">—</span>';
+  }
+
+  return `<div class="ide-flat-row" data-evt='${esc(JSON.stringify(e))}' style="display:grid;grid-template-columns:120px 140px 1fr 180px 80px;gap:12px;padding:6px 18px;border-bottom:1px solid var(--line);cursor:pointer;font-family:ui-monospace,monospace;font-size:11.5px;align-items:center" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
+    <div class="muted">${time}</div>
+    <div style="color:${accent};font-weight:600">${esc(name)}</div>
+    <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(JSON.stringify(props))}">${detail}</div>
+    <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(screen)}">${esc(screen)}</div>
+    <div style="text-align:right">${status}</div>
+  </div>`;
 }
 
 // Restore the flat session list inside the left sidebar (used by the
