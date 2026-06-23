@@ -93,12 +93,20 @@ router.post('/projects/:id/rotate-key', ownProject, (req, res) => {
 // Snowplow proxy) the real collector URL to relay events to. Blank URL = the
 // portal is the only sink (collect-only).
 router.put('/projects/:id/providers', ownProject, (req, res) => {
-  const { providers, sp_forward_url } = req.body || {};
-  const list = Array.isArray(providers)
-    ? providers.filter((p) => ['snowplow', 'firebase'].includes(p))
+  const body = req.body || {};
+  const list = Array.isArray(body.providers)
+    ? body.providers.filter((p) => ['snowplow', 'firebase'].includes(p))
     : [];
-  db.prepare('UPDATE projects SET providers = ?, sp_forward_url = ? WHERE id = ?')
-    .run(JSON.stringify(list), sp_forward_url || null, req.params.id);
+  // Portal UI tab Config bỏ ô "Portal mirror" → client KHÔNG gửi key này nữa.
+  // Khi key vắng mặt, giữ nguyên value DB hiện tại (backward-compat cho
+  // project cũ đã cấu hình sp_forward_url qua API import / cURL).
+  if ('sp_forward_url' in body) {
+    db.prepare('UPDATE projects SET providers = ?, sp_forward_url = ? WHERE id = ?')
+      .run(JSON.stringify(list), body.sp_forward_url || null, req.params.id);
+  } else {
+    db.prepare('UPDATE projects SET providers = ? WHERE id = ?')
+      .run(JSON.stringify(list), req.params.id);
+  }
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id));
 });
 

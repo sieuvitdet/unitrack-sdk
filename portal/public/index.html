@@ -125,6 +125,29 @@
   .autocomplete-list .item{padding:8px 12px;cursor:pointer;font-size:12px;}
   .autocomplete-list .item:hover{background:var(--panel);color:var(--accent2);}
   .relative{position:relative;}
+  /* Config tab grid — refactor t-i-c-1-serene-cookie: show-all + asterisk
+     required, 2-3 col grid per cluster, asterisk + outline đỏ for missing. */
+  .cfg-grid{display:grid;gap:14px}
+  .cfg-grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cfg-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cfg-section{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px;background:var(--panel)}
+  .cfg-section > h3{margin:0 0 12px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .cfg-section > h3 .badge{font-size:10px;padding:2px 7px;border-radius:10px;background:var(--chip);color:var(--muted);text-transform:none;letter-spacing:0}
+  .cfg-section.provider-on{border-left:3px solid var(--accent2)}
+  .cfg-section.provider-off{opacity:.78}
+  .cfg-field{display:flex;flex-direction:column;gap:5px}
+  .cfg-field > label{font-size:11px;color:var(--muted);font-weight:500}
+  .cfg-field > input,.cfg-field > select,.cfg-field > textarea{width:100%}
+  .req::after{content:"*";color:var(--danger);margin-left:3px;font-weight:700}
+  .req-missing{outline:2px solid var(--danger);outline-offset:1px;border-radius:6px}
+  .progress-pill{display:inline-flex;align-items:center;gap:10px;padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--text)}
+  .progress-pill .count{font-weight:600;color:var(--accent2)}
+  .progress-pill .count.partial{color:var(--warn)}
+  .progress-bar{width:120px;height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+  .progress-fill{height:100%;background:var(--accent2);transition:width .25s ease}
+  .progress-fill.partial{background:var(--warn)}
+  .cfg-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+  @media(max-width:720px){.cfg-grid.cols-2,.cfg-grid.cols-3{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -450,26 +473,8 @@ async function renderProject(){
         <a class="btn ghost sm" href="${BASE}/api/projects/${pid}/export">⬇ Export Excel</a>
       </div>
     </div>
-    <div class="cards">
-      <div class="card"><div class="k">Events</div><div class="v">${stats.total}</div></div>
-      <div class="card"><div class="k">Sessions</div><div class="v">${stats.sessions}</div></div>
-      <div class="card ${stats.users?'card-clickable card-clickable-accent':''}" id="usersCard"
-        style="${stats.users?'cursor:pointer':''}"
-        title="${stats.users?'Bấm để xem danh sách user':''}">
-        <div class="k">Users${stats.users?' <span class="muted" style="font-size:10px">↗</span>':''}</div>
-        <div class="v">${stats.users}</div>
-      </div>
-      <div class="card ${stats.crashes?'card-clickable':''}" id="crashCard"
-        style="${stats.crashes?'cursor:pointer':''}"
-        title="${stats.crashes?'Bấm để xem chi tiết các crash':''}">
-        <div class="k">Crashes${stats.crashes?' <span class="muted" style="font-size:10px">↗</span>':''}</div>
-        <div class="v" style="color:${stats.crashes?'var(--danger)':'inherit'}">${stats.crashes}</div>
-      </div>
-    </div>
-    <!-- Report charts row: rendered async by renderStatsCharts(). HIDDEN
-         temporarily — operators only need Sessions + Config (remote) for now.
-         Re-enable by removing display:none here + restoring renderStatsCharts()
-         call below + the hidden tabs (logs / wireframe / agent). -->
+    <!-- 4 stat card Events/Sessions/Users/Crashes đã ẩn — operator focus
+         vào Config tab. Khôi phục: revert refactor t-i-c-1-serene-cookie. -->
     <div id="statsChartsRow" style="display:none;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px"></div>
     <div class="panel">
       <div class="tabs">
@@ -895,101 +900,127 @@ async function renderConfig(pid, mountSel){
   // helper: returns the override object for `flavor` or {}.
   const ovGet = (block, flavor) => (block && block.flavor_overrides && block.flavor_overrides[flavor]) || {};
   mount.innerHTML = `
-    <div style="padding:16px;max-width:760px">
-      <div class="muted" style="font-size:12px;margin-bottom:14px">
-        App kéo cấu hình này về lúc khởi tạo (qua <span class="mono">GET /config</span>).
-        Đổi ở đây → app áp dụng lần mở sau, <b>không cần build lại</b>. Phiên bản: <b>v${c.version}</b>
-      </div>
-
-      <h3 style="margin:0 0 8px;font-size:14px">Endpoint & SDK</h3>
-      <label>Ingest endpoint</label>
-      <input id="cfEndpoint" style="width:100%" value="${esc(c.endpoint)}"/>
-      <div class="row" style="gap:10px;margin-top:8px;flex-wrap:wrap">
-        <div><label>batchSize</label><input id="cfBatch" type="number" style="width:90px" value="${s.batchSize??10}"/></div>
-        <div><label>flushIntervalMs</label><input id="cfFlush" type="number" style="width:110px" value="${s.flushIntervalMs??3000}"/></div>
-        <div><label>logLevel</label><select id="cfLog">
-          ${['error','warn','info','debug'].map(lv=>`<option value="${lv}" ${ (s.logLevel||'info')===lv?'selected':''}>${lv}</option>`).join('')}
-        </select></div>
-      </div>
-      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px">Auto-capture flags <span class="muted" style="font-weight:400">— SDK tự fire mỗi khi user tap / navigate / HTTP. Tắt để chỉ ghi nhận business event app code chủ động fire.</span></div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:start">
-          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
-          <span class="muted" style="font-size:11px">Bật toàn bộ chuỗi auto-capture. Tắt = SDK chỉ track event app code chủ động fire.</span>
-
-          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> trackScreens</label>
-          <span class="muted" style="font-size:11px">Tự fire <span class="mono">screen_load_completed</span> mỗi khi route đổi (qua RouteObserver / swizzler / FragmentLifecycle).</span>
-
-          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> trackTaps</label>
-          <span class="muted" style="font-size:11px">Tự fire <span class="mono">click</span> cho MỌI tap button — kèm metadata (class_name, framework, package). <b>Tắt nếu app đã wire <span class="mono">trackingClickEvent()</span> ở mọi nơi cần</b>: tránh dup 2 event/tap.</span>
-
-          <label class="row" style="gap:5px;font-size:12px"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> trackNetwork</label>
-          <span class="muted" style="font-size:11px">Tự fire <span class="mono">network_request</span> cho mỗi HTTP call (URLProtocol / OkHttp / fetch interceptor). Tắt nếu chỉ muốn log lượt API quan trọng qua <span class="mono">trackingAPI()</span>.</span>
+    <div style="padding:16px;max-width:1000px">
+      <!-- Config header — version + progress pill -->
+      <div class="cfg-header">
+        <div class="muted" style="font-size:12px">
+          App pull qua <span class="mono">GET /config</span>. Đổi ở đây → áp dụng lần mở app sau.
+          Phiên bản: <b>v${c.version}</b>
+        </div>
+        <div class="progress-pill" title="Số trường bắt buộc đã điền">
+          <span>Setup:</span>
+          <span class="count" id="cfgProgress">–</span>
+          <div class="progress-bar"><div class="progress-fill" id="cfgProgressFill" style="width:0%"></div></div>
         </div>
       </div>
 
-      <!-- Screen lifecycle event names. Empty = core SDK keeps default
-           behavior (no screen_start / screen_end pair, swizzler fires
-           "screen_load_completed"). Set these per project to a custom
-           taxonomy without rebuilding the app. -->
-      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px">Screen lifecycle event names <span class="muted" style="font-weight:400">— bỏ trống = giữ default</span></div>
-        <div class="row" style="gap:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:140px">
-            <label style="font-size:11.5px">screen_start_event</label>
-            <input id="cfScreenStart" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                   placeholder="vd: screen_started (trống = không emit)"
-                   value="${esc(s.screen_start_event||s.screenStartEvent||'')}"/>
+      <!-- ─────── ESSENTIALS ─────── -->
+      <div class="cfg-section">
+        <h3>Essentials</h3>
+        <div class="cfg-grid cols-2">
+          <div class="cfg-field">
+            <label class="req" for="cfEndpoint" title="App pull endpoint này về khi initialize">Ingest endpoint</label>
+            <input id="cfEndpoint" value="${esc(c.endpoint)}" placeholder="https://your-portal.com/event-tracking-mobile/v1/events"/>
           </div>
-          <div style="flex:1;min-width:140px">
-            <label style="font-size:11.5px">screen_end_event</label>
-            <input id="cfScreenEnd" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                   placeholder="vd: screen_ended (trống = không emit)"
-                   value="${esc(s.screen_end_event||s.screenEndEvent||'')}"/>
-          </div>
-          <div style="flex:1;min-width:140px">
-            <label style="font-size:11.5px">screen_load_event</label>
-            <input id="cfScreenLoad" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-                   placeholder="default: screen_load_completed"
-                   value="${esc(s.screen_load_event||s.screenLoadEvent||'')}"/>
+          <div class="cfg-field">
+            <label>API key (readonly)</label>
+            <div class="keybox mono" style="user-select:all">${esc(p.api_key)}</div>
           </div>
         </div>
-        <div class="muted" style="font-size:10.5px;margin-top:6px">
-          <b>start/end</b>: core fire khi đổi screen (end kèm dwell_ms cho màn trước). Trống = không emit.
-          <b>load</b>: swizzler fire ở viewDidAppear kèm load_ms (viewDidLoad → first appearance). Default: <span class="mono">screen_load_completed</span>.
+      </div>
+
+      <!-- ─────── PROVIDERS (3 toggle card) ─────── -->
+      <div class="cfg-section">
+        <h3>Providers</h3>
+        <div class="cfg-grid cols-3">
+          <label class="row" style="gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer" title="Forward event tới Snowplow collector">
+            <input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}>
+            <span style="font-weight:600">🔵 Snowplow</span>
+          </label>
+          <label class="row" style="gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer" title="Bắc cầu Firebase Analytics + stamp session_id">
+            <input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}>
+            <span style="font-weight:600">🟠 Firebase</span>
+          </label>
+          <label class="row" style="gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer" title="Custom HTTP backend (Kibana / ELK / nội bộ)">
+            <input type="checkbox" id="cfHpToggle" ${hp.length>0?'checked':''}>
+            <span style="font-weight:600">🟣 HTTP Custom <span class="muted" style="font-weight:400;font-size:11px">(${hp.length})</span></span>
+          </label>
         </div>
       </div>
 
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px"><label class="row" style="gap:6px;display:inline-flex"><input type="checkbox" id="cfSpOn" ${sp.enabled?'checked':''}> Snowplow</label></h3>
-      <label>Collector endpoint</label><input id="cfSpEp" style="width:100%" value="${esc(sp.endpoint||'')}"/>
-      <div class="row" style="gap:10px;margin-top:8px">
-        <div style="flex:1"><label>appId</label><input id="cfSpApp" style="width:100%" value="${esc(sp.appId||'')}"/></div>
+      <!-- ─────── SDK BEHAVIOR ─────── -->
+      <div class="cfg-section">
+        <h3>SDK Behavior</h3>
+        <div class="cfg-grid cols-3">
+          <div class="cfg-field">
+            <label>batchSize</label>
+            <input id="cfBatch" type="number" value="${s.batchSize??10}"/>
+          </div>
+          <div class="cfg-field">
+            <label>flushIntervalMs</label>
+            <input id="cfFlush" type="number" value="${s.flushIntervalMs??3000}"/>
+          </div>
+          <div class="cfg-field">
+            <label>logLevel</label>
+            <select id="cfLog">
+              ${['error','warn','info','debug'].map(lv=>`<option value="${lv}" ${(s.logLevel||'info')===lv?'selected':''}>${lv}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="row" style="gap:18px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <label class="row" style="gap:5px;font-size:12px" title="Bật toàn bộ auto-capture pipeline. Tắt = chỉ track event app code chủ động fire."><input type="checkbox" id="cfAuto" ${s.autoCapture!==false?'checked':''}> autoCapture</label>
+          <label class="row" style="gap:5px;font-size:12px" title="Tự fire screen_load_completed khi route đổi"><input type="checkbox" id="cfScreens" ${s.trackScreens!==false?'checked':''}> trackScreens</label>
+          <label class="row" style="gap:5px;font-size:12px" title="Tự fire click cho mọi tap. Tắt nếu app đã wire trackingClickEvent ở mọi nơi cần"><input type="checkbox" id="cfTaps" ${s.trackTaps!==false?'checked':''}> trackTaps</label>
+          <label class="row" style="gap:5px;font-size:12px" title="Tự fire network_request cho mỗi HTTP call. Tắt nếu chỉ muốn log API quan trọng qua trackingAPI()"><input type="checkbox" id="cfNet" ${s.trackNetwork!==false?'checked':''}> trackNetwork</label>
+        </div>
       </div>
 
-      <!-- Portal forward: trỏ tracker app vào portal collector → portal ingest
-           log → forward sang collector THẬT. sp_forward_url + providers nằm ở
-           bảng projects nên endpoint riêng (/providers), không thuộc /config. -->
-      <div style="margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:6px;background:var(--bg)">
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px">
-          🔁 Portal mirror <span class="muted" style="font-weight:400">— trỏ tracker app vào portal, portal forward sang collector thật</span>
+      <!-- ─────── SCREEN LIFECYCLE EVENTS ─────── -->
+      <div class="cfg-section">
+        <h3>Screen Lifecycle Events <span class="badge">optional</span></h3>
+        <div class="cfg-grid cols-3">
+          <div class="cfg-field">
+            <label title="Core fire khi screen mới được present. Trống = không emit.">screen_start_event</label>
+            <input id="cfScreenStart" placeholder="vd: screen_started" value="${esc(s.screen_start_event||s.screenStartEvent||'')}"/>
+          </div>
+          <div class="cfg-field">
+            <label title="Core fire khi screen rời view, kèm dwell_ms. Trống = không emit.">screen_end_event</label>
+            <input id="cfScreenEnd" placeholder="vd: screen_ended" value="${esc(s.screen_end_event||s.screenEndEvent||'')}"/>
+          </div>
+          <div class="cfg-field">
+            <label title="Swizzler fire ở viewDidAppear, kèm load_ms. Default: screen_load_completed">screen_load_event</label>
+            <input id="cfScreenLoad" placeholder="default: screen_load_completed" value="${esc(s.screen_load_event||s.screenLoadEvent||'')}"/>
+          </div>
         </div>
-        <div class="muted" style="font-size:11px;margin-bottom:6px">Portal collector URL (gán vào <span class="mono">snowplow.endpoint</span> nếu muốn portal thấy log):</div>
-        <div class="keybox mono" style="display:block;margin:0 0 8px">${location.origin}${BASE}/sp/${esc(p.api_key)}</div>
-        <label style="font-size:11.5px">Forward tới collector thật (trống = portal chỉ thu, không bắn tiếp)</label>
-        <input id="cfSpForward" style="width:100%;font-family:ui-monospace,monospace;font-size:11.5px"
-               placeholder="https://collector-that.cua-ban.com" value="${esc(p.sp_forward_url||'')}"/>
       </div>
 
-      <!-- Per-platform override — SDK trên iOS pick {endpoint, appId} từ
-           snowplow.ios nếu non-empty, fallback các value chung ở trên.
-           Same cho Android. Mỗi platform thêm 4 sub-row flavor (dev/staging/
-           beta/production) — endpoint+appId riêng cho từng platform × flavor.
-           Resolve: platform.flavor_overrides[X] → platform → flavor_overrides[X] → base. -->
-      <div style="margin-top:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:10px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">
-          📱 Per-platform override <span style="font-weight:400">— endpoint + appId riêng cho iOS / Android (tuỳ chọn), kèm 4 flavor</span>
+      <!-- ─────── SNOWPLOW DETAILS (visible khi cfSpOn ON) ─────── -->
+      <div class="cfg-section ${sp.enabled?'provider-on':'provider-off'}" id="cfSpDetailsSection" style="${sp.enabled?'':'display:none'}">
+        <h3>Snowplow Details</h3>
+        <div class="cfg-grid cols-2">
+          <div class="cfg-field">
+            <label class="req" for="cfSpEp">Collector endpoint</label>
+            <input id="cfSpEp" placeholder="https://ftracking.fpt.vn" value="${esc(sp.endpoint||'')}"/>
+          </div>
+          <div class="cfg-field">
+            <label class="req" for="cfSpApp">appId</label>
+            <input id="cfSpApp" placeholder="my-app" value="${esc(sp.appId||'')}"/>
+          </div>
+          <div class="cfg-field">
+            <label class="req" for="cfSpIgluVendor">Iglu vendor</label>
+            <input id="cfSpIgluVendor" placeholder="vn.fpt.ftel.snowplow" value="${esc(sp.iglu_vendor || sp.igluVendor || '')}"/>
+          </div>
+          <div class="cfg-field">
+            <label class="req" for="cfSpDefVersion">Default schema version</label>
+            <input id="cfSpDefVersion" placeholder="1-0-0" value="${esc(sp.default_version || sp.defaultVersion || '')}"/>
+          </div>
         </div>
+
+        <!-- Per-platform override — iOS / Android override base + 4 flavor mỗi platform.
+             Resolve order: platform.flavor_overrides[X] → platform → flavor_overrides[X] → base. -->
+      <details style="margin-top:14px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:10px 12px" title="Override Snowplow endpoint/appId riêng iOS vs Android × 4 flavor">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">📱 Per-platform override</summary>
+        <div style="margin-top:8px">
         ${(() => {
           const renderPlatform = (label, key, plat) => {
             const platOv = (plat && plat.flavor_overrides) || {};
@@ -1045,43 +1076,19 @@ async function renderConfig(pid, mountSel){
           return renderPlatform('iOS',     'Ios', sp.ios)
                + renderPlatform('Android', 'And', sp.android);
         })()}
-      </div>
-      <label style="margin-top:8px">userContext (key=value mỗi dòng)</label>
-      <textarea id="cfSpCtx" style="width:100%;height:64px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
+        </div>
+      </details>
 
-      <!-- Convention layer: the SDK's tracking* helpers (trackingClickEvent,
-           trackingResultEvent, trackingScreenView, trackingCrash, trackingAPI)
-           build the iglu schema URI as
-              iglu:<iglu_vendor>/<event_name>/jsonschema/<default_version>
-           Vendor + version live here so a schema bump (1-0-0 → 1-1-0) is one
-           portal save instead of an App Store / Play release. The event_names
-           table below lets a third-party integrator (e.g. FSS team) re-skin
-           the 5 helpers under their own taxonomy ("fss_event_click", …)
-           without forking the SDK. -->
-      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <b style="font-size:13px">Convention layer</b>
-          <span class="muted" style="font-size:11px">schema URI cho 5 helper <span class="mono">tracking*</span> ở app</span>
-        </div>
-        <div class="muted" style="font-size:11px;margin-bottom:10px">
-          App gọi <span class="mono">trackingClickEvent(...)</span>; SDK build URI
-          <span class="mono">iglu:&lt;vendor&gt;/&lt;event name&gt;/jsonschema/&lt;version&gt;</span>.
-          Mỗi dòng dưới là 1 helper — đổi cột "Event name" để override convention default.
-        </div>
-        <div class="row" style="gap:10px">
-          <div style="flex:2">
-            <label style="font-size:12px">Iglu vendor</label>
-            <input id="cfSpIgluVendor" style="width:100%"
-                   placeholder="vn.fpt.ftel.snowplow"
-                   value="${esc(sp.iglu_vendor || sp.igluVendor || '')}"/>
-          </div>
-          <div style="flex:1">
-            <label style="font-size:12px">Default version</label>
-            <input id="cfSpDefVersion" style="width:100%"
-                   placeholder="1-0-0"
-                   value="${esc(sp.default_version || sp.defaultVersion || '')}"/>
-          </div>
-        </div>
+      <!-- userContext seed key=value — gắn vào user_context entity. -->
+      <details style="margin-top:14px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:10px 12px" title="Seed cố định gắn vào user_context entity ngoài giá trị app set qua identify()">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">👤 userContext seed (key=value)</summary>
+        <textarea id="cfSpCtx" style="width:100%;height:64px;margin-top:8px;font-family:ui-monospace,monospace">${esc(kvText(sp.userContext))}</textarea>
+      </details>
+
+      <!-- Convention layer: map kind → wire event name. SDK build iglu URI
+           từ vendor/version đã set ở Snowplow Details. -->
+      <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Map convention kind (click/result/screen_view/crash/api/session) → tên event tuỳ project">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">🏷️ Convention layer (event_names)</summary>
         ${(() => {
           // Convention kinds — each kind has a resolved event name that the
           // SDK turns into iglu:<vendor>/<event_name>/jsonschema/<version>.
@@ -1154,29 +1161,19 @@ async function renderConfig(pid, mountSel){
                 </tbody>
               </table>
             </div>
-            <div class="row" style="margin-top:8px;justify-content:space-between;align-items:center;gap:8px">
-              <div class="muted" style="font-size:10.5px;flex:1">
-                <b>Built-in kinds</b> đi kèm SDK — app dùng ngay sp.<span class="mono">trackingClickEvent(...)</span>.
-                <b>Custom kinds</b> chỉ tồn tại trên portal cho đến khi dev run
-                <span class="mono">swift run unitrack-gen</span> để generate helper
-                trên app (vd kind <span class="mono">ev_error</span> → <span class="mono">trackingEvError(data:)</span>).
-                Sau khi generate, app build lại + có IDE autocomplete.
-              </div>
-              <button class="btn ghost sm" id="cfSpEvAdd" type="button" title="Thêm 1 kind custom — sau khi save, run swift run unitrack-gen để có helper">+ Add convention kind</button>
+            <div class="row" style="margin-top:8px;justify-content:flex-end;align-items:center;gap:8px">
+              <button class="btn ghost sm" id="cfSpEvAdd" type="button" title="Thêm 1 kind custom. Sau save run `swift run unitrack-gen` để generate helper.">+ Add kind</button>
             </div>`;
         })()}
+      </details>
 
-        <!-- Auto-attached entities — context entities the SDK glues onto
-             every tracking* call. user_context + core_action are built-in
-             (the SDK fills their data from setUser + event meta). Adding
-             any other row registers its schema but the app must pass that
-             entity's data via the helper's extraContexts: parameter. -->
-        <div style="margin-top:14px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-            <b style="font-size:12.5px">Auto-attached entities</b>
-            <span class="muted" style="font-size:11px;flex:1">SDK đính entity này vào mọi event tracking*. Built-in: <span class="mono">user_context</span>, <span class="mono">core_action</span>, <span class="mono">application_context</span></span>
-            <button class="btn ghost sm" id="cfSpEntAdd" type="button" title="Thêm entity ngoài built-in">+ Add entity</button>
-          </div>
+      <!-- Auto-attached entities — SDK glue entity vào mọi event tracking*. -->
+      <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Entity SDK đính vào mỗi event. Built-in: user_context / core_action / application_context — entity khác app phải pass data qua extraContexts:.">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:10px">
+          🔗 Auto-attached entities
+          <button class="btn ghost sm" id="cfSpEntAdd" type="button" title="Thêm entity ngoài built-in" style="margin-left:auto">+ Add entity</button>
+        </summary>
+        <div style="margin-top:8px">
           <div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:var(--bg-tab,#1a1a1a)">
@@ -1236,21 +1233,13 @@ async function renderConfig(pid, mountSel){
               </tbody>
             </table>
           </div>
-          <div class="muted" style="font-size:10.5px;margin-top:6px">
-            Bỏ trống short name → entity không được đính. <b>user_context</b> đọc từ <span class="mono">userContext</span> bag ở trên + setUser. <b>core_action</b> auto-fill action_name, timestamp (now), start_time, screen, element_key. <b>application_context</b> auto-fill từ DeviceInfo (platform, app_version, network_type, build_number, device_*). Entity mới thêm — cần app pass data vào helper qua <span class="mono">extraContexts:</span>. SDK chấp nhận cả full URI (legacy) — chỉ short name là khuyến nghị.
-          </div>
         </div>
-      </div>
+      </details>
 
-      <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <b style="font-size:13px">Tracker options</b>
-          <span class="muted" style="font-size:11px">các cờ của <span class="mono">TrackerConfiguration</span> (mobile)</span>
-        </div>
-        <div class="muted" style="font-size:11px;margin-bottom:8px">
-          Bật/tắt các context entity Snowplow tự gắn vào mỗi event + auto-tracking.
-          App phải rebuild + pull lại config để các cờ này có hiệu lực (tracker được khởi tạo lại).
-        </div>
+      <!-- Tracker options — Snowplow TrackerConfiguration flags. -->
+      <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Snowplow TrackerConfiguration flags. App phải rebuild + pull lại config để có hiệu lực.">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">⚙️ Tracker options</summary>
+        <div style="margin-top:8px">
         ${(() => {
           // Tracker config flags. Names match Snowplow's TrackerConfiguration so
           // a Snowplow operator reading this UI sees the exact field they know.
@@ -1272,97 +1261,81 @@ async function renderConfig(pid, mountSel){
               </label>`).join('')
           }</div>`;
         })()}
-      </div>
+        </div>
+      </details>
 
+      <!-- Per-flavor override (dev/staging/beta/prod) — typed fields per block. -->
+      <details style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="Override 4 flavor dev/staging/beta/production. Field trống = inherit base.">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)">🌐 Per-flavor override</summary>
+        <div style="margin-top:8px">${flavorOverrideHtml('Sp', sp)}</div>
+      </details>
+      </div><!-- /Snowplow Details -->
 
-      ${flavorOverrideHtml('Sp', sp)}
-
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 8px;font-size:14px">
-        <label class="row" style="gap:6px;display:inline-flex">
-          <input type="checkbox" id="cfFbOn" ${fb.enabled?'checked':''}>
-          Firebase Analytics / Crashlytics
-        </label>
-      </h3>
-      <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Portal chỉ bật/tắt provider. App tự cấu hình Firebase bằng <code>google-services.json</code> (Android) /
-        <code>GoogleService-Info.plist</code> (iOS) theo hướng dẫn dưới đây.
-      </div>
-      <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--panel2)">
-        <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">📘 Hướng dẫn setup Firebase theo platform</div>
+      <!-- ─────── FIREBASE GUIDE (Always visible — Provider toggle ở Providers cluster trên) ─────── -->
+      <div class="cfg-section ${fb.enabled?'provider-on':'provider-off'}" id="cfFbDetailsSection" style="${fb.enabled?'':'display:none'}">
+        <h3>Firebase Analytics / Crashlytics</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">
+          Portal chỉ bật/tắt provider. App tự cấu hình Firebase qua plist / google-services.json — guide theo platform:
+        </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <a class="btn ghost sm" href="setup/firebase/ios.html" target="_blank">🍎 iOS Native</a>
           <a class="btn ghost sm" href="setup/firebase/android.html" target="_blank">🤖 Android Native</a>
           <a class="btn ghost sm" href="setup/firebase/flutter.html" target="_blank">🐦 Flutter</a>
           <a class="btn ghost sm" href="setup/firebase/react-native.html" target="_blank">⚛ React Native</a>
         </div>
-        <div class="muted" style="font-size:11px;margin-top:8px;line-height:1.5">
-          <b>Đã tích hợp Firebase rồi:</b> chỉ cần bật toggle ở trên, SDK sẽ bắc cầu UniTrack event → Firebase.<br>
-          <b>Chưa tích hợp Firebase:</b> mở guide tương ứng platform → làm theo các bước (có code mẫu, nút copy, hình minh hoạ).
+        <!-- Hidden inputs giữ schema legacy cho cfSave. -->
+        <input type="hidden" id="cfFbApp"    value="${esc(fbo.appId||'')}"/>
+        <input type="hidden" id="cfFbSender" value="${esc(fbo.gcmSenderId||'')}"/>
+        <input type="hidden" id="cfFbKey"    value="${esc(fbo.apiKey||'')}"/>
+        <input type="hidden" id="cfFbProj"   value="${esc(fbo.projectId||'')}"/>
+        <input type="hidden" id="cfFbBundle" value="${esc(fbo.bundleId||'')}"/>
+        <textarea id="cfFbSuper" style="display:none">${esc(kvText(fb.superProperties))}</textarea>
+        <textarea id="cfFbUser"  style="display:none">${esc(kvText(fb.userProperties))}</textarea>
+      </div>
+
+      <!-- ─────── CUSTOM HTTP PROVIDERS ─────── -->
+      <div class="cfg-section ${hp.length>0?'provider-on':'provider-off'}" id="cfHpSection" style="${hp.length>0?'':'display:none'}">
+        <h3>Custom HTTP Providers <span class="badge">${hp.length}</span></h3>
+        <div id="cfHpList"></div>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <button class="btn ghost sm" id="cfHpAdd" type="button" title="Gắn UniTrack lên Kibana / ELK / API nội bộ. Headers hỗ trợ \${ENV_*} placeholder.">+ Add provider</button>
+        </div>
+        <textarea id="cfHpData" style="display:none">${esc(JSON.stringify(hp))}</textarea>
+      </div>
+
+      <!-- ─────── W3C TRACE CONTEXT ─────── -->
+      <div class="cfg-section ${tr.enabled?'provider-on':'provider-off'}">
+        <h3 title="Bật để SDK chèn header traceparent vào HTTP request đi host trong allowlist. Allowlist trống = fail-closed (không inject).">
+          <label class="row" style="gap:6px;text-transform:none;letter-spacing:0;color:var(--text);font-size:13px">
+            <input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}>
+            W3C Trace Context
+          </label>
+          <span class="badge">optional</span>
+        </h3>
+        <div class="cfg-grid cols-2">
+          <div class="cfg-field">
+            <label>Header name</label>
+            <input type="text" id="cfTrHdr" value="${esc(tr.header_name||'traceparent')}" placeholder="traceparent"/>
+          </div>
+          <div class="cfg-field" style="justify-content:flex-end">
+            <label class="row" style="gap:6px;font-size:12px;padding:7px 0">
+              <input type="checkbox" id="cfTrSampled" ${tr.sampled!==false?'checked':''}>
+              <span>Đánh dấu sampled (flags=01)</span>
+            </label>
+          </div>
+        </div>
+        <div class="cfg-field" style="margin-top:10px">
+          <label class="${tr.enabled?'req':''}" title="1 host/dòng, hỗ trợ *.domain. Trống = fail-closed.">Allowlist hosts</label>
+          <textarea id="cfTrHosts" rows="3" placeholder="api.mobix.asia&#10;*.fpt.vn">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
         </div>
       </div>
-      <!-- Hidden inputs cho cfSave: Firebase config cũ — vẫn giữ để không vỡ schema -->
-      <input type="hidden" id="cfFbApp"    value="${esc(fbo.appId||'')}"/>
-      <input type="hidden" id="cfFbSender" value="${esc(fbo.gcmSenderId||'')}"/>
-      <input type="hidden" id="cfFbKey"    value="${esc(fbo.apiKey||'')}"/>
-      <input type="hidden" id="cfFbProj"   value="${esc(fbo.projectId||'')}"/>
-      <input type="hidden" id="cfFbBundle" value="${esc(fbo.bundleId||'')}"/>
-      <textarea id="cfFbSuper" style="display:none">${esc(kvText(fb.superProperties))}</textarea>
-      <textarea id="cfFbUser"  style="display:none">${esc(kvText(fb.userProperties))}</textarea>
 
-      <!-- ═════════ Custom HTTP Providers (Phase 6) ═════════ -->
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 4px;font-size:14px">🔌 Custom HTTP Providers</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.5">
-        Gắn UniTrack lên Kibana / ELK / API nội bộ FPT. SDK tự gửi event,
-        retry khi mất mạng. App <b>không cần code</b> — Portal là nguồn duy nhất.
-        Headers chứa secret có thể viết kiểu <span class="mono">\${ENV_KIBANA_KEY}</span>,
-        SDK đọc từ env vars lúc chạy.
-      </div>
-      <div id="cfHpList"></div>
-      <div class="row" style="gap:8px;margin-top:8px">
-        <button class="btn ghost sm" id="cfHpAdd" type="button">+ Thêm provider</button>
-      </div>
-      <textarea id="cfHpData" style="display:none">${esc(JSON.stringify(hp))}</textarea>
-
-      <!-- ═════════ W3C Trace Context ═════════ -->
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <h3 style="margin:0 0 4px;font-size:14px">
-        <label class="row" style="gap:6px;display:inline-flex">
-          <input type="checkbox" id="cfTrOn" ${tr.enabled?'checked':''}>
-          W3C Trace Context
-        </label>
-      </h3>
-      <div class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.5">
-        Bật để SDK gắn header <span class="mono">traceparent</span> vào HTTP request đi
-        backend nội bộ — cùng <span class="mono">trace_id</span> xuất hiện ở app event +
-        log API + log DB, dò lỗi xuyên hệ thống.
-        <b style="color:var(--accent)">Allowlist trống = SDK không inject gì cả</b>
-        (fail-closed, tránh leak header sang Firebase / Maps / CDN).
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="col" style="gap:4px">
-          <span class="muted" style="font-size:11px">Tên header (mặc định traceparent)</span>
-          <input type="text" id="cfTrHdr" value="${esc(tr.header_name||'traceparent')}" placeholder="traceparent"/>
-        </label>
-        <label class="row" style="gap:6px;align-self:end;padding:6px 0">
-          <input type="checkbox" id="cfTrSampled" ${tr.sampled!==false?'checked':''}>
-          <span style="font-size:12.5px">Đánh dấu sampled (flags=01)</span>
-        </label>
-      </div>
-      <label class="col" style="gap:4px;margin-top:8px">
-        <span class="muted" style="font-size:11px">
-          Allowlist host (1 dòng/host, hỗ trợ <span class="mono">*.mobix.asia</span>)
-        </span>
-        <textarea id="cfTrHosts" rows="3" placeholder="api.mobix.asia&#10;*.fpt.vn">${esc((tr.allowlist_hosts||[]).join('\n'))}</textarea>
-      </label>
-
-      <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
-        <button class="btn" id="cfSave">Lưu config</button>
-        <button class="btn" id="cfExport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬇︎ Export JSON</button>
-        <button class="btn" id="cfImport" type="button" style="background:var(--bg);color:var(--fg);border:1px solid var(--line)">⬆︎ Import JSON…</button>
+      <!-- ─────── ACTIONS ─────── -->
+      <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="cfSave">💾 Lưu config</button>
+        <button class="btn ghost sm" id="cfExport" type="button">⬇︎ Export JSON</button>
+        <button class="btn ghost sm" id="cfImport" type="button">⬆︎ Import JSON…</button>
         <input type="file" id="cfImportFile" accept="application/json,.json" style="display:none">
-        <span class="muted" style="font-size:12px;align-self:center">Export tải về 1 file .json đầy đủ (sdk_config + Snowplow + Firebase + tracing + sp_event_maps). Import vào project khác để mirror cấu hình.</span>
       </div>
     </div>`;
 
@@ -2003,7 +1976,84 @@ async function renderConfig(pid, mountSel){
   const addBtn = $('#cfHpAdd');
   if (addBtn) addBtn.onclick = () => hpOpenModal(null);
 
+  // ── Required-field validator + progress pill ────────────────────────────
+  // Required field list — đồng bộ với plan t-i-c-1-serene-cookie. Chỉ check
+  // input/textarea/select có id; field 'allowlist_hosts' check textarea
+  // value non-empty (allowlist trống = SDK no-op → coi như chưa setup).
+  function _cfgRequiredFields() {
+    const list = [
+      { id: 'cfEndpoint', label: 'Ingest endpoint' },
+    ];
+    if ($('#cfSpOn')?.checked) {
+      list.push(
+        { id: 'cfSpEp',          label: 'Snowplow endpoint' },
+        { id: 'cfSpApp',         label: 'Snowplow appId' },
+        { id: 'cfSpIgluVendor',  label: 'Iglu vendor' },
+        { id: 'cfSpDefVersion',  label: 'Default version' },
+      );
+    }
+    if ($('#cfTrOn')?.checked) {
+      list.push({ id: 'cfTrHosts', label: 'W3C allowlist hosts' });
+    }
+    return list;
+  }
+  function cfgComputeProgress() {
+    const req = _cfgRequiredFields();
+    const total = req.length;
+    const filled = req.filter(f => ($('#' + f.id)?.value || '').trim() !== '').length;
+    const pillCount = $('#cfgProgress');
+    const fill      = $('#cfgProgressFill');
+    if (pillCount) {
+      pillCount.textContent = `${filled}/${total}`;
+      pillCount.classList.toggle('partial', filled < total);
+    }
+    if (fill) {
+      const pct = total > 0 ? Math.round((filled / total) * 100) : 100;
+      fill.style.width = pct + '%';
+      fill.classList.toggle('partial', filled < total);
+    }
+    return { filled, total, missing: req.filter(f => ($('#' + f.id)?.value || '').trim() === '') };
+  }
+  function cfgValidateRequired() {
+    // Clear previous .req-missing outlines first.
+    document.querySelectorAll('.req-missing').forEach(el => el.classList.remove('req-missing'));
+    const { missing } = cfgComputeProgress();
+    if (missing.length === 0) return { ok: true, missing: [] };
+    for (const f of missing) $('#' + f.id)?.classList.add('req-missing');
+    $('#' + missing[0].id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#' + missing[0].id)?.focus();
+    return { ok: false, missing };
+  }
+  // Re-fire progress on every input/checkbox change inside the mount.
+  mount.addEventListener('input',  cfgComputeProgress);
+  mount.addEventListener('change', cfgComputeProgress);
+
+  // ── Provider section show/hide khi toggle ON/OFF ───────────────────────
+  function _wireSectionToggle(toggleId, sectionId) {
+    const toggle = $('#' + toggleId);
+    const section = $('#' + sectionId);
+    if (!toggle || !section) return;
+    const apply = () => {
+      section.style.display = toggle.checked ? '' : 'none';
+      section.classList.toggle('provider-on',  toggle.checked);
+      section.classList.toggle('provider-off', !toggle.checked);
+      cfgComputeProgress();
+    };
+    toggle.addEventListener('change', apply);
+  }
+  _wireSectionToggle('cfSpOn',     'cfSpDetailsSection');
+  _wireSectionToggle('cfFbOn',     'cfFbDetailsSection');
+  _wireSectionToggle('cfHpToggle', 'cfHpSection');
+
+  // Khởi tạo progress + visual state ngay khi render xong.
+  cfgComputeProgress();
+
   $('#cfSave').onclick=async()=>{
+   const _validate = cfgValidateRequired();
+   if (!_validate.ok) {
+     toast(`Thiếu ${_validate.missing.length} trường bắt buộc — đã highlight đỏ`, 'err');
+     return;
+   }
    try {
     // Build the base block then attach flavor_overrides if any flavor box has
     // content. The server treats flavor_overrides as opaque JSON and only
@@ -2150,18 +2200,17 @@ async function renderConfig(pid, mountSel){
     };
     const r=await api(`/api/projects/${pid}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
-    // Also persist providers[] + sp_forward_url (separate endpoint because the
-    // projects table owns those columns, not the versioned /config blob).
-    // Derive providers from the Snowplow/Firebase enable toggles already on
-    // this form so operators see one consolidated Save button — no separate
-    // ⚙ Providers dialog anymore.
+    // Persist providers[] (UI of "Portal mirror" / sp_forward_url đã bỏ ở
+    // refactor t-i-c-1-serene-cookie — DB column `sp_forward_url` giữ nguyên
+    // backward-compat; chỉ không cho operator edit qua tab Config nữa).
+    // Derive providers list từ Snowplow/Firebase enable toggles.
     const provList = [];
     if (snowplow.enabled) provList.push('snowplow');
     if (firebase.enabled) provList.push('firebase');
     try {
       await api(`/api/projects/${pid}/providers`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providers: provList, sp_forward_url: $('#cfSpForward').value.trim() }),
+        body: JSON.stringify({ providers: provList }),
       });
     } catch (e) { toast('Lưu providers thất bại: ' + e.message, 'err'); }
 
