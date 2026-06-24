@@ -374,7 +374,7 @@ public final class UniTrack {
     /// Drop every registered provider. Call this before re-adding providers
     /// when the host re-reads portal config (vd flavor switch, SSE-driven
     /// realtime refresh). Without it, a re-init would leave the OLD
-    /// SnowplowProvider/FirebaseProvider in the fan-out list alongside the
+    /// SnowplowProvider/FirebaseAdapter in the fan-out list alongside the
     /// new one and every event would land twice — once at the old endpoint,
     /// once at the new one.
     public static func removeAllProviders() {

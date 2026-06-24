@@ -3,11 +3,12 @@
 // (Kibana / ELK / FPT internal).
 //
 // The core UniTrack pod depends on NOTHING third-party. A provider lives in its
-// own pod (UniTrackSnowplow, UniTrackFirebase) that pulls in the heavy SDK,
-// conforms to this protocol, and is registered by the app:
+// own pod (vd UniTrackSnowplow) that pulls in the heavy SDK, conforms to this
+// protocol, and is registered by the app. Firebase dùng built-in adapter
+// (reflection — không cần module riêng).
 //
 //   UniTrack.addProvider(SnowplowProvider(endpoint: ..., appId: ...))
-//   UniTrack.addProvider(FirebaseProvider())
+//   UniTrack.attachFirebaseAdapter()    // reflection — 0 import Firebase ở SDK
 //   UniTrack.initialize(apiKey: ...)
 //
 // Every event UniTrack captures (manual track() and all auto-capture) is

@@ -10,28 +10,16 @@ let package = Package(
     ],
     products: [
         // Core SDK — auto screen/tap/network/crash/OOM tracking + offline queue.
+        // Includes built-in FirebaseAdapter (reflection-based qua NSClassFromString
+        // — app gọi `UniTrack.attachFirebaseAdapter()` khi đã tự link Firebase).
+        // 0 import Firebase ở SDK, không cần product riêng.
         .library(name: "UniTrack", targets: ["UniTrack"]),
-        // Optional providers. Each pulls in its vendor SDK, so keep them as
-        // separate products an app opts into.
-        .library(name: "UniTrackFirebase", targets: ["UniTrackFirebase"]),
+        // Snowplow forwarder — kéo vendor SnowplowTracker. App opt-in.
         .library(name: "UniTrackSnowplow", targets: ["UniTrackSnowplow"]),
     ],
     dependencies: [
         // Snowplow is fetched + linked by SPM — apps don't bring their own.
         .package(url: "https://github.com/snowplow/snowplow-ios-tracker.git", from: "6.0.0"),
-        // NOTE: NO Firebase dependency declared here. Earlier versions pulled
-        // firebase-ios-sdk directly, which collided with apps that already
-        // ship Firebase via CocoaPods — Clang's module scanner fails with
-        // "redefinition of module 'Firebase'" when the same module shows up
-        // under two source trees.
-        //
-        // Instead, UniTrackFirebase imports FirebaseAnalytics via
-        // `#if canImport(FirebaseAnalytics)` — the app is REQUIRED to provide
-        // FirebaseAnalytics through one of:
-        //   • CocoaPods: pod 'Firebase/Analytics', '10.27.0'
-        //   • SPM:       add firebase-ios-sdk to the app target directly
-        // Without either, FirebaseProvider compiles into a no-op shell that
-        // logs "FirebaseAnalytics not available" and ignores tracking calls.
     ],
     targets: [
         // C/C++ core, vendored as real source files (copied from the monorepo's
@@ -59,14 +47,6 @@ let package = Package(
             name: "UniTrack",
             dependencies: ["UniTrackCore"],
             path: "Sources/UniTrack"
-        ),
-        .target(
-            name: "UniTrackFirebase",
-            // Only depends on UniTrack. FirebaseAnalytics resolves via
-            // canImport at compile time — provided by the consuming app's
-            // own Firebase setup (Pods or SPM, whichever the app picked).
-            dependencies: ["UniTrack"],
-            path: "Providers/UniTrackFirebase/Sources"
         ),
         .target(
             name: "UniTrackSnowplow",
