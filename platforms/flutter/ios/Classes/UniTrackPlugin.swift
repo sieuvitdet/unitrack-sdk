@@ -15,6 +15,10 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
     // Held so we can push native-originating events (e.g. recovered crash from
     // a previous launch) back to Dart on the same channel the app uses.
     private var channel: FlutterMethodChannel?
+    // Subscription token into NativeScreenChannel so we can release on dealloc.
+    // Multiple plugin instances would each subscribe; one subscription per
+    // instance keeps the API simple.
+    private var nativeScreenToken: Int?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "unitrack",
@@ -22,6 +26,25 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
         let instance = UniTrackPlugin()
         instance.channel = channel
         registrar.addMethodCallDelegate(instance, channel: channel)
+
+        // Reverse direction: when the native swizzler emits a screen for a
+        // non-Flutter VC (vd Flutter app opened a UIKit screen via plugin),
+        // tell Dart so its `currentScreen` mirror is correct for tap attribution.
+        // Self-broadcasts (layer == .flutter) are ignored — Dart already knows
+        // about its own screens.
+        instance.nativeScreenToken = NativeScreenChannel.subscribe { [weak instance] screen, layer in
+            guard layer != .flutter else { return }
+            DispatchQueue.main.async {
+                instance?.channel?.invokeMethod(
+                    "onNativeScreen",
+                    arguments: ["name": screen, "layer": Int(layer.rawValue)]
+                )
+            }
+        }
+    }
+
+    deinit {
+        if let t = nativeScreenToken { NativeScreenChannel.unsubscribe(t) }
     }
 
     private func dict(from json: Any?) -> [String: Any] {
@@ -78,6 +101,43 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
 
         case "setScreen":
             UniTrack.setScreen(args["name"] as? String ?? "")
+            result(nil)
+
+        // ── Cross-language layer registry ───────────────────────────────────
+        // Forwarded by the Dart UniTrack.initialize so the Swift swizzler can
+        // detect Flutter is present and yield its FlutterViewController to us.
+        case "registerLayer":
+            // Dart sends the raw bitmask (UT_LAYER_FLUTTER = 4) so we can
+            // accept either Flutter or, in mixed setups, also RN if someone
+            // routes through this same channel. Defaults to Flutter.
+            let raw = UInt32(args["layer"] as? Int ?? Int(UniTrackLayer.flutter.rawValue))
+            if let layer = UniTrackLayer(rawValue: raw) {
+                LayerRegistry.register(layer)
+            }
+            result(nil)
+
+        case "claimSubtree":
+            let id  = args["subtreeId"] as? String ?? ""
+            let raw = UInt32(args["layer"] as? Int ?? Int(UniTrackLayer.flutter.rawValue))
+            if !id.isEmpty, let layer = UniTrackLayer(rawValue: raw) {
+                LayerRegistry.claim(subtree: id, by: layer)
+            }
+            result(nil)
+
+        case "releaseSubtree":
+            let id = args["subtreeId"] as? String ?? ""
+            if !id.isEmpty { LayerRegistry.release(subtree: id) }
+            result(nil)
+
+        // setScreenForLayer goes through the binding's full fan-out (providers,
+        // dwell tracking) so a Flutter-originated screen looks identical to a
+        // native one from the portal's perspective — just tagged so core's
+        // cross-layer dedup knows who emitted it.
+        case "setScreenForLayer":
+            let name = args["name"] as? String ?? ""
+            let raw  = UInt32(args["layer"] as? Int ?? Int(UniTrackLayer.flutter.rawValue))
+            let layer = UniTrackLayer(rawValue: raw) ?? .flutter
+            UniTrack.setScreen(name, layer: layer)
             result(nil)
 
         case "flush":

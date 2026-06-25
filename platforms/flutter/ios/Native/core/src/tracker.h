@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace unitrack {
 
@@ -31,6 +32,18 @@ public:
     void set_screen(const std::string& screen_name);
     void identify(const std::string& user_id, const std::string& traits_json);
     void reset();
+
+    // Cross-language layer registry. See unitrack.h §"Layer registry".
+    // The caller layer for set_screen is taken from a thread_local set by
+    // capi.cpp right before the call — keeps the C++ API ergonomic for
+    // direct C++ users (test, future hosts) while letting bindings tag
+    // emissions without an ABI change.
+    void     register_layer(ut_layer layer);
+    uint32_t active_layers() const { return active_layers_.load(); }
+    void     claim_subtree(ut_layer layer, const std::string& subtree_id);
+    void     release_subtree(const std::string& subtree_id);
+    ut_layer subtree_claimed_by(const std::string& subtree_id);
+    void     set_screen_dedup_window_ms(int ms) { dedup_window_ms_.store(ms < 0 ? 0 : ms); }
 
     // Lightweight read of the active session id — used by bindings that need
     // to stamp session_id onto app-side events (vd iOS session_ended fired
@@ -133,9 +146,22 @@ private:
     std::atomic<bool> enabled_{true};
     std::atomic<bool> running_{true};
 
+    // Layer registry. active_layers_ is a bitmask; subtree_owners_ maps
+    // a binding-supplied id (vd "vc@0x12345") to the layer that claimed
+    // it. layer_mu_ guards the map but NOT the bitmask (atomic). Kept
+    // separate from state_mu_ so a busy set_screen path doesn't block
+    // unrelated subtree queries.
+    std::atomic<uint32_t> active_layers_{0};
+    std::atomic<int>      dedup_window_ms_{250};
+    std::mutex            layer_mu_;
+    std::unordered_map<std::string, ut_layer> subtree_owners_;
+
     std::mutex       state_mu_;
     std::string      current_screen_;
     long long        screen_entered_at_ms_ = 0;  // when current_screen_ was entered (dwell)
+    std::string      last_screen_name_;          // last name passed to set_screen (cross-layer dedup key)
+    ut_layer         last_screen_layer_ = UT_LAYER_NONE;  // which layer emitted last_screen_name_
+    long long        last_screen_at_ms_ = 0;     // when last_screen_name_ was emitted
     std::string      user_id_;
     std::string      user_traits_json_ = "{}";
     std::string      device_json_;        // device/app metadata, attached to every event

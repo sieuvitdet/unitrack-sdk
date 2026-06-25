@@ -97,11 +97,13 @@ class _UniTrackTapObserverState extends State<UniTrackTapObserver> {
     _lastKey = resolved.key;
     _lastAt = now;
 
+    // `currentScreen` is now event-driven: Dart routes write it from
+    // _set(), and the native swizzler broadcasts non-Flutter screens via
+    // MethodChannel `onNativeScreen` → NativeScreenChannel.handleInbound.
+    // Only the genuine pre-init / first-frame window leaves it as
+    // 'unknown'; in that case we still omit `screen` so the core uses its
+    // current_screen_ snapshot rather than the literal 'unknown'.
     final flutterScreen = UniTrackTapObserver.routeObserver.currentScreen;
-    // When the Flutter route observer doesn't know the screen (the user is on a
-    // NATIVE / webview screen — my_pt, mobimap, STWebController…), don't send a
-    // bogus 'unknown'. Omit `screen` so the core uses its current_screen_, which
-    // the native iOS/Android view-controller swizzler keeps up to date.
     final known = flutterScreen.isNotEmpty && flutterScreen != 'unknown';
     UniTrackTapObserver.lastTap = LastTap(resolved.key, known ? flutterScreen : '', now);
 

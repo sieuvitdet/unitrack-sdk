@@ -56,6 +56,12 @@ public final class UniTrack {
     public static let shared = UniTrack()
 
     private var context: OpaquePointer?
+
+    /// Internal read-only handle to the core context, used by sibling files in
+    /// the SDK (LayerRegistry, NativeScreenChannel…). Returns nil until
+    /// initialize() succeeds. NOT public — bindings should call high-level
+    /// APIs (LayerRegistry.register, setScreen, …) instead.
+    static var coreContext: OpaquePointer? { shared.context }
     private let coldStartAt = Date()
     private(set) public var isInitialized = false
 
@@ -617,11 +623,21 @@ public final class UniTrack {
     }
 
     public static func setScreen(_ name: String) {
+        setScreen(name, layer: nil)
+    }
+
+    /// Layer-tagged variant called by the auto-capture swizzler so core's
+    /// cross-layer dedup can suppress a sibling Flutter/RN SDK firing the
+    /// same screen name within the dedup window. Public API stays the
+    /// untagged overload above — apps that call `setScreen("Home")`
+    /// directly behave exactly as before.
+    static func setScreen(_ name: String, layer: UniTrackLayer?) {
         // Trace so a "screen_viewed/screen_exited not firing" bug is one log
         // line away from a diagnosis. The core dedupes by screen-name equality
         // (same name twice in a row = no boundary events), so the next line
         // confirms the boundary path was even reached on the C++ side.
-        UniTrack.log("[UniTrack] setScreen → name=%@ (calls core ut_set_screen which fires screen_start/screen_view/screen_end)", name)
+        UniTrack.log("[UniTrack] setScreen → name=%@ layer=%@ (calls core ut_set_screen_for_layer which fires screen_start/screen_view/screen_end)",
+                     name, layer.map { String(describing: $0) } ?? "none")
         forEachProvider { $0.setScreen(name) }
         // Snapshot previous screen + transition timestamp on the binding side
         // so the boundary fan-out below can build matching screen_exited /
@@ -644,7 +660,16 @@ public final class UniTrack {
         shared.lastScreenLock.unlock()
 
         guard let ctx = shared.context else { return }
-        ut_set_screen(ctx, name)
+        if let layer = layer {
+            ut_set_screen_for_layer(ctx, name, ut_layer(rawValue: layer.rawValue))
+        } else {
+            ut_set_screen(ctx, name)
+        }
+        // Reverse-direction reverse channel: announce the new native screen
+        // to any cross-platform SDK in the process so its currentScreen (used
+        // for tap attribution) stays in sync without it racing the swizzler.
+        // No-op when no cross-platform layer is registered.
+        NativeScreenChannel.broadcast(screen: name, from: layer ?? .iOSNative)
 
         // Fan-out boundary events to providers. Match the field names the
         // core emits (screen / screen_name / dwell_ms / foreground_sec /
@@ -797,6 +822,14 @@ public final class UniTrack {
             return
         }
         ut_set_log_level(context, ut_log_level(rawValue: UInt32(config.logLevel.rawValue)))
+
+        // Cross-language layer registry: announce this binding so a sibling
+        // Flutter/RN SDK in the same process can detect us via active_layers
+        // and route screen-boundary events through cross-layer dedup. The
+        // dedup window default is 250 ms — set it explicitly here so the
+        // intent is one grep away from the swizzler that relies on it.
+        LayerRegistry.register(.iOSNative)
+        LayerRegistry.setScreenDedupWindow(ms: 250)
 
         // Seed the session-stat snapshot so AppLifecycleObserver + apps see
         // the right values immediately (vs racing the first background event).

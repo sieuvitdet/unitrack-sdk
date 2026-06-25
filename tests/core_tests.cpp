@@ -417,6 +417,148 @@ static void test_screen_lifecycle() {
     std::remove("/tmp/ut_screen.db-wal");
 }
 
+// Cross-language layer registry: register flips bits, claim_subtree round-trips,
+// release removes. Idempotent register doesn't double-count.
+static void test_layer_registry() {
+    printf("test_layer_registry\n");
+    std::remove("/tmp/ut_layer.db");
+    const char* cfg = "{\"db_path\":\"/tmp/ut_layer.db\","
+                      " \"batch_size\":50, \"flush_interval_ms\":1000,"
+                      " \"screen_lifecycle\":false, \"sampling_rate\":1.0}";
+    ut_context* ctx = ut_init("test-key", cfg, UT_PLATFORM_IOS);
+    CHECK(ctx != nullptr, "layer: ut_init");
+
+    CHECK(ut_active_layers(ctx) == 0, "layer: empty before any register");
+
+    ut_register_layer(ctx, UT_LAYER_NATIVE_IOS);
+    ut_register_layer(ctx, UT_LAYER_FLUTTER);
+    ut_register_layer(ctx, UT_LAYER_FLUTTER);  // idempotent
+    uint32_t mask = ut_active_layers(ctx);
+    CHECK((mask & UT_LAYER_NATIVE_IOS) != 0, "layer: iOS bit set");
+    CHECK((mask & UT_LAYER_FLUTTER)    != 0, "layer: Flutter bit set");
+    CHECK((mask & UT_LAYER_REACT_NATIVE) == 0, "layer: RN bit NOT set");
+
+    // Subtree claim round-trip.
+    CHECK(ut_subtree_claimed_by(ctx, "vc-42") == UT_LAYER_NONE,
+          "layer: subtree unclaimed by default");
+    ut_claim_subtree(ctx, UT_LAYER_FLUTTER, "vc-42");
+    CHECK(ut_subtree_claimed_by(ctx, "vc-42") == UT_LAYER_FLUTTER,
+          "layer: claim_subtree records owner");
+    ut_release_subtree(ctx, "vc-42");
+    CHECK(ut_subtree_claimed_by(ctx, "vc-42") == UT_LAYER_NONE,
+          "layer: release_subtree clears owner");
+
+    // Null / empty inputs are safe.
+    ut_claim_subtree(ctx, UT_LAYER_FLUTTER, nullptr);
+    ut_release_subtree(ctx, nullptr);
+    CHECK(ut_subtree_claimed_by(ctx, nullptr) == UT_LAYER_NONE,
+          "layer: null subtree_id safe");
+
+    ut_shutdown(ctx);
+    std::remove("/tmp/ut_layer.db");
+    std::remove("/tmp/ut_layer.db-shm");
+    std::remove("/tmp/ut_layer.db-wal");
+}
+
+// Cross-layer dedup: when iOS native swizzler and Flutter NavigatorObserver
+// both call set_screen("Home") within the dedup window, only ONE screen_view
+// reaches the queue. Different names → both pass through. Outside the window
+// → both pass through. UT_LAYER_NONE never dedups (preserves legacy ut_set_screen).
+static void test_screen_dedup_cross_layer() {
+    printf("test_screen_dedup_cross_layer\n");
+    std::remove("/tmp/ut_dedup.db");
+    g_http_calls.store(0);
+    g_last_payload.clear();
+
+    const char* cfg = "{\"db_path\":\"/tmp/ut_dedup.db\","
+                      " \"batch_size\":50, \"flush_interval_ms\":1000,"
+                      " \"screen_lifecycle\":false, \"sampling_rate\":1.0}";
+    ut_context* ctx = ut_init("test-key", cfg, UT_PLATFORM_IOS);
+    CHECK(ctx != nullptr, "dedup: ut_init");
+    ut_set_http_transport(ctx, mock_http, nullptr);
+    ut_set_screen_dedup_window_ms(ctx, 250);
+
+    // Count screen_view events for a given screen name. Each event JSON has
+    // both an envelope `"screen":"X"` and a properties `"screen":"X"` — using
+    // event_id occurrences in event objects whose `"screen":"<name>"` field
+    // matches keeps the count = number of distinct events. Simplest robust
+    // approach: count occurrences of the (event_name + screen) pair in the
+    // batch JSON, where the pair only co-occurs once per event.
+    auto count_screen_view = [](const std::string& payload, const std::string& screen) {
+        // Pattern unique per event: "event_name":"screen_view" appears once
+        // per event, then the same event carries "screen":"<name>" twice. We
+        // count by splitting on event_id (one per event) and checking each
+        // object for the matching screen.
+        int n = 0;
+        size_t p = 0;
+        const std::string evid = "\"event_id\":";
+        while ((p = payload.find(evid, p)) != std::string::npos) {
+            // Find the end of this event object (next event_id or end-of-array).
+            size_t next = payload.find(evid, p + evid.size());
+            std::string obj = payload.substr(p, next == std::string::npos ? std::string::npos : next - p);
+            if (obj.find("\"event_name\":\"screen_view\"") != std::string::npos &&
+                obj.find("\"screen\":\"" + screen + "\"") != std::string::npos) {
+                ++n;
+            }
+            p += evid.size();
+        }
+        return n;
+    };
+
+    // 1) Same name from two layers within the window → exactly 1 emission.
+    ut_set_screen_for_layer(ctx, "Home", UT_LAYER_NATIVE_IOS);
+    ut_set_screen_for_layer(ctx, "Home", UT_LAYER_FLUTTER);   // dedup-drop
+    ut_flush(ctx);
+    for (int i = 0; i < 30 && g_http_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(g_http_calls.load() >= 1, "dedup: HTTP send for first batch");
+    CHECK(count_screen_view(g_last_payload, "Home") == 1,
+          "dedup: same-name cross-layer collapsed to 1 screen_view");
+
+    // 2) Different names → both pass through (no dedup).
+    g_http_calls.store(0); g_last_payload.clear();
+    ut_set_screen_for_layer(ctx, "Detail", UT_LAYER_NATIVE_IOS);
+    ut_set_screen_for_layer(ctx, "OtherScreen", UT_LAYER_FLUTTER);
+    ut_flush(ctx);
+    for (int i = 0; i < 30 && g_http_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(count_screen_view(g_last_payload, "Detail") == 1, "dedup: Detail kept");
+    CHECK(count_screen_view(g_last_payload, "OtherScreen") == 1,
+          "dedup: OtherScreen kept (different name)");
+
+    // 3) Outside the window: re-emit same name after window expires → both kept.
+    g_http_calls.store(0); g_last_payload.clear();
+    ut_set_screen_dedup_window_ms(ctx, 30);
+    ut_set_screen_for_layer(ctx, "Profile", UT_LAYER_NATIVE_IOS);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    // Intermediate spacer screen so Tracker's same-name-as-current dedup
+    // (independent of layer) doesn't drop the second Profile call.
+    ut_set_screen_for_layer(ctx, "Spacer", UT_LAYER_NATIVE_IOS);
+    ut_set_screen_for_layer(ctx, "Profile", UT_LAYER_FLUTTER);  // outside window → kept
+    ut_flush(ctx);
+    for (int i = 0; i < 30 && g_http_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(count_screen_view(g_last_payload, "Profile") == 2,
+          "dedup: re-emission outside window passes through");
+
+    // 4) UT_LAYER_NONE never dedups (legacy ut_set_screen path).
+    g_http_calls.store(0); g_last_payload.clear();
+    ut_set_screen_dedup_window_ms(ctx, 250);
+    ut_set_screen(ctx, "Legacy");
+    ut_set_screen(ctx, "Spacer2");
+    ut_set_screen(ctx, "Legacy");   // same name, both LAYER_NONE → not deduped by layer
+    ut_flush(ctx);
+    for (int i = 0; i < 30 && g_http_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(count_screen_view(g_last_payload, "Legacy") == 2,
+          "dedup: legacy ut_set_screen never cross-layer-deduped");
+
+    ut_shutdown(ctx);
+    std::remove("/tmp/ut_dedup.db");
+    std::remove("/tmp/ut_dedup.db-shm");
+    std::remove("/tmp/ut_dedup.db-wal");
+}
+
 int main() {
     printf("UniTrack core tests\n");
     printf("===================\n");
@@ -432,6 +574,8 @@ int main() {
     test_session_boundary();
     test_screen_lifecycle();
     test_c_api_end_to_end();
+    test_layer_registry();
+    test_screen_dedup_cross_layer();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;

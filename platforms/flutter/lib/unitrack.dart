@@ -15,6 +15,7 @@ import 'package:flutter/widgets.dart';
 
 import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
+import 'src/native_screen_channel.dart';
 import 'src/trace_context.dart' as _trace;
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
@@ -248,6 +249,19 @@ class UniTrack {
     });
     _initialized = true;
     _initAt = DateTime.now();
+    // Cross-language layer registry: announce Flutter to the C core so that
+    // a co-existing native iOS / Android SDK in the same process knows to
+    // yield FlutterViewController / FlutterActivity to us. The native call
+    // is idempotent — multiple Flutter engines in one process won't double-
+    // register. No-op when the native plugin is an older version without
+    // the registerLayer handler (try/catch swallows MissingPluginException).
+    try {
+      await _channel.invokeMethod('registerLayer',
+          {'layer': UniTrackLayer.flutter.raw});
+    } catch (_) {
+      // Older native plugin — falls back to today's behaviour (no dedup,
+      // possible duplicate screen_view; not a crash).
+    }
     if (captureErrors) _installErrorHandlers();
     _installLifecycleObserver();
     _installNativeCallbackHandler();
@@ -292,6 +306,23 @@ class UniTrack {
               }
             } catch (e) {
               debugPrint('[UniTrack] onRecoveredCrash: parse failed: $e');
+            }
+          }
+          return null;
+
+        case 'onNativeScreen':
+          // Reverse-direction notification: native swizzler emitted a
+          // screen_view for a non-Flutter VC (vd a UIKit screen reached
+          // from inside this Flutter app via plugin). Mirror the name
+          // into the Dart route observer so subsequent taps inside that
+          // native screen get attributed correctly. Do NOT emit anything
+          // from Dart — native already enqueued the screen_view event.
+          final args = call.arguments;
+          if (args is Map) {
+            final n = args['name'];
+            final l = args['layer'];
+            if (n is String) {
+              NativeScreenChannel.handleInbound(n, l is int ? l : null);
             }
           }
           return null;
@@ -422,7 +453,14 @@ class UniTrack {
   Future<void> setScreen(String name) {
     if (verboseLogging) log('[UniTrack] setScreen="$name"');
     _forEachProvider((p) => p.setScreen(name));
-    return _channel.invokeMethod('setScreen', {'name': name});
+    // Layer-tagged so the C core's cross-layer dedup window suppresses a
+    // sibling iOS/Android native swizzler firing the same name a few ms
+    // later. Falls back to the untagged path on older native plugins that
+    // don't implement setScreenForLayer (catch MissingPluginException).
+    return _channel
+        .invokeMethod('setScreenForLayer',
+            {'name': name, 'layer': UniTrackLayer.flutter.raw})
+        .catchError((_) => _channel.invokeMethod('setScreen', {'name': name}));
   }
 
   // --- semantic event helpers (Phase 3) -----------------------------------

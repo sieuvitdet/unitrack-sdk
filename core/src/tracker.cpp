@@ -10,6 +10,14 @@
 
 namespace unitrack {
 
+// Caller-tagged layer for the most recent ut_set_screen / direct call.
+// capi.cpp writes this on the calling thread immediately before forwarding
+// into Tracker::set_screen; the Tracker reads it inside the lock so the
+// dedup decision sees a consistent (name, layer) pair. Direct C++ users
+// who skip the C API leave it as UT_LAYER_NONE — treated as "unknown
+// layer", which never dedups against itself.
+thread_local ut_layer tl_caller_layer = UT_LAYER_NONE;
+
 static const char* platform_str(ut_platform p) {
     switch (p) {
         case UT_PLATFORM_IOS:          return "ios";
@@ -138,6 +146,7 @@ void Tracker::set_screen(const std::string& screen_name) {
     std::string previous;
     long long dwell_ms = 0;
     long long now = current_time_ms();
+    ut_layer caller = tl_caller_layer;  // snapshot before we touch state
     {
         std::lock_guard<std::mutex> lock(state_mu_);
         if (current_screen_ == screen_name) {
@@ -147,11 +156,28 @@ void Tracker::set_screen(const std::string& screen_name) {
             UT_LOGI("Tracker", "set_screen(" + screen_name + ") deduped — same as current");
             return;
         }
+        // Cross-layer dedup: if the previous emission was the SAME name from
+        // a DIFFERENT layer within the dedup window, this is a duplicate from
+        // a sibling SDK that didn't yet know the boundary was claimed. Drop
+        // silently — the first emission wins. UT_LAYER_NONE never matches
+        // itself (direct C++ tests + legacy bindings).
+        int window = dedup_window_ms_.load();
+        if (window > 0 && caller != UT_LAYER_NONE && last_screen_layer_ != UT_LAYER_NONE
+                && caller != last_screen_layer_
+                && screen_name == last_screen_name_
+                && (now - last_screen_at_ms_) <= window) {
+            UT_LOGI("Tracker", "set_screen(" + screen_name + ") deduped — emitted "
+                    + std::to_string(now - last_screen_at_ms_) + "ms ago by other layer");
+            return;
+        }
         previous = current_screen_;
         if (!previous.empty() && screen_entered_at_ms_ > 0)
             dwell_ms = now - screen_entered_at_ms_;
         current_screen_ = screen_name;
         screen_entered_at_ms_ = now;
+        last_screen_name_   = screen_name;
+        last_screen_layer_  = caller;
+        last_screen_at_ms_  = now;
     }
     // What the core is ABOUT to fire — confirms screen_lifecycle flag + which
     // event names will be used (these come from portal sdk_config.screen_*).
@@ -448,6 +474,40 @@ void Tracker::do_flush() {
         UT_LOGW("Tracker", "flush failed; backing off before retry");
     }
     queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
+}
+
+// ── Cross-language layer registry ────────────────────────────────────────
+// See unitrack.h §"Layer registry" for the design. Bindings register their
+// layer once at init; cross-platform bindings claim a subtree when their
+// root view shows; native bindings consult subtree_claimed_by + the active
+// bitmask before deciding whether to emit screen_view themselves.
+
+void Tracker::register_layer(ut_layer layer) {
+    if (layer == UT_LAYER_NONE) return;
+    uint32_t prev = active_layers_.fetch_or(static_cast<uint32_t>(layer));
+    if ((prev & static_cast<uint32_t>(layer)) == 0) {
+        UT_LOGI("Tracker", "register_layer +" + std::to_string(static_cast<uint32_t>(layer))
+                + " (active=" + std::to_string(prev | static_cast<uint32_t>(layer)) + ")");
+    }
+}
+
+void Tracker::claim_subtree(ut_layer layer, const std::string& subtree_id) {
+    if (layer == UT_LAYER_NONE || subtree_id.empty()) return;
+    std::lock_guard<std::mutex> lock(layer_mu_);
+    subtree_owners_[subtree_id] = layer;
+}
+
+void Tracker::release_subtree(const std::string& subtree_id) {
+    if (subtree_id.empty()) return;
+    std::lock_guard<std::mutex> lock(layer_mu_);
+    subtree_owners_.erase(subtree_id);
+}
+
+ut_layer Tracker::subtree_claimed_by(const std::string& subtree_id) {
+    if (subtree_id.empty()) return UT_LAYER_NONE;
+    std::lock_guard<std::mutex> lock(layer_mu_);
+    auto it = subtree_owners_.find(subtree_id);
+    return it == subtree_owners_.end() ? UT_LAYER_NONE : it->second;
 }
 
 std::string Tracker::pending_event_counts_json() {

@@ -44,6 +44,55 @@ typedef enum {
 } ut_platform;
 
 /* ============================================================
+ * Layer registry (cross-language auto-tracking arbitration)
+ * ============================================================
+ *
+ * When a single process hosts more than one UniTrack binding (vd: native
+ * iOS app embedding a Flutter module — both Swift swizzler and Dart
+ * NavigatorObserver are live), each layer registers itself here so the
+ * other can detect the boundary and yield. The C core itself is UI-blind
+ * — it only records (a) which layers are active and (b) which subtree
+ * each cross-platform layer has claimed; the bindings probe their own
+ * UI runtime (NSClassFromString("FlutterViewController"), Class.forName
+ * "FlutterActivity", …) and consult this registry before emitting
+ * screen_view. See plan: docs/cross-language-tracking.md (Phase 0).
+ *
+ * Bitmask so ut_active_layers() can be (UT_LAYER_FLUTTER | UT_LAYER_IOS).
+ */
+typedef enum {
+    UT_LAYER_NONE           = 0,
+    UT_LAYER_NATIVE_IOS     = 1 << 0,
+    UT_LAYER_NATIVE_ANDROID = 1 << 1,
+    UT_LAYER_FLUTTER        = 1 << 2,
+    UT_LAYER_REACT_NATIVE   = 1 << 3
+} ut_layer;
+
+/* Called by every binding once during its init. Idempotent — re-registering
+ * the same layer is a no-op. Safe before any track() call. */
+UT_EXPORT void ut_register_layer(ut_context* ctx, ut_layer layer);
+
+/* OR-able bitmask of layers that have called ut_register_layer. Native
+ * bindings call this first; if no cross-platform layer is present they
+ * skip class-probing entirely (zero overhead for single-SDK installs). */
+UT_EXPORT uint32_t ut_active_layers(ut_context* ctx);
+
+/* The cross-platform layer (Flutter/RN) calls ut_claim_subtree when its
+ * root view becomes visible, naming the subtree by a stable id (typically
+ * the hash of the host VC/Activity). Native swizzlers consult
+ * ut_subtree_claimed_by() for that id and yield when claimed. */
+UT_EXPORT void    ut_claim_subtree(ut_context* ctx,
+                                   ut_layer layer,
+                                   const char* subtree_id);
+UT_EXPORT void    ut_release_subtree(ut_context* ctx, const char* subtree_id);
+UT_EXPORT ut_layer ut_subtree_claimed_by(ut_context* ctx, const char* subtree_id);
+
+/* Backstop dedup: ut_set_screen drops a duplicate screen name if it came
+ * from a different layer within this window. Default 250 ms. Set to 0 to
+ * disable. The first emission wins; subsequent same-name calls from other
+ * layers are silently ignored until the window expires. */
+UT_EXPORT void ut_set_screen_dedup_window_ms(ut_context* ctx, int window_ms);
+
+/* ============================================================
  * Lifecycle
  * ============================================================ */
 
@@ -88,6 +137,15 @@ UT_EXPORT void ut_track(ut_context* ctx,
 
 /* Update current screen — called by auto-capture binding. */
 UT_EXPORT void ut_set_screen(ut_context* ctx, const char* screen_name);
+
+/* Same as ut_set_screen, but tags the calling layer so cross-layer dedup
+ * (see ut_set_screen_dedup_window_ms) can suppress duplicates from a
+ * sibling SDK. Bindings prefer this form when more than one UniTrack
+ * layer is active in the process. Passing UT_LAYER_NONE is equivalent
+ * to ut_set_screen. */
+UT_EXPORT void ut_set_screen_for_layer(ut_context* ctx,
+                                       const char* screen_name,
+                                       ut_layer    layer);
 
 /* ============================================================
  * Auto-capture hooks (called by platform bindings)
