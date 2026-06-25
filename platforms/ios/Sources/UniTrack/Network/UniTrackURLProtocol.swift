@@ -174,7 +174,14 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
             props["trace_id"] = ids.traceId
             props["span_id"]  = ids.spanId
         }
-        UniTrack.track("network_request", properties: props)
+        // Manual-priority arbitration: skip auto network_request nếu DEV đã
+        // log API thủ công qua interceptor Alamofire / OkHttp trong 500ms
+        // vừa rồi. Window dài hơn click vì network có async delay tự nhiên.
+        if ManualTrackSignal.shouldSkip(.networkRequest) {
+            UniTrack.log("[UniTrack] auto network_request SUPPRESSED — manual signal in window url=%@", url)
+        } else {
+            UniTrack.track("network_request", properties: props, isAuto: true)
+        }
 
         if let err = error {
             client?.urlProtocol(self, didFailWithError: err)

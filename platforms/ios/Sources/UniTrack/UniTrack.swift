@@ -604,6 +604,36 @@ public final class UniTrack {
     }
 
     public static func track(_ event: String, properties: [String: Any] = [:]) {
+        track(event, properties: properties, isAuto: false)
+    }
+
+    /// Internal variant. `isAuto=true` được swizzler (control/gesture/screen/
+    /// URLProtocol) dùng khi event được auto-capture. Manual call từ DEV mặc
+    /// định `isAuto=false` → ghi signal vào ManualTrackSignal để arbitrate
+    /// với auto event cùng nhóm trong 200ms tiếp theo.
+    internal static func track(_ event: String,
+                               properties: [String: Any] = [:],
+                               isAuto: Bool) {
+        // Manual track signal: DEV gọi UniTrack.track() trực tiếp → ghi signal
+        // theo loại event để swizzler tap/screen/network có thể skip auto fire
+        // ngay sau đó. KHÔNG ghi cho event auto-emitted (tránh tự suppress chính
+        // mình).
+        if !isAuto {
+            switch event {
+            case "click":
+                ManualTrackSignal.recordManual(.click)
+            case "screen_view", "screen_viewed", "screen_exited":
+                ManualTrackSignal.recordManual(.screen)
+            case "network_request":
+                ManualTrackSignal.recordManual(.networkRequest)
+            default:
+                // Generic manual event (vd "purchase_click", "checkout_done")
+                // suy ra DEV đang track quanh moment 1 user tap → ghi click
+                // signal. Heuristic: tên event ko khớp screen/network thì coi
+                // như click. Đủ cho 90% case khách than "trùng tap".
+                ManualTrackSignal.recordManual(.click)
+            }
+        }
         let name = event
         let props = properties
         // Visibility — one line per event so the developer can see what's
@@ -611,8 +641,9 @@ public final class UniTrack {
         // UniTrack.verboseLogging so a release build can mute it.
         if UniTrack.verboseLogging {
             let provNames = shared.providers.map { String(describing: type(of: $0)) }.joined(separator: ",")
-            UniTrack.log("[UniTrack] track event=\"%@\" props=%@ → providers=[%@]",
+            UniTrack.log("[UniTrack] track event=\"%@\" props=%@ auto=%@ → providers=[%@]",
                          name, UniTrack.jsonString(from: props) ?? "{}",
+                         isAuto ? "yes" : "no",
                          provNames.isEmpty ? "(none)" : provNames)
         }
         // Forward to every registered provider (Snowplow, Firebase, …).
@@ -724,6 +755,32 @@ public final class UniTrack {
     /// the SDK never captures-and-re-forwards its own analytics traffic.
     public static func excludeFromNetworkCapture(urlContaining substring: String) {
         UniTrackURLProtocol.excludeURL(containing: substring)
+    }
+
+    // MARK: - Manual tracking arbitration
+
+    /// Báo cho SDK biết DEV vừa fire 1 manual event THẲNG qua provider khác
+    /// (Firebase Analytics, Snowplow, Countly …) BYPASS UniTrack.track().
+    /// SDK dùng signal này để skip auto-capture trùng trong window 200ms
+    /// (tap/screen) hoặc 500ms (network). Gọi NGAY trước/sau khi log
+    /// manual để arbitration đúng.
+    ///
+    /// Ví dụ:
+    ///   @objc func buyTapped() {
+    ///       UniTrack.recordManualSignal(.click)
+    ///       Analytics.logEvent("purchase_click", parameters: ...)
+    ///   }
+    ///
+    /// Nếu DEV chỉ dùng UniTrack.track() (không bypass), KHÔNG cần gọi —
+    /// signal được ghi tự động trong public track().
+    public static func recordManualSignal(_ kind: ManualTrackKind) {
+        ManualTrackSignal.recordManual(kind)
+    }
+
+    /// Master toggle. Default ON. Tắt khi muốn cả manual + auto cùng fire
+    /// (vd debug / migration period). KHÔNG persist — reset mỗi launch.
+    public static func setManualArbitration(_ enabled: Bool) {
+        ManualTrackSignal.enabled = enabled
     }
 
     // MARK: - Semantic events (Phase 3)

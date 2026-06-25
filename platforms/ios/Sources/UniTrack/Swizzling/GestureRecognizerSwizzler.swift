@@ -64,14 +64,22 @@ private extension UIGestureRecognizer {
 
         UniTrack.log("[UniTrack] tap-gesture captured key=%@ screen=%@ class=%@",
                      key, screen, className)
-        UniTrack.track("click", properties: [
-            "element_key": key,
-            "screen":      screen,
-            "class_name":  className,
-            "framework":   "uikit",
-            "package":     pkg,
-            "extra":       extra,
-        ])
+        // Defer 50ms so DEV's onTap handler có cơ hội ghi manual signal.
+        // Skip auto click nếu phát hiện manual cùng nhóm.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if ManualTrackSignal.shouldSkip(.click) {
+                UniTrack.log("[UniTrack] auto tap-gesture SUPPRESSED — manual signal in window")
+                return
+            }
+            UniTrack.track("click", properties: [
+                "element_key": key,
+                "screen":      screen,
+                "class_name":  className,
+                "framework":   "uikit",
+                "package":     pkg,
+                "extra":       extra,
+            ], isAuto: true)
+        }
     }
 
     func ut_resolveKey() -> String {

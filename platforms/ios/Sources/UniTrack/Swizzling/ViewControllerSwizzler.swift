@@ -117,11 +117,20 @@ private extension UIViewController {
         if ut_isSkippedContainer { return }
 
         let screen = ut_screenName
-        // Layer-tagged emit so a sibling Flutter/RN SDK firing the same name
-        // a few ms later is dropped by core's cross-layer dedup. Falls back
-        // to the legacy untagged path on contexts where the C symbol isn't
-        // present (vd version skew with an older core).
-        UniTrack.setScreen(screen, layer: .iOSNative)
+        // Manual-priority arbitration cho screen: nếu DEV đã gọi setScreen
+        // hoặc track("screen_view", ...) trong window vừa rồi, swizzler giữ
+        // im lặng. Defer 50ms để DEV's viewDidAppear handler có cơ hội fire.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if ManualTrackSignal.shouldSkip(.screen) {
+                UniTrack.log("[UniTrack] auto screen_view SUPPRESSED — manual signal in window screen=%@", screen)
+                return
+            }
+            // Layer-tagged emit so a sibling Flutter/RN SDK firing the same name
+            // a few ms later is dropped by core's cross-layer dedup. Falls back
+            // to the legacy untagged path on contexts where the C symbol isn't
+            // present (vd version skew with an older core).
+            UniTrack.setScreen(screen, layer: .iOSNative)
+        }
 
         // Load time: viewDidLoad → first appearance. Reported once per VC.
         // Event name resolves from UniTrack.screenLoadEventName (set during
@@ -131,7 +140,8 @@ private extension UIViewController {
             ut_loadReported = true
             let ms = Int((CACurrentMediaTime() - ut_loadStart) * 1000)
             UniTrack.track(UniTrack.screenLoadEventName,
-                           properties: ["screen": screen, "load_ms": ms])
+                           properties: ["screen": screen, "load_ms": ms],
+                           isAuto: true)
         }
     }
 }
