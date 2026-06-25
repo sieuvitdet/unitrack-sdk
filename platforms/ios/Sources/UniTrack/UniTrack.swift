@@ -555,6 +555,11 @@ public final class UniTrack {
         shared.tracingHeaderName  = headerName.isEmpty ? "traceparent" : headerName
         shared.tracingAllowlist   = allowlistHosts
         shared.tracingSampledFlag = sampled
+        UniTrackURLProtocol.configureTracing(enabled: enabled,
+                                             headerName: headerName.isEmpty ? "traceparent" : headerName,
+                                             allowlistHosts: allowlistHosts,
+                                             sampled: sampled)
+        NSLog("[W3C] setTracing enabled=\(enabled) hosts=\(allowlistHosts.count) header=\(headerName)")
     }
 
     /// Snapshot the URLProtocol reads on each outbound request. Internal so

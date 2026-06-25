@@ -99,13 +99,26 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
         // on the allowlist. Skip if the app already set the header (manual
         // propagation wins — don't clobber an explicit upstream trace).
         let (enabled, hdrName, allow, sampled) = Self.tracingSnapshot()
+        let host = request.url?.host ?? "?"
         if enabled,
            UniTrackTracing.shouldInject(host: request.url?.host, allowlist: allow),
            mreq.value(forHTTPHeaderField: hdrName) == nil {
             let ids = UniTrackTracing.newTrace()
-            mreq.setValue(UniTrackTracing.traceparent(ids, sampled: sampled),
-                          forHTTPHeaderField: hdrName)
+            let header = UniTrackTracing.traceparent(ids, sampled: sampled)
+            mreq.setValue(header, forHTTPHeaderField: hdrName)
             traceIds = ids
+            UniTrack.log("[W3C] inject host=%@ %@: %@",
+                         host, hdrName, header)
+        } else if enabled {
+            let reason: String
+            if !UniTrackTracing.shouldInject(host: request.url?.host, allowlist: allow) {
+                reason = "host not in allowlist (allow=[\(allow.joined(separator: ", "))])"
+            } else if mreq.value(forHTTPHeaderField: hdrName) != nil {
+                reason = "header already set by app"
+            } else {
+                reason = "unknown"
+            }
+            UniTrack.log("[W3C] skip   host=%@ reason=%@", host, reason)
         }
 
         let cfg = URLSessionConfiguration.default

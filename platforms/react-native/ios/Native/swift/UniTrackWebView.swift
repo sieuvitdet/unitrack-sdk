@@ -59,22 +59,56 @@ public enum UniTrackWebView {
     /// via the __unitrack flag so re-injection on history navigation is safe.
     /// Listens for click events in the capture phase so even handlers that
     /// stopPropagation can't hide the event. Resolves element_key from
-    /// data-track-id → id → aria-label → tagName + truncated textContent.
+    /// data-sp-action → data-track-id → title → id → aria-label → tag:text,
+    /// and harvests every `data-*` (incl. parsed `data-sp-extra` JSON) into
+    /// the `data` map so portal-side filtering can match on any attribute.
     static let injectJS: String = """
     (function(){
       if (window.__unitrack && window.__unitrack.installed) return;
       window.__unitrack = { installed: true };
       function key(el){
         if (!el) return 'unknown';
-        var k = el.getAttribute && (el.getAttribute('data-track-id') ||
+        var k = el.getAttribute && (el.getAttribute('data-sp-action') ||
+                                    el.getAttribute('data-track-id') ||
                                     el.getAttribute('data-testid') ||
+                                    el.getAttribute('title') ||
                                     el.id ||
                                     el.getAttribute('aria-label'));
-        if (k) return String(k).slice(0, 80);
+        if (k) return String(k).slice(0, 120);
         var tag = (el.tagName || '').toLowerCase();
         var txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
         if (txt) return tag + ':' + txt.slice(0, 60);
         return tag || 'unknown';
+      }
+      // Snake-case "dataSpAction" → "data_sp_action" so portal column names
+      // align with the rest of the SDK convention (Snowplow uses snake_case
+      // for self-describing-event keys).
+      function snake(camel){
+        return camel.replace(/[A-Z]/g, function(c){ return '_' + c.toLowerCase(); });
+      }
+      function collectData(el){
+        var out = {};
+        if (!el || !el.attributes) return out;
+        var ds = el.dataset || {};
+        for (var k in ds){
+          var v = ds[k];
+          if (v == null) continue;
+          var key = snake(k);
+          // data-sp-extra is JSON — parse so portal sees structured fields,
+          // not a quoted string. Fall back to raw text if parse fails.
+          if (k === 'spExtra' || k === 'extra'){
+            try { out[key] = JSON.parse(v); }
+            catch(e) { out[key] = String(v).slice(0, 500); }
+          } else {
+            out[key] = String(v).slice(0, 200);
+          }
+        }
+        // Keep title/aria-label too — common spots for human labels.
+        var t = el.getAttribute && el.getAttribute('title');
+        if (t) out.title = String(t).slice(0, 200);
+        var a = el.getAttribute && el.getAttribute('aria-label');
+        if (a) out.aria_label = String(a).slice(0, 200);
+        return out;
       }
       function post(payload){
         try {
@@ -83,15 +117,18 @@ public enum UniTrackWebView {
       }
       document.addEventListener('click', function(ev){
         var t = ev.target;
-        // Walk up to the nearest interactive ancestor (button/a/[role=button])
-        // so wrappers around clickable content still resolve to a meaningful key.
+        // Walk up to the nearest interactive ancestor (button/a/[role=button]
+        // or anything carrying data-sp-*/data-track-id). So wrappers around
+        // clickable content still resolve to a meaningful key + data set.
         var hop = t, found = null;
         while (hop && hop !== document) {
           var tag = (hop.tagName || '').toLowerCase();
+          var hasSp = hop.getAttribute && (hop.getAttribute('data-sp-action') ||
+                                           hop.getAttribute('data-sp-area') ||
+                                           hop.getAttribute('data-track-id'));
           if (tag === 'a' || tag === 'button' || tag === 'input' ||
               (hop.getAttribute && (hop.getAttribute('role') === 'button' ||
-                                    hop.getAttribute('data-track-id') ||
-                                    hop.onclick))) {
+                                    hop.onclick)) || hasSp) {
             found = hop; break;
           }
           hop = hop.parentNode;
@@ -99,10 +136,11 @@ public enum UniTrackWebView {
         var target = found || t;
         post({
           kind: 'click',
-          key: key(target),
-          tag: (target.tagName || '').toLowerCase(),
+          key:  key(target),
+          tag:  (target.tagName || '').toLowerCase(),
           href: target.href || '',
-          url: location.href
+          url:  location.href,
+          data: collectData(target)
         });
       }, true);
       // Single-page apps rewrite URL without reloading. Hook history API +
@@ -176,13 +214,21 @@ final class UniTrackWebMessageHandler: NSObject, WKScriptMessageHandler {
             let key  = (body["key"] as? String) ?? "unknown"
             let tag  = (body["tag"] as? String) ?? ""
             let href = (body["href"] as? String) ?? ""
+            var extra: [String: Any] = ["href": href]
+            if let data = body["data"] as? [String: Any] {
+                // Flatten the per-element data-* set into `extra` so portal
+                // sees columns like data_sp_action, data_sp_area, data_sp_extra
+                // alongside the click. data-sp-extra was parsed to a JSON
+                // object in the inject script — keep it as a nested map.
+                for (k, v) in data { extra[k] = v }
+            }
             UniTrack.track("click", properties: [
                 "element_key": key,
                 "screen":      url,
                 "class_name":  tag,
                 "framework":   "webview",
                 "package":     "",
-                "extra":       ["href": href],
+                "extra":       extra,
             ])
         case "navigate":
             UniTrack.track("webview_navigate", properties: ["url": url])

@@ -33,22 +33,59 @@ object UniTrackWebView {
 
     /** Inject script — same shape + idempotency as the iOS version so the
      *  payload format matches. Sends JSON-encoded strings to the native
-     *  bridge because JavascriptInterface only accepts primitives. */
+     *  bridge because JavascriptInterface only accepts primitives.
+     *
+     *  Resolves element_key from data-sp-action → data-track-id → title → id
+     *  → aria-label → tag:text, and harvests every data-* (incl. parsed
+     *  data-sp-extra JSON) into the `data` map so portal-side filtering can
+     *  match on any attribute. */
     private val INJECT_JS = """
     (function(){
       if (window.__unitrack && window.__unitrack.installed) return;
       window.__unitrack = { installed: true };
       function key(el){
         if (!el) return 'unknown';
-        var k = el.getAttribute && (el.getAttribute('data-track-id') ||
+        var k = el.getAttribute && (el.getAttribute('data-sp-action') ||
+                                    el.getAttribute('data-track-id') ||
                                     el.getAttribute('data-testid') ||
+                                    el.getAttribute('title') ||
                                     el.id ||
                                     el.getAttribute('aria-label'));
-        if (k) return String(k).slice(0, 80);
+        if (k) return String(k).slice(0, 120);
         var tag = (el.tagName || '').toLowerCase();
         var txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
         if (txt) return tag + ':' + txt.slice(0, 60);
         return tag || 'unknown';
+      }
+      // Snake-case "dataSpAction" → "data_sp_action" so portal column names
+      // align with the rest of the SDK convention (Snowplow uses snake_case
+      // for self-describing-event keys).
+      function snake(camel){
+        return camel.replace(/[A-Z]/g, function(c){ return '_' + c.toLowerCase(); });
+      }
+      function collectData(el){
+        var out = {};
+        if (!el || !el.attributes) return out;
+        var ds = el.dataset || {};
+        for (var k in ds){
+          var v = ds[k];
+          if (v == null) continue;
+          var key = snake(k);
+          // data-sp-extra is JSON — parse so portal sees structured fields,
+          // not a quoted string. Fall back to raw text if parse fails.
+          if (k === 'spExtra' || k === 'extra'){
+            try { out[key] = JSON.parse(v); }
+            catch(e) { out[key] = String(v).slice(0, 500); }
+          } else {
+            out[key] = String(v).slice(0, 200);
+          }
+        }
+        // Keep title/aria-label too — common spots for human labels.
+        var t = el.getAttribute && el.getAttribute('title');
+        if (t) out.title = String(t).slice(0, 200);
+        var a = el.getAttribute && el.getAttribute('aria-label');
+        if (a) out.aria_label = String(a).slice(0, 200);
+        return out;
       }
       function post(payload){
         try { ${BRIDGE_NAME}.postMessage(JSON.stringify(payload)); } catch(e) {}
@@ -57,10 +94,12 @@ object UniTrackWebView {
         var t = ev.target, hop = t, found = null;
         while (hop && hop !== document) {
           var tag = (hop.tagName || '').toLowerCase();
+          var hasSp = hop.getAttribute && (hop.getAttribute('data-sp-action') ||
+                                           hop.getAttribute('data-sp-area') ||
+                                           hop.getAttribute('data-track-id'));
           if (tag === 'a' || tag === 'button' || tag === 'input' ||
               (hop.getAttribute && (hop.getAttribute('role') === 'button' ||
-                                    hop.getAttribute('data-track-id') ||
-                                    hop.onclick))) {
+                                    hop.onclick)) || hasSp) {
             found = hop; break;
           }
           hop = hop.parentNode;
@@ -68,7 +107,8 @@ object UniTrackWebView {
         var target = found || t;
         post({ kind: 'click', key: key(target),
                tag: (target.tagName || '').toLowerCase(),
-               href: target.href || '', url: location.href });
+               href: target.href || '', url: location.href,
+               data: collectData(target) });
       }, true);
       function nav(method){
         var orig = history[method];
@@ -116,13 +156,27 @@ object UniTrackWebView {
                         val key  = o.optString("key", "unknown")
                         val tag  = o.optString("tag", "")
                         val href = o.optString("href", "")
+                        // Flatten the per-element data-* set into `extra` so
+                        // portal sees columns like data_sp_action, data_sp_area,
+                        // data_sp_extra alongside the click. data-sp-extra was
+                        // parsed to a JSON object in the inject script — keep
+                        // it as a nested map.
+                        val extra = mutableMapOf<String, Any>("href" to href)
+                        o.optJSONObject("data")?.let { data ->
+                            val keys = data.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val v = data.opt(k) ?: continue
+                                extra[k] = jsonToNative(v)
+                            }
+                        }
                         UniTrack.track("click", mapOf(
                             "element_key" to key,
                             "screen"      to url,
                             "class_name"  to tag,
                             "framework"   to "webview",
                             "package"     to "",
-                            "extra"       to mapOf("href" to href),
+                            "extra"       to extra,
                         ))
                     }
                     "navigate" -> {
@@ -130,6 +184,30 @@ object UniTrackWebView {
                     }
                 }
             } catch (_: Throwable) { /* defensive: never break the WebView */ }
+        }
+
+        /** Recursively convert org.json containers to Kotlin Map/List so the
+         *  downstream Snowplow/portal serializer sees plain Java types, not
+         *  JSONObject/JSONArray (which would otherwise be stringified). */
+        private fun jsonToNative(value: Any?): Any {
+            return when (value) {
+                null, org.json.JSONObject.NULL -> ""
+                is org.json.JSONObject -> {
+                    val map = mutableMapOf<String, Any>()
+                    val keys = value.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        map[k] = jsonToNative(value.opt(k))
+                    }
+                    map
+                }
+                is org.json.JSONArray -> {
+                    val list = mutableListOf<Any>()
+                    for (i in 0 until value.length()) list.add(jsonToNative(value.opt(i)))
+                    list
+                }
+                else -> value
+            }
         }
     }
 

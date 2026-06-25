@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal Config · Realtime vs Reinit Matrix</title>
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #1a1f2e;
+    --muted: #6b7384;
+    --line: #e4e7ee;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --orange: #d97706;
+    --orange-bg: #fffbeb;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --blue: #2563eb;
+    --code-bg: #1b2231;
+    --code-text: #e6e9ef;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+    max-width: 1180px; margin: 0 auto; padding: 32px 28px 80px;
+  }
+  h1 { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+  h1 .sub { font-size: 15px; color: var(--muted); font-weight: 400; display: block; margin-top: 6px; }
+  h2 { font-size: 21px; font-weight: 600; margin: 32px 0 14px; padding-top: 22px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 16px; font-weight: 600; margin: 20px 0 10px; }
+  p { margin-bottom: 10px; }
+  ul, ol { margin: 0 0 12px 24px; }
+  li { margin-bottom: 5px; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: #eef1f6; padding: 2px 6px; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 12px 16px; border-radius: 8px;
+    overflow-x: auto; margin: 10px 0;
+    font: 12.5px/1.5 "SF Mono", Menlo, monospace;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    background: #eef1f6; font-weight: 600; color: var(--muted);
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  tr.realtime { background: var(--green-bg); }
+  tr.reinit { background: var(--red-bg); }
+  tr.semi { background: var(--orange-bg); }
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 12px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    vertical-align: middle; margin-right: 6px;
+  }
+  .badge.realtime { background: var(--green); color: #fff; }
+  .badge.reinit   { background: var(--red);   color: #fff; }
+  .badge.semi     { background: var(--orange); color: #fff; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 20px; margin: 12px 0;
+  }
+  .card.green  { border-left: 4px solid var(--green); background: var(--green-bg); }
+  .card.red    { border-left: 4px solid var(--red);   background: var(--red-bg); }
+  .card.orange { border-left: 4px solid var(--orange); background: var(--orange-bg); }
+  .card.blue   { border-left: 4px solid var(--blue); }
+  .meta {
+    color: var(--muted); font-size: 13px;
+    border-left: 3px solid var(--blue); padding-left: 12px;
+    margin-bottom: 22px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+  .ascii {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 16px 20px; border-radius: 8px;
+    font: 12px/1.4 "SF Mono", Menlo, monospace;
+    white-space: pre; overflow-x: auto;
+  }
+  .footer {
+    margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 13px; text-align: center;
+  }
+  .field-name { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
+  .demo-tip {
+    background: #eff6ff; border-left: 3px solid var(--blue);
+    padding: 12px 16px; border-radius: 6px; margin: 10px 0;
+    font-size: 13.5px;
+  }
+</style>
+</head>
+<body>
+
+<h1>
+  Portal Config · Realtime vs Reinit
+  <span class="sub">Field nào anh save trên Portal là app pickup ngay — field nào phải kill + restart app</span>
+</h1>
+
+<div class="meta">
+  <b>Áp dụng cho:</b> FPT Life iOS (UniTrack 0.3.36+), Android Native, MobiX Flutter có wire foreground re-fetch.<br>
+  <b>Cơ chế hot reload:</b> SSE stream (<span class="mono">/config/stream</span>) hoặc <span class="mono">onAppForeground</span> throttle 5'. Khi save Portal → SDK fetch lại → <span class="mono">FSDKTracking.start(remote:)</span> chạy lại → re-wire providers.<br>
+  <b>Ngày cập nhật:</b> 24/06/2026
+</div>
+
+<h2>Tóm tắt nhanh</h2>
+
+<div class="grid-2">
+  <div class="card green">
+    <h3 style="margin-top:0">✅ REALTIME (16 field)</h3>
+    <p>Anh save Portal → SDK pickup trong <b>&lt;1s</b> (SSE) hoặc &lt;5 phút (foreground throttle).</p>
+    <p><b>Demo được</b>: đổi Snowplow appId, bật/tắt provider, đổi event_names, đổi tracing hosts.</p>
+  </div>
+  <div class="card red">
+    <h3 style="margin-top:0">⚠️ REINIT (10 field)</h3>
+    <p>Anh save Portal nhưng SDK <b>KHÔNG đổi</b> cho đến khi anh kill + cold start app.</p>
+    <p><b>Lý do</b>: C++ core init một lần, swizzler đã install vào URLSession/UIControl runtime — không gỡ realtime được.</p>
+  </div>
+</div>
+
+<h2>Bảng chi tiết — nhóm REALTIME</h2>
+
+<table>
+  <thead>
+    <tr><th style="width:32%">Field Portal</th><th style="width:18%">Type</th><th>Cơ chế hot-reload</th></tr>
+  </thead>
+  <tbody>
+    <tr class="realtime"><td colspan="3"><b>Snowplow provider</b> — toàn bộ rebuild khi <span class="mono">start(remote:)</span> chạy lại</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.enabled</span></td><td>bool</td><td>tearDown + re-add provider</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.endpoint</span></td><td>string</td><td>provider rebuild với endpoint mới</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.appId</span></td><td>string</td><td>provider rebuild</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.iglu_vendor</span></td><td>string</td><td>schema URI rebuild</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.default_version</span></td><td>string</td><td>schema URI rebuild</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.event_names.*</span></td><td>map</td><td>convention layer rebuild — đổi <span class="mono">click → ev_click</span> sang <span class="mono">click → custom_click</span> ngay</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.entities.*</span></td><td>map</td><td>auto-attach entity map rebuild</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.options.*</span> (10 flag)</td><td>map&lt;bool&gt;</td><td>Snowplow native tracker recreate với TrackerConfiguration mới</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.userContext</span></td><td>map</td><td>provider userContext bag refresh</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.ios.{endpoint, appId}</span></td><td>object</td><td>per-platform override rebuild</td></tr>
+    <tr class="realtime"><td><span class="field-name">snowplow.flavor_overrides</span></td><td>object</td><td>4 flavor block rebuild</td></tr>
+
+    <tr class="realtime"><td colspan="3"><b>SDK Behavior</b> — hot static qua <span class="mono">applyHotConfig()</span></td></tr>
+    <tr class="realtime"><td><span class="field-name">sdk_config.screen_start_event</span></td><td>string</td><td>swizzler đọc static, hot-swap</td></tr>
+    <tr class="realtime"><td><span class="field-name">sdk_config.screen_end_event</span></td><td>string</td><td>same</td></tr>
+    <tr class="realtime"><td><span class="field-name">sdk_config.screen_load_event</span></td><td>string</td><td>swizzler đọc static qua <span class="mono">UniTrack.screenLoadEventName</span></td></tr>
+
+    <tr class="realtime"><td colspan="3"><b>Firebase</b> — đọc tại fire time</td></tr>
+    <tr class="realtime"><td><span class="field-name">firebase.enabled</span></td><td>bool</td><td>FirebaseAdapter đọc <span class="mono">UniTrackRemoteConfig.latest</span> ở mọi <span class="mono">track()</span>. SSE refresh <span class="mono">latest</span> → event kế tiếp respect ngay</td></tr>
+
+    <tr class="realtime"><td colspan="3"><b>W3C Trace Context</b> — hot-swap qua <span class="mono">setTracing()</span></td></tr>
+    <tr class="realtime"><td><span class="field-name">tracing.enabled</span></td><td>bool</td><td>URLProtocol đọc flag mỗi request</td></tr>
+    <tr class="realtime"><td><span class="field-name">tracing.header_name</span></td><td>string</td><td>same</td></tr>
+    <tr class="realtime"><td><span class="field-name">tracing.sampled</span></td><td>bool</td><td>same</td></tr>
+    <tr class="realtime"><td><span class="field-name">tracing.allowlist_hosts</span></td><td>array</td><td>same</td></tr>
+
+    <tr class="realtime"><td colspan="3"><b>HTTP Custom Providers</b> — reconcile mỗi fetch</td></tr>
+    <tr class="realtime"><td><span class="field-name">http_providers[]</span></td><td>array</td><td>SDK reconcile: thêm/xoá provider HTTP runtime</td></tr>
+  </tbody>
+</table>
+
+<h2>Bảng chi tiết — nhóm REINIT</h2>
+
+<table>
+  <thead>
+    <tr><th style="width:32%">Field Portal</th><th style="width:18%">Type</th><th>Lý do cần restart</th></tr>
+  </thead>
+  <tbody>
+    <tr class="reinit"><td colspan="3"><b>Core engine</b> — C++ <span class="mono">ut_init</span> chỉ chạy 1 lần</td></tr>
+    <tr class="reinit"><td><span class="field-name">endpoint</span> (top-level ingest)</td><td>string</td><td>C++ HTTP queue đã bind URL — không re-bind runtime</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.batchSize</span></td><td>int</td><td>C++ core init đọc 1 lần</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.flushIntervalMs</span></td><td>int</td><td>same</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.samplingRate</span></td><td>double</td><td>same</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.sessionTimeoutMs</span></td><td>int</td><td>session_manager init</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.logLevel</span></td><td>string</td><td><span class="mono">ut_set_log_level</span> chỉ chạy ở init</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.journeyCapture</span></td><td>bool</td><td>swizzler wired ở init</td></tr>
+
+    <tr class="reinit"><td colspan="3"><b>Auto-capture toggles</b> — swizzler đã install runtime</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.autoCapture</span></td><td>bool</td><td>master switch — swizzler đã install vào UIControl / GestureRecognizer / URLSession, không gỡ runtime</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.trackScreens</span></td><td>bool</td><td>UIViewController swizzler đã install</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.trackTaps</span></td><td>bool</td><td>UIControl + GestureRecognizer swizzler đã install</td></tr>
+    <tr class="reinit"><td><span class="field-name">sdk_config.trackNetwork</span></td><td>bool</td><td>URLProtocol đã register vào URLSession config global</td></tr>
+  </tbody>
+</table>
+
+<h2>Pipeline realtime end-to-end</h2>
+
+<div class="ascii">
+  Operator save Portal
+        │
+        ▼
+  Portal /config UPDATE → version++ → SSE broadcast `config_changed`
+        │
+        ▼  ─────── &lt; 1 second ───────────
+        │
+  App (foreground): UniTrackConfigStream listener
+        │
+        ▼
+  applyConfigFromPortal()
+        │
+        ├─→ UniTrackRemoteConfig.fetch(/config) (re-fetch full JSON)
+        │
+        ▼
+  FSDKTracking.start(remote: newCfg)
+        │
+        ├─→ UniTrack.removeAllProviders()        ← clear providers cũ
+        ├─→ UniTrack.addProvider(SnowplowProvider(... newCfg ...))
+        ├─→ UniTrack.initialize(...)             ← guard isInitialized → SKIP
+        └─→ UniTrack.applyHotConfig(             ← chỉ hot field được swap
+              screenStartEvent: ...,
+              screenEndEvent:   ...,
+              screenLoadEvent:  ...
+            )
+        │
+        ▼
+  Event tiếp theo (tap / screen_view / network_request)
+  → Snowplow stamp với endpoint mới / appId mới / vendor mới ✓
+  → Firebase respect firebase.enabled mới                    ✓
+  → C++ core VẪN dùng batchSize/flushInterval/logLevel cũ    ✗ (REINIT)
+</div>
+
+<h2>Demo script cho khách</h2>
+
+<div class="card green">
+  <h3 style="margin-top:0">Demo 1: Đổi Snowplow appId realtime</h3>
+  <ol>
+    <li>Mở Portal pid=8 → Config tab → Snowplow Details</li>
+    <li>Đổi <span class="mono">appId: 505 → 999</span></li>
+    <li>Save</li>
+    <li>Quay sang Xcode Console — chờ SSE log: <span class="mono">config_changed version=N+1</span></li>
+    <li>Tap bất kỳ button trong app → fire event</li>
+    <li>Mở Snowplow collector hoặc Portal Sessions tab — event mới có <span class="mono">appId=999</span></li>
+  </ol>
+  <p><b>Thời gian end-to-end</b>: 1-2 giây (SSE push) hoặc &lt;5 phút (foreground throttle).</p>
+</div>
+
+<div class="card green">
+  <h3 style="margin-top:0">Demo 2: Bật / tắt Firebase realtime</h3>
+  <ol>
+    <li>Portal → Providers → bỏ tick Firebase checkbox</li>
+    <li>Save</li>
+    <li>Tap button → Firebase DebugView dừng nhận event (UniTrack adapter no-op)</li>
+    <li>Tick lại Firebase → save → event tiếp theo lên Firebase trở lại</li>
+  </ol>
+</div>
+
+<div class="card red">
+  <h3 style="margin-top:0">Demo 3 — Reinit: Đổi batchSize</h3>
+  <ol>
+    <li>Portal → SDK Behavior → batchSize <span class="mono">10 → 1</span> (gửi event ngay)</li>
+    <li>Save → fire event → vẫn batch 10 (offline queue C++ core không re-read)</li>
+    <li><b>Force kill app</b> (swipe up) + cold start lại</li>
+    <li>Fire event → giờ flush ngay từng event (batch 1)</li>
+  </ol>
+  <p style="color:var(--red);font-weight:600">⚠️ Đây là điểm phải giải thích cho khách: SDK đã start xong, không thể re-read C++ runtime config.</p>
+</div>
+
+<h2>Tại sao 2 nhóm field hành xử khác nhau?</h2>
+
+<div class="card blue">
+  <h3 style="margin-top:0">Hot-reloadable (nhóm 1)</h3>
+  <p>Các field này được đọc <b>tại fire time</b> hoặc qua <b>provider rebuild</b>:</p>
+  <ul>
+    <li><b>Provider rebuild</b>: <span class="mono">start(remote:)</span> luôn gọi <span class="mono">removeAllProviders()</span> trước khi <span class="mono">addProvider(SnowplowProvider(newCfg))</span>. Tất cả Snowplow config sống trong provider instance — instance mới mang value mới.</li>
+    <li><b>Static swap</b>: <span class="mono">screenStartEvent</span> / <span class="mono">screenEndEvent</span> / <span class="mono">screenLoadEvent</span> là static var trong <span class="mono">UniTrack</span>. <span class="mono">applyHotConfig()</span> đổi static → mọi lần swizzler fire đọc giá trị mới.</li>
+    <li><b>Fire-time read</b>: <span class="mono">firebase.enabled</span>, <span class="mono">tracing.*</span> đọc từ <span class="mono">UniTrackRemoteConfig.latest</span> mỗi event — chỉ cần update <span class="mono">latest</span> là xong.</li>
+  </ul>
+</div>
+
+<div class="card orange">
+  <h3 style="margin-top:0">Cold-config (nhóm 2)</h3>
+  <p>Các field này wired vào <b>C++ core khi <span class="mono">ut_init</span> chạy</b> hoặc <b>swizzler khi install method</b>:</p>
+  <ul>
+    <li><b>C++ core idempotent</b>: <span class="mono">UniTrack.initialize()</span> có guard <span class="mono">isInitialized</span> (line 768). Lần gọi thứ 2 trở đi là no-op — <span class="mono">ut_init</span> không chạy lại, không re-read JSON config.</li>
+    <li><b>Method swizzling</b>: <span class="mono">trackNetwork=true</span> → <span class="mono">URLProtocol.register</span> được gọi 1 lần ở init. <span class="mono">URLSession.shared</span> đã bind class chain — Apple không có API gỡ runtime.</li>
+    <li><b>Tương tự cho tap/screen</b>: <span class="mono">ControlSwizzler.install()</span>, <span class="mono">ViewControllerSwizzler.install()</span> hoán đổi IMP của class — gỡ runtime sẽ phá apps khác cùng class.</li>
+  </ul>
+</div>
+
+<h2>Workaround cho nhóm REINIT (tương lai)</h2>
+
+<div class="card blue">
+  <p>Nếu khách cần realtime cả nhóm 2, em có thể bump SDK thêm 2 API:</p>
+  <table style="font-size:13px;margin-top:8px">
+    <tr><th>API mới</th><th>Tác dụng</th></tr>
+    <tr><td><span class="mono">ut_reconfigure(ctx, newConfigJson)</span></td><td>C++ core re-read batchSize / flushIntervalMs / logLevel / sessionTimeoutMs runtime</td></tr>
+    <tr><td><span class="mono">UniTrack.setAutoCaptureFlags(...)</span></td><td>Toggle Swift swizzler: tap = guard check, network = bỏ chèn vào props builder, KHÔNG gỡ swizzle nhưng skip emit</td></tr>
+  </table>
+  <p style="margin-top:10px"><b>Effort</b>: ~1-2 giờ wire 2 API. Khi nào khách yêu cầu thì em làm.</p>
+</div>
+
+<h2>Verify cách realtime hoạt động ở app của anh</h2>
+
+<div class="demo-tip">
+  <p><b>Bước check Xcode Console:</b> sau cold start, anh thấy log:</p>
+  <pre><code>UniTrackConfigStream: connecting https://mobix.asia/event-tracking-mobile/config/stream
+UniTrackConfigStream: connected</code></pre>
+  <p>→ SSE listener đã hoạt động. Anh save Portal sẽ thấy log:</p>
+  <pre><code>UniTrackConfigStream: event=config_changed data={"version":N}
+[FSDK] start(remote:) — v(N) endpoint=... snowplow.appId=...</code></pre>
+  <p>Nếu KHÔNG thấy "connecting" → SSE chưa wire (hoặc <span class="mono">verboseLogging=false</span> ở release). Nếu thấy "connecting" nhưng không "connected" → network/firewall chặn SSE.</p>
+</div>
+
+<div class="footer">
+  UniTrack SDK · Portal Realtime Config Matrix · Generated 24/06/2026
+</div>
+
+</body>
+</html>
