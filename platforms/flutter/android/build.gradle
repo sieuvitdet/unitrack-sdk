@@ -26,9 +26,23 @@ apply plugin: 'org.jetbrains.kotlin.android'
 // at `unitrack_sdk/src/` by `tools/sync_flutter_android.sh`. Vendoring is the
 // only reliable way to ship the SDK on pub.dev — `../../android/unitrack`
 // only resolves inside this monorepo, not inside a consumer app's pub-cache.
-// Re-run the sync script after any Android core change, then `flutter pub
-// publish` will pick up the diff.
+//
+// Co-resident mode (skipVendor): khi host Android app ALREADY link native
+// UniTrack Maven (vd app native nhúng Flutter, app đã có UniTrack riêng cho
+// UIKit-equivalent), vendor cùng FQN `com.unitrack.sdk.UniTrack` sẽ gây
+// Gradle duplicate class error. Set `unitrack.skipVendor=true` trong
+// gradle.properties hoặc -Punitrack.skipVendor=true ở command line → plugin
+// SKIP vendor + đổi sang `compileOnly` để code Flutter plugin (UniTrackPlugin.kt
+// + binding code) vẫn compile được nhưng KHÔNG ship native binary. Host app
+// phải supply native UniTrack Maven (singleton sẽ là cái duy nhất → 1 SDK).
 def sdkRoot = file("${projectDir}/unitrack_sdk")
+def skipVendor = providers.gradleProperty('unitrack.skipVendor')
+    .map { it.toBoolean() }.getOrElse(false)
+
+if (skipVendor) {
+    logger.lifecycle("[unitrack] skipVendor=true — host app phải supply " +
+        "com.github.sieuvitdet.unitrack-sdk:unitrack ở dependencies block")
+}
 
 android {
     namespace 'com.unitrack.flutter'
@@ -37,37 +51,42 @@ android {
 
     defaultConfig {
         minSdk 21
-        externalNativeBuild {
-            cmake {
-                // capi.cpp uses try/catch — exceptions must stay enabled.
-                cppFlags '-std=c++17', '-fvisibility=hidden'
-                arguments '-DCMAKE_BUILD_TYPE=Release'
+        if (!skipVendor) {
+            externalNativeBuild {
+                cmake {
+                    // capi.cpp uses try/catch — exceptions must stay enabled.
+                    cppFlags '-std=c++17', '-fvisibility=hidden'
+                    arguments '-DCMAKE_BUILD_TYPE=Release'
+                }
+            }
+            ndk {
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
         }
-        ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-        }
-        // Ship our proguard keep rules with the plugin so any release/staging
-        // app that consumes us inherits them (otherwise R8 minifies
-        // NativeBridge.httpPost → `d` and JNI_OnLoad crashes the app).
+        // Ship our proguard keep rules với plugin code regardless of mode —
+        // host's R8 vẫn cần keep NativeBridge.httpPost cho JNI.
         consumerProguardFiles 'consumer-rules.pro'
     }
 
-    // Build the SDK's JNI shared library (libunitrack_jni) from its CMakeLists.
-    externalNativeBuild {
-        cmake {
-            path "${sdkRoot}/src/main/cpp/CMakeLists.txt"
-            version '3.22.1'
+    if (!skipVendor) {
+        // Build the SDK's JNI shared library (libunitrack_jni) from its CMakeLists.
+        externalNativeBuild {
+            cmake {
+                path "${sdkRoot}/src/main/cpp/CMakeLists.txt"
+                version '3.22.1'
+            }
         }
-    }
 
-    // Compile the SDK's Kotlin/Java sources directly into the plugin. The
-    // SDK's permissions are declared in this plugin's own AndroidManifest.
-    sourceSets {
-        main {
-            java.srcDirs += "${sdkRoot}/src/main/java"
+        // Compile the SDK's Kotlin/Java sources directly into the plugin.
+        sourceSets {
+            main {
+                java.srcDirs += "${sdkRoot}/src/main/java"
+            }
         }
     }
+    // Khi skipVendor=true: plugin chỉ compile code Classes/ riêng (UniTrackPlugin.kt
+    // + HostProxy). Reference đến com.unitrack.sdk.UniTrack được resolve qua
+    // `compileOnly` dependency dưới — host app supply runtime binary.
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
@@ -80,4 +99,12 @@ dependencies {
     // Mirror the SDK module's own dependencies (it is compiled into us now).
     implementation 'androidx.fragment:fragment:1.6.2'
     compileOnly    'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // Co-resident: plugin code reference UniTrack class. Khi skipVendor=true,
+    // compileOnly link Maven coordinate cho compile pass — runtime binary host
+    // supply. Khi skipVendor=false, vendored source đã cung cấp class này nên
+    // dòng dưới được lookup qua sourceSets, không kéo Maven.
+    if (skipVendor) {
+        compileOnly 'com.github.sieuvitdet.unitrack-sdk:unitrack:0.3.11'
+    }
 }

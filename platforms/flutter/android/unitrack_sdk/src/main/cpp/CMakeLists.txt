@@ -5,8 +5,12 @@ set(CMAKE_CXX_STANDARD          17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Path to the shared C++ core relative to this file.
-set(UT_CORE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../core)
+# Path tới C++ core. Plugin Flutter Android VENDOR core vào subfolder
+# `cpp/core/` (via sync_native.sh) để consumer Flutter app build qua
+# dependency_overrides:path: hoặc qua pub.dev cache đều thấy được core
+# self-contained. KHÔNG dùng relative-out-of-plugin path nữa — chỉ work
+# khi build từ monorepo direct, fail mọi consumer khác.
+set(UT_CORE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/core)
 
 # Build the core static library into our shared lib.
 set(UT_CORE_SOURCES
