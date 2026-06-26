@@ -90,11 +90,6 @@
   .toc a:hover { text-decoration: underline; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
-  .kbd {
-    background: #e2e8f0; padding: 2px 6px; border-radius: 4px;
-    font-family: "SF Mono", Menlo, monospace; font-size: 12px;
-    border: 1px solid #cbd5e1;
-  }
   .pipeline {
     background: #0f172a; color: #e2e8f0;
     padding: 16px 20px; border-radius: 8px;
@@ -110,21 +105,20 @@
 <header>
   <h1>UniTrack — Hướng dẫn tích hợp FPT Life</h1>
   <p class="sub">iOS (FPT-Life-FLI) + Android (android-fptlife-fli). Setup, custom event, debug, troubleshoot.</p>
-  <p class="sub">Cập nhật: <strong>2026-06-26</strong> · iOS SPM <strong>0.3.46</strong> · Android Maven <strong>0.3.11</strong> · Portal config <strong>v56</strong></p>
+  <p class="sub">Cập nhật: <strong>2026-06-26</strong> · iOS SPM <strong>0.3.46</strong> · Android Maven <strong>0.3.11</strong></p>
 </header>
 
 <div class="toc">
   <h3 style="margin-top:0">Mục lục</h3>
   <ol>
     <li><a href="#arch">Kiến trúc tổng quan</a></li>
-    <li><a href="#ios-setup">iOS — Setup SPM + bundled config</a></li>
-    <li><a href="#android-setup">Android — Setup Maven + bundled config</a></li>
-    <li><a href="#bootstrap">Bootstrap — frozen vs live mode</a></li>
+    <li><a href="#ios-setup">iOS — Setup SPM + JSON config</a></li>
+    <li><a href="#android-setup">Android — Setup Maven + JSON config</a></li>
+    <li><a href="#json-config">Cấu trúc JSON config</a></li>
     <li><a href="#events-builtin">Custom events có sẵn (FSDKTracking helpers)</a></li>
     <li><a href="#events-custom">Tự định nghĩa custom event mới</a></li>
     <li><a href="#identity">Identify user + session</a></li>
     <li><a href="#offline">Offline queue + retry</a></li>
-    <li><a href="#refresh-json">Refresh JSON config từ Portal</a></li>
     <li><a href="#debug">Debug + console log</a></li>
     <li><a href="#troubleshoot">Troubleshoot</a></li>
   </ol>
@@ -147,7 +141,7 @@
 │   UniTrack SDK (cross-platform)                 │
 │   ├─ SnowplowProvider → ftracking.fpt.vn        │
 │   ├─ FirebaseAdapter  → Firebase Analytics       │
-│   ├─ Core HTTP queue  → mobix.asia (Portal)      │
+│   ├─ Core HTTP queue  → ingest endpoint          │
 │   └─ SQLite offline   → tự queue + retry        │
 │                                                  │
 └─────────────────────────────────────────────────┘</div>
@@ -163,7 +157,7 @@
 <h3>2.1 Dependency</h3>
 <p>Xcode → File → Add Package Dependencies → URL:</p>
 <pre><code>https://github.com/sieuvitdet/unitrack-ios-package.git</code></pre>
-<p>Exact version: <code>0.3.46</code> (latest hỗ trợ Manual arbitration + Layer Registry + ObjC bridge cho Flutter co-resident).</p>
+<p>Exact version: <code>0.3.46</code>.</p>
 
 <p>Targets cần link:</p>
 <ul>
@@ -171,10 +165,13 @@
   <li><code>UniTrackSnowplow</code> — Snowplow provider (bắt buộc cho FPT Life vì BE dùng schema Snowplow)</li>
 </ul>
 
-<h3>2.2 Bundled config JSON</h3>
-<p>FPT Life iOS dùng <strong>frozen mode</strong> — load <code>PortalConfigFallback.json</code> từ Bundle.main, KHÔNG fetch Portal live. File đã ở:</p>
+<h3>2.2 JSON config</h3>
+<p>SDK cấu hình dựa trên file JSON đặt trong app bundle:</p>
 <pre><code>FPTLife/FSDKTracking/PortalConfigFallback.json</code></pre>
-<p>Phải add vào Xcode target <strong>FPTLife → Build Phases → Copy Bundle Resources</strong> (đã setup, kiểm tra: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code>).</p>
+
+<p>File này phải được add vào Xcode target <strong>FPTLife → Build Phases → Copy Bundle Resources</strong>. Verify:</p>
+<pre><code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code></pre>
+<p>Phải thấy 4 dòng (PBXBuildFile + PBXFileReference + group + Copy Resources).</p>
 
 <h3>2.3 Bootstrap trong AppDelegate</h3>
 <pre><code>import UniTrack
@@ -231,8 +228,8 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
     implementation libs.unitrack.firebase
 }</code></pre>
 
-<h3>3.2 Bundled config JSON</h3>
-<p>File đã ở:</p>
+<h3>3.2 JSON config</h3>
+<p>SDK cấu hình dựa trên file JSON đặt trong assets:</p>
 <pre><code>app/src/main/assets/portal_config_fallback.json</code></pre>
 <p>Android tự động pick từ <code>assets/</code> — không cần khai báo build.gradle.</p>
 
@@ -257,37 +254,89 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
     android:name=".FPTLifeApp"
     ... /&gt;</code></pre>
 
-<!-- ============== BOOTSTRAP MODES ============== -->
-<div class="anchor-pad" id="bootstrap"></div>
-<h2>4. Bootstrap — Frozen vs Live mode</h2>
+<!-- ============== JSON CONFIG ============== -->
+<div class="anchor-pad" id="json-config"></div>
+<h2>4. Cấu trúc JSON config</h2>
 
+<p>File JSON định nghĩa toàn bộ runtime config: ingest endpoint, Snowplow provider, sdk_config (batch / sampling / auto-capture), tracing W3C. Đường dẫn:</p>
+<ul>
+  <li><span class="tag tag-ios">iOS</span> <code>FPTLife/FSDKTracking/PortalConfigFallback.json</code></li>
+  <li><span class="tag tag-android">Android</span> <code>app/src/main/assets/portal_config_fallback.json</code></li>
+</ul>
+
+<h3>4.1 Schema</h3>
+<pre><code>{
+  "version": 56,
+  "endpoint": "https://ingest.example.com/events",
+
+  "snowplow": {
+    "enabled": true,
+    "endpoint": "https://ftracking.fpt.vn",
+    "appId": "fpt-life-fli",
+    "namespace": "FPTLife",
+    "iglu_vendor": "vn.fpt.ftel.snowplow",
+    "default_version": "1-0-0",
+    "options": {
+      "base64Encoding": true,
+      "platformContext": true,
+      "applicationContext": true,
+      "sessionContext": true,
+      "screenContext": true,
+      "lifecycleAutotracking": true,
+      "screenViewAutotracking": false
+    }
+  },
+
+  "firebase": { "enabled": true },
+
+  "sdk_config": {
+    "batchSize": 10,
+    "flushIntervalMs": 3000,
+    "samplingRate": 1.0,
+    "autoCapture": true,
+    "trackScreens": true,
+    "trackTaps": true,
+    "trackNetwork": false,
+    "logLevel": "info"
+  },
+
+  "tracing": {
+    "enabled": true,
+    "header_name": "traceparent",
+    "sampled": true,
+    "allowlist_hosts": [
+      "api-fptlife-beta.fcam.vn",
+      "api-fptlife-beta.fptsmarthome.vn",
+      "beta-api-gateway.fcam.vn"
+    ]
+  }
+}</code></pre>
+
+<h3>4.2 Các trường chính</h3>
 <table>
-  <thead>
-    <tr><th>Aspect</th><th>FROZEN (default)</th><th>LIVE (demo only)</th></tr>
-  </thead>
+  <thead><tr><th>Field</th><th>Ý nghĩa</th></tr></thead>
   <tbody>
-    <tr><td>Config source</td><td>Bundled JSON trong app</td><td>Fetch Portal mobix.asia mỗi cold start</td></tr>
-    <tr><td>Foreground throttle 5 phút</td><td>Skip — frozen</td><td>Re-fetch + apply</td></tr>
-    <tr><td>SSE realtime push</td><td>Connect nhưng skip apply</td><td>Apply ngay khi server push</td></tr>
-    <tr><td>Update config</td><td>Refresh JSON + rebuild app</td><td>Save Portal → push tự</td></tr>
-    <tr><td>Offline cold start</td><td>✅ OK (no network needed)</td><td>❌ Có thể fail nếu fetch timeout</td></tr>
-    <tr><td>Khi nào dùng</td><td>Production stable</td><td>Demo realtime config cho khách</td></tr>
+    <tr><td><code>endpoint</code></td><td>URL ingest cho core HTTP queue gửi event lên BE</td></tr>
+    <tr><td><code>snowplow.enabled</code></td><td>Bật/tắt Snowplow provider</td></tr>
+    <tr><td><code>snowplow.endpoint</code></td><td>Snowplow collector URL</td></tr>
+    <tr><td><code>snowplow.appId</code></td><td>App identifier trên Snowplow side</td></tr>
+    <tr><td><code>snowplow.iglu_vendor</code></td><td>Iglu schema vendor prefix</td></tr>
+    <tr><td><code>sdk_config.batchSize</code></td><td>Số event trong 1 batch HTTP POST</td></tr>
+    <tr><td><code>sdk_config.flushIntervalMs</code></td><td>Chu kỳ flush batch (ms)</td></tr>
+    <tr><td><code>sdk_config.samplingRate</code></td><td>0.0–1.0, tỉ lệ giữ event (1.0 = giữ hết)</td></tr>
+    <tr><td><code>sdk_config.autoCapture</code></td><td>Master toggle cho auto-capture (tap/screen/network)</td></tr>
+    <tr><td><code>sdk_config.trackTaps</code></td><td>Auto-capture button taps qua swizzler</td></tr>
+    <tr><td><code>sdk_config.trackScreens</code></td><td>Auto-capture screen transition</td></tr>
+    <tr><td><code>sdk_config.trackNetwork</code></td><td>Auto-capture HTTP requests qua URLProtocol / OkHttp interceptor</td></tr>
+    <tr><td><code>sdk_config.logLevel</code></td><td><code>error</code> / <code>warn</code> / <code>info</code> / <code>debug</code></td></tr>
+    <tr><td><code>tracing.enabled</code></td><td>Bật W3C trace inject vào outbound HTTP</td></tr>
+    <tr><td><code>tracing.allowlist_hosts</code></td><td>Danh sách host được inject <code>traceparent</code> (fail-closed)</td></tr>
   </tbody>
 </table>
 
-<h3>Cách switch sang LIVE mode (cho demo)</h3>
-
-<p><span class="tag tag-ios">iOS</span> Trong <code>FSDKTracking.swift</code>:</p>
-<ol>
-  <li>Comment hàm <code>bootstrap()</code> (frozen).</li>
-  <li>Uncomment <code>bootstrapLive(...)</code> + rename thành <code>bootstrap</code>.</li>
-</ol>
-
-<p><span class="tag tag-android">Android</span> Trong <code>FSDKTracking.kt</code>:</p>
-<ol>
-  <li>Comment block frozen <code>val bundled = loadBundledFallback(app)...</code>.</li>
-  <li>Để code fallback <code>UniTrackRemoteConfig.fetch(...)</code> chạy.</li>
-</ol>
+<div class="panel warn">
+  <strong>Lưu ý quan trọng:</strong> 2 file JSON iOS + Android phải <strong>identical</strong> để parity. Mỗi lần đổi config, update CẢ HAI file rồi rebuild app.
+</div>
 
 <!-- ============== BUILT-IN EVENTS ============== -->
 <div class="anchor-pad" id="events-builtin"></div>
@@ -476,14 +525,14 @@ static func packageRegistered(packageId: String,
 </div>
 
 <div class="panel warn">
-  <strong>Caveat:</strong> Cách 2 bypass Snowplow provider → event chỉ vào Portal C core, KHÔNG vào Snowplow collector <code>ftracking.fpt.vn</code>. Cách 1 (helper) fire qua cả 2 endpoint.
+  <strong>Caveat:</strong> Cách 2 bypass Snowplow provider → event chỉ vào core HTTP queue, KHÔNG vào Snowplow collector. Cách 1 (helper) fire qua cả 2 endpoint.
 </div>
 
 <h3>6.3 Schema cho event mới — Snowplow side</h3>
 <p>Mọi event Snowplow phải có Iglu schema. Convention FPT Life:</p>
 <pre><code>iglu:vn.fpt.ftel.snowplow/&lt;event_name&gt;/jsonschema/1-0-0</code></pre>
 
-<p>Schema vẽ ở team BE Snowplow (tạo trên Iglu registry trước khi đẩy event). Tham khảo <code>cfg.snowplow.eventNames</code> + <code>cfg.snowplow.entities</code> trong Portal config.</p>
+<p>Schema vẽ ở team BE Snowplow (tạo trên Iglu registry trước khi đẩy event). Tham khảo <code>cfg.snowplow.eventNames</code> + <code>cfg.snowplow.entities</code> trong file JSON.</p>
 
 <!-- ============== IDENTITY ============== -->
 <div class="anchor-pad" id="identity"></div>
@@ -525,7 +574,7 @@ UniTrack.reset()   // clear core session + provider user context</code></pre>
   </tbody>
 </table>
 
-<p>session_id tự stamp vào <strong>mọi event</strong> qua Snowplow + Portal C core → operator có thể filter Portal theo session_id để xem journey 1 user.</p>
+<p>session_id tự stamp vào <strong>mọi event</strong> qua Snowplow + core HTTP → backend có thể filter theo session_id để xem journey 1 user.</p>
 
 <!-- ============== OFFLINE ============== -->
 <div class="anchor-pad" id="offline"></div>
@@ -541,13 +590,13 @@ HTTP queue thử send → fail vì offline
      ↓ retry timer (exp backoff)
 [User mở lại mạng]
      ↓
-SDK auto-drain queue → Portal/Snowplow
+SDK auto-drain queue → ingest endpoint + Snowplow collector
      ↓
 Event vẫn giữ session_id + timestamp ORIGINAL (lúc tap)
      ↓
-Operator Portal thấy event bay muộn nhưng attribute đúng session</div>
+Backend thấy event bay muộn nhưng attribute đúng session</div>
 
-<p>Cộng thêm <strong>kill detection</strong> (từ tag 0.3.11): nếu user force-kill app, lần cold start kế tiếp tự fire 1 <code>session_ended</code> với reason <code>killed_recovered</code> cho session đã chết — Portal sẽ thấy session đóng đúng thay vì bỏ ngỏ.</p>
+<p>Cộng thêm <strong>kill detection</strong> (từ tag 0.3.11): nếu user force-kill app, lần cold start kế tiếp tự fire 1 <code>session_ended</code> với reason <code>killed_recovered</code> cho session đã chết — backend sẽ thấy session đóng đúng thay vì bỏ ngỏ.</p>
 
 <h3>API kiểm tra queue</h3>
 <table>
@@ -557,39 +606,11 @@ Operator Portal thấy event bay muộn nhưng attribute đúng session</div>
   </tbody>
 </table>
 
-<!-- ============== REFRESH JSON ============== -->
-<div class="anchor-pad" id="refresh-json"></div>
-<h2>9. Refresh JSON config từ Portal</h2>
-
-<p>Khi anh thay đổi config trên Portal (vd thêm host vào tracing allowlist), FPT Life KHÔNG pickup vì frozen. Cần refresh JSON + rebuild:</p>
-
-<h3>Script copy-paste</h3>
-<pre><code>API_KEY=utk_2A4HetJnOKCotS3LBxrNM54L
-FLAVOR=production
-
-# iOS
-curl -s -H "Authorization: Bearer $API_KEY" \
-    "https://mobix.asia/event-tracking-mobile/config?flavor=$FLAVOR" \
-    | python3 -m json.tool \
-    > /Volumes/DucsM1/FPT-Life-FLI/FPTLife/FSDKTracking/PortalConfigFallback.json
-
-# Android
-curl -s -H "Authorization: Bearer $API_KEY" \
-    "https://mobix.asia/event-tracking-mobile/config?flavor=$FLAVOR" \
-    | python3 -m json.tool \
-    > /Volumes/DucsM1/android-fptlife-fli/app/src/main/assets/portal_config_fallback.json
-
-# Verify
-python3 -c "import json; d=json.load(open('/Volumes/DucsM1/FPT-Life-FLI/FPTLife/FSDKTracking/PortalConfigFallback.json')); print('iOS version:', d['version'])"
-python3 -c "import json; d=json.load(open('/Volumes/DucsM1/android-fptlife-fli/app/src/main/assets/portal_config_fallback.json')); print('Android version:', d['version'])"</code></pre>
-
-<p>Sau đó rebuild + commit. Production parity check: 2 file phải cùng version.</p>
-
 <!-- ============== DEBUG ============== -->
 <div class="anchor-pad" id="debug"></div>
-<h2>10. Debug + console log</h2>
+<h2>9. Debug + console log</h2>
 
-<h3>10.1 Verbose log toggle</h3>
+<h3>9.1 Verbose log toggle</h3>
 <p>Mặc định ON. Tắt cho release:</p>
 <div class="grid2">
   <div>
@@ -604,13 +625,13 @@ UniTrack.setVerboseLogging(false) // release</code></pre>
   </div>
 </div>
 
-<h3>10.2 Log lines quan trọng</h3>
+<h3>9.2 Log lines quan trọng</h3>
 <table>
   <thead><tr><th>Log</th><th>Ý nghĩa</th></tr></thead>
   <tbody>
-    <tr><td><code>[FSDK] bundled config loaded — version=56 ...</code></td><td>Frozen mode đã pickup JSON đúng</td></tr>
+    <tr><td><code>[FSDK] config loaded — version=56 ...</code></td><td>JSON config đã pickup đúng</td></tr>
     <tr><td><code>[UniTrack] track event="..." auto=yes/no</code></td><td>Mỗi event fire — yes là swizzler auto, no là DEV manual</td></tr>
-    <tr><td><code>[UniTrack] HTTP POST .../v1/events → 200</code></td><td>Batch flush thành công</td></tr>
+    <tr><td><code>[UniTrack] HTTP POST .../events → 200</code></td><td>Batch flush thành công</td></tr>
     <tr><td><code>[W3C] inject host=... traceparent: 00-...</code></td><td>Trace inject vào HTTP outbound</td></tr>
     <tr><td><code>[W3C] skip host=... reason=...</code></td><td>Bỏ qua inject (host không trong allowlist)</td></tr>
     <tr><td><code>[UniTrack] auto click SUPPRESSED — manual signal in window</code></td><td>Arbitration tự skip auto khi DEV đã track manual <span class="tag tag-ios">iOS only</span></td></tr>
@@ -618,35 +639,27 @@ UniTrack.setVerboseLogging(false) // release</code></pre>
   </tbody>
 </table>
 
-<h3>10.3 Verify Portal</h3>
-<p>Mở <a href="https://mobix.asia">mobix.asia</a> → Project pid=8 (FPT Life) → tab <strong>Events</strong>:</p>
-<ul>
-  <li>Filter <code>session_id=&lt;UUID&gt;</code> để xem journey 1 user</li>
-  <li>Filter <code>event_name=camera_stream_started</code> để xem riêng 1 loại event</li>
-  <li>Tab <strong>Sessions</strong> hiển thị tổng quan session + events count</li>
-</ul>
-
 <!-- ============== TROUBLESHOOT ============== -->
 <div class="anchor-pad" id="troubleshoot"></div>
-<h2>11. Troubleshoot</h2>
+<h2>10. Troubleshoot</h2>
 
-<h3>Q1. Console không thấy log <code>[FSDK] bundled config loaded</code></h3>
+<h3>Q1. Console không thấy log <code>[FSDK] config loaded</code></h3>
 <div class="panel danger">
-<strong>iOS:</strong> Verify <code>PortalConfigFallback.json</code> đã add vào Xcode target FPTLife → Build Phases → Copy Bundle Resources. <br>
+<strong>iOS:</strong> Verify file JSON đã add vào Xcode target FPTLife → Build Phases → Copy Bundle Resources. <br>
 Test: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code> phải thấy 4 dòng.
 <br><br>
 <strong>Android:</strong> Verify file nằm ở <code>app/src/main/assets/portal_config_fallback.json</code> (chữ thường + underscore). KHÔNG đặt ở <code>res/raw</code>.
 </div>
 
-<h3>Q2. Event không bay lên Portal mà console thấy track</h3>
+<h3>Q2. Event không bay lên BE mà console thấy track</h3>
 <ul>
   <li>Check network — SDK queue offline OK, sẽ flush sau khi có mạng</li>
   <li>Check <code>UniTrack.pendingEventCounts()</code> — nếu &gt; 0 → đang queue, retry</li>
-  <li>Check Portal endpoint — <code>cfg.endpoint</code> phải là <code>https://mobix.asia/event-tracking-mobile/v1/events</code></li>
+  <li>Check ingest endpoint — <code>cfg.endpoint</code> phải đúng URL BE</li>
   <li>Console log <code>HTTP POST ... → 4xx/5xx</code> → check server side</li>
 </ul>
 
-<h3>Q3. Snowplow side thiếu event nhưng Portal có</h3>
+<h3>Q3. Snowplow side thiếu event nhưng ingest queue có</h3>
 <ul>
   <li>Schema chưa register trên Iglu registry → Snowplow tracker drop event</li>
   <li>Helper gọi <code>snowplow?.trackingClickEvent</code> hay <code>UniTrack.track</code> trực tiếp? Cách 2 bypass Snowplow (xem 6.2)</li>
@@ -662,8 +675,8 @@ Test: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code> p
 
 <h3>Q5. W3C trace_id không inject vào HTTP outbound</h3>
 <ul>
-  <li>Check <code>cfg.tracing.enabled = true</code> trong JSON (version 56 đã enable)</li>
-  <li>Check <code>cfg.tracing.allowlist_hosts</code> chứa host anh đang gọi</li>
+  <li>Check <code>cfg.tracing.enabled = true</code> trong JSON</li>
+  <li>Check <code>cfg.tracing.allowlist_hosts</code> chứa host đang gọi</li>
   <li>App nếu dùng Alamofire/OkHttp custom session phải đảm bảo dùng <code>URLSessionConfiguration.default</code> hoặc init AFTER UniTrack.initialize</li>
   <li>iOS console: tìm log <code>[W3C] inject host=...</code> hoặc <code>[W3C] skip host=...</code></li>
 </ul>
@@ -678,8 +691,7 @@ Test: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code> p
 
 <p class="sub" style="text-align:center">
   Repo: <code>github.com/sieuvitdet/unitrack-sdk</code> ·
-  iOS SPM: <code>github.com/sieuvitdet/unitrack-ios-package</code> ·
-  Portal: <code>mobix.asia</code>
+  iOS SPM: <code>github.com/sieuvitdet/unitrack-ios-package</code>
 </p>
 
 </div>
