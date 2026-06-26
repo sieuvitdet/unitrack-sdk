@@ -43,6 +43,15 @@ public class RNUniTrack: RCTEventEmitter {
     func initialize(_ apiKey: String, configJson: String,
                     resolver resolve: @escaping RCTPromiseResolveBlock,
                     rejecter reject: @escaping RCTPromiseRejectBlock) {
+        // Co-resident: native host đã init UniTrack module ngoài (vd iOS app
+        // native nhúng RN). RN bridge KHÔNG init lại — chỉ register layer
+        // để swizzler native biết RN có mặt. Mọi event JS sau đó forward về
+        // singleton native qua ObjC bridge.
+        if UniTrackHostProxy.isCoResident {
+            UniTrackHostProxy.registerLayer(0x08) // UT_LAYER_REACT_NATIVE
+            NSLog("[UniTrack/RN] co-resident: skip RN init, piggyback native singleton")
+            resolve(nil); return
+        }
         let c = dict(from: configJson)
         var cfg = UniTrack.Config()
         if let v = c["endpoint"]         as? String { cfg.endpoint        = v }
@@ -64,21 +73,31 @@ public class RNUniTrack: RCTEventEmitter {
     func identify(_ userId: String, traitsJson: String,
                   resolver resolve: @escaping RCTPromiseResolveBlock,
                   rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.identify(userId: userId, traits: dict(from: traitsJson))
+        if UniTrackHostProxy.isCoResident {
+            UniTrackHostProxy.identify(userId: userId, traitsJson: traitsJson)
+        } else {
+            UniTrack.identify(userId: userId, traits: dict(from: traitsJson))
+        }
         resolve(nil)
     }
 
     @objc(reset:rejecter:)
     func reset(_ resolve: @escaping RCTPromiseResolveBlock,
                rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.reset(); resolve(nil)
+        if UniTrackHostProxy.isCoResident { UniTrackHostProxy.reset() } else { UniTrack.reset() }
+        resolve(nil)
     }
 
     @objc(track:props:resolver:rejecter:)
     func track(_ event: String, propsJson: String,
                resolver resolve: @escaping RCTPromiseResolveBlock,
                rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.track(event, properties: dict(from: propsJson))
+        let props = dict(from: propsJson)
+        if UniTrackHostProxy.isCoResident {
+            UniTrackHostProxy.track(event, properties: props)
+        } else {
+            UniTrack.track(event, properties: props)
+        }
         resolve(nil)
     }
 
@@ -86,20 +105,23 @@ public class RNUniTrack: RCTEventEmitter {
     func setScreen(_ name: String,
                    resolver resolve: @escaping RCTPromiseResolveBlock,
                    rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.setScreen(name); resolve(nil)
+        if UniTrackHostProxy.isCoResident { UniTrackHostProxy.setScreen(name) } else { UniTrack.setScreen(name) }
+        resolve(nil)
     }
 
     @objc(flush:rejecter:)
     func flush(_ resolve: @escaping RCTPromiseResolveBlock,
                rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.flush(); resolve(nil)
+        if UniTrackHostProxy.isCoResident { UniTrackHostProxy.flush() } else { UniTrack.flush() }
+        resolve(nil)
     }
 
     @objc(setEnabled:resolver:rejecter:)
     func setEnabled(_ enabled: Bool,
                     resolver resolve: @escaping RCTPromiseResolveBlock,
                     rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.setEnabled(enabled); resolve(nil)
+        if UniTrackHostProxy.isCoResident { UniTrackHostProxy.setEnabled(enabled) } else { UniTrack.setEnabled(enabled) }
+        resolve(nil)
     }
 
     // ── Session API ───────────────────────────────────────────────────────
@@ -107,25 +129,26 @@ public class RNUniTrack: RCTEventEmitter {
     @objc(currentSessionId:rejecter:)
     func currentSessionId(_ resolve: @escaping RCTPromiseResolveBlock,
                           rejecter reject: @escaping RCTPromiseRejectBlock) {
-        resolve(UniTrack.currentSessionId())
+        resolve(UniTrackHostProxy.isCoResident ? UniTrackHostProxy.currentSessionId() : UniTrack.currentSessionId())
     }
 
     @objc(sessionIndex:rejecter:)
     func sessionIndex(_ resolve: @escaping RCTPromiseResolveBlock,
                       rejecter reject: @escaping RCTPromiseRejectBlock) {
-        resolve(UniTrack.sessionIndex())
+        resolve(UniTrackHostProxy.isCoResident ? UniTrackHostProxy.sessionIndex() : UniTrack.sessionIndex())
     }
 
     @objc(previousSessionId:rejecter:)
     func previousSessionId(_ resolve: @escaping RCTPromiseResolveBlock,
                            rejecter reject: @escaping RCTPromiseRejectBlock) {
-        resolve(UniTrack.previousSessionId())
+        resolve(UniTrackHostProxy.isCoResident ? UniTrackHostProxy.previousSessionId() : UniTrack.previousSessionId())
     }
 
     @objc(rotateSession:rejecter:)
     func rotateSession(_ resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
-        UniTrack.rotateSession(); resolve(nil)
+        if UniTrackHostProxy.isCoResident { UniTrackHostProxy.rotateSession() } else { UniTrack.rotateSession() }
+        resolve(nil)
     }
 
     // ── Provider Adapters (Phase 6) ────────────────────────────────────────
