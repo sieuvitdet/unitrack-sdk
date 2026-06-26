@@ -22,6 +22,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Used by UniTrackHttpClient — wrapper http.BaseClient inject traceparent +
+  # auto-emit network_request event với cùng trace_id. App có thể tránh dep
+  # nếu không dùng UniTrackHttpClient — Dart không tree-shake import nhưng
+  # http package nhẹ (<50KB).
+  http: ^1.1.0
 
 dev_dependencies:
   flutter_test:

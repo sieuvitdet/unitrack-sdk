@@ -29,6 +29,7 @@ export 'src/remote_config.dart' show UniTrackRemoteConfig;
 // W3C trace-context helpers — exposed so app code can mint a trace_id for
 // non-HTTP boundaries (push payload → backend correlation) or pre-populate
 // a header for a specific request.
+export 'src/http_client.dart' show UniTrackHttpClient;
 export 'src/trace_context.dart'
     show UniTrackTraceIds, UniTrackTraceContext, UniTrackTracingConfig;
 // Screen wireframe was an experimental feature (walk Element tree → SVG on
@@ -428,6 +429,10 @@ class UniTrack {
       sampled: sampled,
     );
   }
+
+  /// Read-only snapshot dùng cho UniTrackHttpClient inject traceparent.
+  /// Tách thành getter để client không phải import lib internal trace_context.
+  _trace.UniTrackTracingConfig tracingSnapshot() => _trace.unitrackTracing;
 
   Future<void> track(String event, {Map<String, Object?>? properties}) {
     final props = properties ?? const <String, Object?>{};
