@@ -848,6 +848,71 @@ public final class UniTrack {
         return Trace(traceId: traceId, spanId: spanId, header: header)
     }
 
+    // MARK: - ObjC bridge for cross-binary singleton sharing
+    //
+    // Khi 1 process iOS host CẢ native UniTrack (SPM/Pod, module "UniTrack")
+    // VÀ Flutter unitrack plugin (xcframework, module "unitrack"), 2 binary
+    // mặc định không share singleton dù tên class trùng. Plugin Flutter dùng
+    // UniTrackHostProxy gọi qua ObjC runtime → vô đây → chính singleton native.
+    //
+    // Tất cả là class methods @objc-exposed, signature ObjC-compatible
+    // (NSString, NSNumber, JSON string). Không break Swift API hiện có.
+
+    @objc public static func objc_track(_ name: String, propertiesJson: String) {
+        let data = propertiesJson.data(using: .utf8) ?? Data()
+        let props = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        track(name, properties: props ?? [:], isAuto: false)
+    }
+
+    @objc public static func objc_setScreen(_ name: String) {
+        setScreen(name)
+    }
+
+    @objc public static func objc_setScreen(_ name: String, layer: NSNumber) {
+        let raw = UInt32(layer.uint32Value)
+        setScreen(name, layer: UniTrackLayer(rawValue: raw))
+    }
+
+    @objc public static func objc_identify(_ userId: String, traitsJson: String) {
+        let data = traitsJson.data(using: .utf8) ?? Data()
+        let traits = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        identify(userId: userId, traits: traits ?? [:])
+    }
+
+    @objc public static func objc_reset()  { reset() }
+    @objc public static func objc_flush()  { flush() }
+
+    @objc public static func objc_setEnabled(_ enabled: NSNumber) {
+        setEnabled(enabled.boolValue)
+    }
+
+    @objc public static func objc_currentSessionId() -> NSString {
+        return currentSessionId() as NSString
+    }
+
+    @objc public static func objc_sessionIndex() -> NSNumber {
+        return NSNumber(value: sessionIndex())
+    }
+
+    @objc public static func objc_previousSessionId() -> NSString {
+        return previousSessionId() as NSString
+    }
+
+    @objc public static func objc_rotateSession() { rotateSession() }
+
+    @objc public static func objc_registerLayer(_ layer: NSNumber) {
+        let raw = UInt32(layer.uint32Value)
+        if let l = UniTrackLayer(rawValue: raw) {
+            LayerRegistry.register(l)
+        }
+    }
+
+    @objc public static func objc_recordManualSignal(_ kind: NSNumber) {
+        if let k = ManualTrackKind(rawValue: kind.intValue) {
+            recordManualSignal(k)
+        }
+    }
+
     // MARK: - Internal
 
     var contextHandle: OpaquePointer? { context }

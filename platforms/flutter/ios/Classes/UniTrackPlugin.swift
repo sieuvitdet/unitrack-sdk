@@ -58,6 +58,15 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         let args = call.arguments as? [String: Any] ?? [:]
 
+        // Co-resident mode: nếu process có native UniTrack module ngoài (FPT
+        // Life host SPM "UniTrack"), forward mọi call qua HostProxy → cùng
+        // singleton native (cùng session_id, cùng SQLite, cùng provider list).
+        // KHÔNG dùng module-local UniTrack ở Plugin để tránh tạo singleton thứ 2.
+        if UniTrackHostProxy.isCoResident {
+            handleCoResident(call, args: args, result: result)
+            return
+        }
+
         switch call.method {
         case "initialize":
             let apiKey = args["apiKey"] as? String ?? ""
@@ -224,6 +233,69 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
         case "resetSessionStats":    UniTrack.resetSessionStats();    result(nil)
 
         default:
+            result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - Co-resident handler (forward qua HostProxy → singleton native)
+    //
+    // Khi process có cả native UniTrack SPM lẫn Flutter plugin, mọi MethodChannel
+    // call route vào đây để forward về singleton NATIVE qua ObjC runtime. Plugin
+    // KHÔNG init UniTrack module-local → zero singleton trùng, zero SQLite trùng,
+    // zero session_id trùng.
+    private func handleCoResident(_ call: FlutterMethodCall,
+                                  args: [String: Any],
+                                  result: @escaping FlutterResult) {
+        switch call.method {
+        case "initialize":
+            // No-op — native side đã init từ host app code. Plugin chỉ piggyback.
+            // Vẫn forward registerLayer để native swizzler biết Flutter có mặt.
+            UniTrackHostProxy.registerLayer(Int(UniTrackLayer.flutter.rawValue))
+            UniTrackPluginLog.info("co-resident: skip Flutter init, piggyback native UniTrack singleton")
+            result(nil)
+        case "identify":
+            let uid = args["userId"] as? String ?? ""
+            // Encode traits as JSON cho ObjC bridge
+            let traits = dict(from: args["traits"])
+            let json = (try? JSONSerialization.data(withJSONObject: traits))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            UniTrackHostProxy.identify(userId: uid, traitsJson: json)
+            result(nil)
+        case "reset":
+            UniTrackHostProxy.reset(); result(nil)
+        case "track":
+            let event = args["event"] as? String ?? ""
+            let props = dict(from: args["props"])
+            UniTrackHostProxy.track(event, properties: props)
+            result(nil)
+        case "setScreen":
+            UniTrackHostProxy.setScreen(args["name"] as? String ?? "")
+            result(nil)
+        case "registerLayer":
+            UniTrackHostProxy.registerLayer(args["layer"] as? Int ?? Int(UniTrackLayer.flutter.rawValue))
+            result(nil)
+        case "setScreenForLayer":
+            UniTrackHostProxy.setScreenForLayer(
+                args["name"] as? String ?? "",
+                layer: args["layer"] as? Int ?? Int(UniTrackLayer.flutter.rawValue))
+            result(nil)
+        case "flush":           UniTrackHostProxy.flush(); result(nil)
+        case "setEnabled":      UniTrackHostProxy.setEnabled(args["enabled"] as? Bool ?? true); result(nil)
+        case "currentSessionId":  result(UniTrackHostProxy.currentSessionId())
+        case "sessionIndex":      result(UniTrackHostProxy.sessionIndex())
+        case "previousSessionId": result(UniTrackHostProxy.previousSessionId())
+        case "rotateSession":     UniTrackHostProxy.rotateSession(); result(nil)
+        // claimSubtree / releaseSubtree không exposed qua ObjC bridge ở proxy
+        // hiện tại (LayerRegistry là internal). Fall back no-op để Dart không
+        // crash khi gọi — registerLayer đã đủ cho dedup baseline.
+        case "claimSubtree", "releaseSubtree":
+            result(nil)
+        default:
+            // Mọi method khác (pendingEventCounts, attachFirebaseAdapter,
+            // applicationContext, …) chưa wire qua ObjC bridge. Trả không
+            // implemented để Dart side fallback hành vi cũ. Sẽ mở rộng khi
+            // có nhu cầu thực tế.
+            UniTrackPluginLog.warn("co-resident: method '\(call.method)' chưa bridge → not implemented")
             result(FlutterMethodNotImplemented)
         }
     }
