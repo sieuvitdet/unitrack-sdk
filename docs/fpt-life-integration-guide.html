@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniTrack — Hướng dẫn tích hợp FPT Life (iOS + Android)</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --line: #e4e7ec;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --danger: #dc2626;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+    --tag-ios: #007aff;
+    --tag-android: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); margin: 0; padding: 0;
+    line-height: 1.6;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  header {
+    border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 28px;
+  }
+  h1 { font-size: 28px; margin: 0 0 8px; color: var(--accent); }
+  h2 {
+    font-size: 22px; margin: 40px 0 14px;
+    border-left: 4px solid var(--accent); padding-left: 12px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 10px; color: #374151; }
+  h4 { font-size: 14px; margin: 16px 0 6px; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); font-size: 14px; }
+  code {
+    background: #eef2ff; color: #3730a3; padding: 2px 6px;
+    border-radius: 4px; font-size: 13px;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13px; line-height: 1.55;
+    font-family: "SF Mono", Menlo, monospace;
+    margin: 12px 0;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .4px;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .tag-ios     { background: rgba(0,122,255,.12); color: var(--tag-ios); }
+  .tag-android { background: rgba(52,211,153,.18); color: #047857; }
+  .tag-both    { background: #eef2ff; color: var(--accent); }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 10px 12px; border: 1px solid var(--line); text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f3f4f6; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 22px; margin: 14px 0;
+  }
+  .note   { border-left: 4px solid var(--accent); background: #eef2ff; }
+  .warn   { border-left: 4px solid var(--warn);   background: #fffbeb; }
+  .danger { border-left: 4px solid var(--danger); background: #fef2f2; }
+  .ok     { border-left: 4px solid var(--ok);     background: #f0fdf4; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .toc {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 24px; margin-bottom: 24px;
+  }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .kbd {
+    background: #e2e8f0; padding: 2px 6px; border-radius: 4px;
+    font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+    border: 1px solid #cbd5e1;
+  }
+  .pipeline {
+    background: #0f172a; color: #e2e8f0;
+    padding: 16px 20px; border-radius: 8px;
+    font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+    white-space: pre; overflow-x: auto;
+  }
+  .anchor-pad { padding-top: 24px; margin-top: -24px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>UniTrack — Hướng dẫn tích hợp FPT Life</h1>
+  <p class="sub">iOS (FPT-Life-FLI) + Android (android-fptlife-fli). Setup, custom event, debug, troubleshoot.</p>
+  <p class="sub">Cập nhật: <strong>2026-06-26</strong> · iOS SPM <strong>0.3.46</strong> · Android Maven <strong>0.3.11</strong> · Portal config <strong>v56</strong></p>
+</header>
+
+<div class="toc">
+  <h3 style="margin-top:0">Mục lục</h3>
+  <ol>
+    <li><a href="#arch">Kiến trúc tổng quan</a></li>
+    <li><a href="#ios-setup">iOS — Setup SPM + bundled config</a></li>
+    <li><a href="#android-setup">Android — Setup Maven + bundled config</a></li>
+    <li><a href="#bootstrap">Bootstrap — frozen vs live mode</a></li>
+    <li><a href="#events-builtin">Custom events có sẵn (FSDKTracking helpers)</a></li>
+    <li><a href="#events-custom">Tự định nghĩa custom event mới</a></li>
+    <li><a href="#identity">Identify user + session</a></li>
+    <li><a href="#offline">Offline queue + retry</a></li>
+    <li><a href="#refresh-json">Refresh JSON config từ Portal</a></li>
+    <li><a href="#debug">Debug + console log</a></li>
+    <li><a href="#troubleshoot">Troubleshoot</a></li>
+  </ol>
+</div>
+
+<!-- ============== ARCHITECTURE ============== -->
+<div class="anchor-pad" id="arch"></div>
+<h2>1. Kiến trúc tổng quan</h2>
+
+<p>UniTrack là analytics SDK đa nền tảng, share C++ core. FPT Life dùng wrapper <code>FSDKTracking</code> (cùng tên cả iOS + Android) để abstract toàn bộ tracking domain — DEV gọi <code>FSDKTracking.streamStarted(...)</code>, không trực tiếp dùng UniTrack API.</p>
+
+<div class="pipeline">┌──── FPT Life app ─────────────────────────────┐
+│                                                │
+│   App code (UIKit / Activity / Fragment)        │
+│         │                                       │
+│         ▼                                       │
+│   FSDKTracking.swift / .kt   (domain wrapper)   │
+│         │                                       │
+│         ▼                                       │
+│   UniTrack SDK (cross-platform)                 │
+│   ├─ SnowplowProvider → ftracking.fpt.vn        │
+│   ├─ FirebaseAdapter  → Firebase Analytics       │
+│   ├─ Core HTTP queue  → mobix.asia (Portal)      │
+│   └─ SQLite offline   → tự queue + retry        │
+│                                                  │
+└─────────────────────────────────────────────────┘</div>
+
+<div class="panel note">
+  <strong>Convention:</strong> App KHÔNG gọi <code>UniTrack.track(...)</code> trực tiếp. Mọi event đi qua <code>FSDKTracking</code> để giữ event_name + schema chuẩn FPT Life.
+</div>
+
+<!-- ============== iOS SETUP ============== -->
+<div class="anchor-pad" id="ios-setup"></div>
+<h2>2. <span class="tag tag-ios">iOS</span> Setup SPM</h2>
+
+<h3>2.1 Dependency</h3>
+<p>Xcode → File → Add Package Dependencies → URL:</p>
+<pre><code>https://github.com/sieuvitdet/unitrack-ios-package.git</code></pre>
+<p>Exact version: <code>0.3.46</code> (latest hỗ trợ Manual arbitration + Layer Registry + ObjC bridge cho Flutter co-resident).</p>
+
+<p>Targets cần link:</p>
+<ul>
+  <li><code>UniTrack</code> — core SDK (bắt buộc)</li>
+  <li><code>UniTrackSnowplow</code> — Snowplow provider (bắt buộc cho FPT Life vì BE dùng schema Snowplow)</li>
+</ul>
+
+<h3>2.2 Bundled config JSON</h3>
+<p>FPT Life iOS dùng <strong>frozen mode</strong> — load <code>PortalConfigFallback.json</code> từ Bundle.main, KHÔNG fetch Portal live. File đã ở:</p>
+<pre><code>FPTLife/FSDKTracking/PortalConfigFallback.json</code></pre>
+<p>Phải add vào Xcode target <strong>FPTLife → Build Phases → Copy Bundle Resources</strong> (đã setup, kiểm tra: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code>).</p>
+
+<h3>2.3 Bootstrap trong AppDelegate</h3>
+<pre><code>import UniTrack
+
+func application(_ application: UIApplication,
+                 didFinishLaunchingWithOptions launchOptions: ...) -&gt; Bool {
+    FSDKTracking.bootstrap {
+        FSDKTracking.sessionStarted()
+        // Optional: kiểm tra notification permission
+        self.checkNotificationPermission()
+    }
+    // UNUserNotificationCenter delegate wrap để auto-capture notification clicks
+    let center = UNUserNotificationCenter.current()
+    center.delegate = UniTrackNotifications.wrap(center.delegate)
+    return true
+}
+
+func applicationDidEnterBackground(_ application: UIApplication) {
+    FSDKTracking.sessionEnded(reason: "backgrounded")
+    UniTrack.flush()
+}
+
+func applicationWillEnterForeground(_ application: UIApplication) {
+    FSDKTracking.sessionStarted()
+}</code></pre>
+
+<!-- ============== ANDROID SETUP ============== -->
+<div class="anchor-pad" id="android-setup"></div>
+<h2>3. <span class="tag tag-android">Android</span> Setup Maven</h2>
+
+<h3>3.1 Dependency</h3>
+<p><code>gradle/libs.versions.toml</code>:</p>
+<pre><code>[versions]
+unitrack = "0.3.11"
+
+[libraries]
+unitrack          = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack",          version.ref = "unitrack" }
+unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-snowplow", version.ref = "unitrack" }
+unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-firebase", version.ref = "unitrack" }</code></pre>
+
+<p><code>settings.gradle</code> — add Jitpack repo:</p>
+<pre><code>dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }   // ← UniTrack publish qua Jitpack
+    }
+}</code></pre>
+
+<p><code>app/build.gradle</code> hoặc <code>fpt-tracker/build.gradle</code>:</p>
+<pre><code>dependencies {
+    implementation libs.unitrack
+    implementation libs.unitrack.snowplow
+    implementation libs.unitrack.firebase
+}</code></pre>
+
+<h3>3.2 Bundled config JSON</h3>
+<p>File đã ở:</p>
+<pre><code>app/src/main/assets/portal_config_fallback.json</code></pre>
+<p>Android tự động pick từ <code>assets/</code> — không cần khai báo build.gradle.</p>
+
+<h3>3.3 Bootstrap trong Application</h3>
+<pre><code>class FPTLifeApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+
+        FSDKTracking.bootstrap(
+            app       = this,
+            apiKey    = BuildConfig.FSDK_TRACKING_API_KEY,
+            configURL = BuildConfig.FSDK_TRACKING_CONFIG_URL,
+            flavor    = BuildConfig.FLAVOR
+        ) {
+            FSDKTracking.sessionStarted()
+        }
+    }
+}</code></pre>
+
+<p>Đăng ký <code>FPTLifeApp</code> trong <code>AndroidManifest.xml</code>:</p>
+<pre><code>&lt;application
+    android:name=".FPTLifeApp"
+    ... /&gt;</code></pre>
+
+<!-- ============== BOOTSTRAP MODES ============== -->
+<div class="anchor-pad" id="bootstrap"></div>
+<h2>4. Bootstrap — Frozen vs Live mode</h2>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>FROZEN (default)</th><th>LIVE (demo only)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Config source</td><td>Bundled JSON trong app</td><td>Fetch Portal mobix.asia mỗi cold start</td></tr>
+    <tr><td>Foreground throttle 5 phút</td><td>Skip — frozen</td><td>Re-fetch + apply</td></tr>
+    <tr><td>SSE realtime push</td><td>Connect nhưng skip apply</td><td>Apply ngay khi server push</td></tr>
+    <tr><td>Update config</td><td>Refresh JSON + rebuild app</td><td>Save Portal → push tự</td></tr>
+    <tr><td>Offline cold start</td><td>✅ OK (no network needed)</td><td>❌ Có thể fail nếu fetch timeout</td></tr>
+    <tr><td>Khi nào dùng</td><td>Production stable</td><td>Demo realtime config cho khách</td></tr>
+  </tbody>
+</table>
+
+<h3>Cách switch sang LIVE mode (cho demo)</h3>
+
+<p><span class="tag tag-ios">iOS</span> Trong <code>FSDKTracking.swift</code>:</p>
+<ol>
+  <li>Comment hàm <code>bootstrap()</code> (frozen).</li>
+  <li>Uncomment <code>bootstrapLive(...)</code> + rename thành <code>bootstrap</code>.</li>
+</ol>
+
+<p><span class="tag tag-android">Android</span> Trong <code>FSDKTracking.kt</code>:</p>
+<ol>
+  <li>Comment block frozen <code>val bundled = loadBundledFallback(app)...</code>.</li>
+  <li>Để code fallback <code>UniTrackRemoteConfig.fetch(...)</code> chạy.</li>
+</ol>
+
+<!-- ============== BUILT-IN EVENTS ============== -->
+<div class="anchor-pad" id="events-builtin"></div>
+<h2>5. Custom events có sẵn (FSDKTracking helpers)</h2>
+
+<p>FPT Life đã wire 18+ event domain camera. API <strong>identical</strong> cả iOS + Android:</p>
+
+<h3>5.1 Session lifecycle</h3>
+<table>
+  <thead><tr><th>Helper</th><th>Khi nào gọi</th><th>Event name</th></tr></thead>
+  <tbody>
+    <tr><td><code>sessionStarted(entrySource:)</code></td><td>App foreground / cold start</td><td><code>session_started</code></td></tr>
+    <tr><td><code>sessionEnded(reason:)</code></td><td>App background / kill</td><td><code>session_ended</code></td></tr>
+  </tbody>
+</table>
+
+<h3>5.2 Camera stream</h3>
+<table>
+  <thead><tr><th>Helper</th><th>Event</th><th>Args</th></tr></thead>
+  <tbody>
+    <tr><td><code>streamStarted(...)</code></td><td>camera_stream_started</td><td>cameraSerial, channel, viewMode, gridSize, entryScreen?, isNotificationTriggered?, playSequence?, gridPosition?</td></tr>
+    <tr><td><code>streamEnded(...)</code></td><td>camera_stream_ended</td><td>cameraSerial, watchSec, viewMode, endReason?, gridSize?</td></tr>
+    <tr><td><code>streamPaused(...)</code></td><td>camera_stream_paused</td><td>cameraSerial, watchSecBeforePause?</td></tr>
+    <tr><td><code>streamFirstFrame(...)</code></td><td>camera_stream_first_frame</td><td>cameraSerial, ttffMs, featureType, networkType?, resolution?, codec?</td></tr>
+    <tr><td><code>streamBuffering(...)</code></td><td>camera_stream_buffering</td><td>cameraSerial, action, bufferingDurationMs, bufferReason?, bufferSequence?</td></tr>
+  </tbody>
+</table>
+
+<h3>5.3 Playback + AI</h3>
+<table>
+  <thead><tr><th>Helper</th><th>Event</th></tr></thead>
+  <tbody>
+    <tr><td><code>playbackStarted(...)</code></td><td>camera_playback_started</td></tr>
+    <tr><td><code>playbackEnded(...)</code></td><td>camera_playback_ended</td></tr>
+    <tr><td><code>eventViewed(...)</code> <span class="tag tag-ios">iOS</span></td><td>camera_event_viewed</td></tr>
+    <tr><td><code>aiFeatureToggled(...)</code> <span class="tag tag-ios">iOS</span></td><td>camera_ai_feature_toggled</td></tr>
+  </tbody>
+</table>
+
+<h3>5.4 Pairing / Sharing</h3>
+<table>
+  <tbody>
+    <tr><td><code>pairingStarted(...)</code></td><td>camera_pairing_started</td></tr>
+    <tr><td><code>pairingCompleted(...)</code></td><td>camera_pairing_completed</td></tr>
+    <tr><td><code>pairingFailed(...)</code></td><td>camera_pairing_failed</td></tr>
+    <tr><td><code>cameraRegistered(...)</code></td><td>camera_registered</td></tr>
+    <tr><td><code>cameraShared(...)</code></td><td>camera_shared</td></tr>
+    <tr><td><code>cameraShareRevoked(...)</code></td><td>camera_share_revoked</td></tr>
+    <tr><td><code>cameraItemSelected(...)</code></td><td>camera_item_selected</td></tr>
+  </tbody>
+</table>
+
+<h3>5.5 Notification</h3>
+<table>
+  <tbody>
+    <tr><td><code>notificationPermissionChecked(granted:previousStatus:)</code></td><td>notification_permission_checked</td></tr>
+    <tr><td><code>notificationSent(...)</code></td><td>camera_notification_sent</td></tr>
+    <tr><td><code>notificationDelivered(...)</code></td><td>camera_notification_delivered</td></tr>
+    <tr><td><code>notificationClicked(...)</code></td><td>camera_notification_clicked</td></tr>
+  </tbody>
+</table>
+
+<h3>5.6 Errors</h3>
+<table>
+  <tbody>
+    <tr><td><code>applicationError(exceptionName:message:isFatal:...)</code></td><td>application_error → Snowplow tracker.crash + Crashlytics (nếu enabled)</td></tr>
+  </tbody>
+</table>
+
+<h3>5.7 Ví dụ gọi</h3>
+<div class="grid2">
+  <div>
+    <h4>iOS Swift</h4>
+    <pre><code>FSDKTracking.streamStarted(
+    cameraSerial: cam.serial,
+    channel: 0,
+    viewMode: "single",
+    gridSize: "1x1",
+    entryScreen: "camera_detail",
+    isNotificationTriggered: false
+)
+
+// Sau X giây user dừng stream
+FSDKTracking.streamEnded(
+    cameraSerial: cam.serial,
+    watchSec: 42,
+    viewMode: "single",
+    endReason: "user_back"
+)</code></pre>
+  </div>
+  <div>
+    <h4>Android Kotlin</h4>
+    <pre><code>FSDKTracking.streamStarted(
+    cameraSerial = cam.serial,
+    channel = 0,
+    viewMode = "single",
+    gridSize = "1x1",
+    entryScreen = "camera_detail",
+    isNotificationTriggered = false
+)
+
+// Sau X giây user dừng stream
+FSDKTracking.streamEnded(
+    cameraSerial = cam.serial,
+    watchSec = 42,
+    viewMode = "single",
+    endReason = "user_back"
+)</code></pre>
+  </div>
+</div>
+
+<!-- ============== CUSTOM EVENTS NEW ============== -->
+<div class="anchor-pad" id="events-custom"></div>
+<h2>6. Tự định nghĩa custom event mới</h2>
+
+<p>Nếu helper sẵn không khớp use case (vd track button "Đăng ký gói Giga"), 2 cách:</p>
+
+<h3>6.1 Cách 1 (Recommended) — Thêm helper vào FSDKTracking</h3>
+<p>Pattern: tạo thêm method giống các method có sẵn → gọi <code>snowplow?.trackingClickEvent(...)</code> với event name + data.</p>
+
+<div class="grid2">
+  <div>
+    <h4>iOS Swift — thêm vào FSDKTracking.swift</h4>
+    <pre><code>// MARK: - Subscription
+static func packageRegistered(packageId: String,
+                              source: String,
+                              priceVnd: Int? = nil) {
+    var data = baseData(.package_registered, includeUser: true)
+    data["package_id"] = packageId
+    data["source"]     = source
+    addOptional(&data, ["price_vnd": priceVnd])
+    snowplow?.trackingClickEvent(
+        elementKey: FSDKEvent.package_registered.rawValue,
+        data: data
+    )
+}</code></pre>
+
+    <p>Cập nhật <code>FSDKEvent.swift</code>:</p>
+    <pre><code>case package_registered = "package_registered"</code></pre>
+  </div>
+  <div>
+    <h4>Android Kotlin — thêm vào FSDKTracking.kt</h4>
+    <pre><code>fun packageRegistered(
+    packageId: String,
+    source: String,
+    priceVnd: Int? = null
+) {
+    val data = baseData(FSDKEvent.PACKAGE_REGISTERED, includeUser = true)
+        .toMutableMap()
+    data["package_id"] = packageId
+    data["source"]     = source
+    priceVnd?.let { data["price_vnd"] = it }
+    snowplow?.trackingClickEvent(
+        elementKey = FSDKEvent.PACKAGE_REGISTERED.value,
+        data = data
+    )
+}</code></pre>
+
+    <p>Cập nhật <code>FSDKEvent.kt</code>:</p>
+    <pre><code>PACKAGE_REGISTERED("package_registered"),</code></pre>
+  </div>
+</div>
+
+<h3>6.2 Cách 2 — Gọi <code>UniTrack.track</code> trực tiếp (không khuyến nghị)</h3>
+<p>Khi cần fire 1 lần ad-hoc, không muốn add helper:</p>
+
+<div class="grid2">
+  <div>
+    <h4>iOS</h4>
+    <pre><code>UniTrack.track("package_registered", properties: [
+    "package_id": "goi-giga",
+    "source": "home_section_3",
+    "price_vnd": 250000,
+    "session_id": UniTrack.currentSessionId()
+])</code></pre>
+  </div>
+  <div>
+    <h4>Android</h4>
+    <pre><code>UniTrack.track("package_registered", mapOf(
+    "package_id" to "goi-giga",
+    "source"     to "home_section_3",
+    "price_vnd"  to 250000,
+    "session_id" to UniTrack.currentSessionId()
+))</code></pre>
+  </div>
+</div>
+
+<div class="panel warn">
+  <strong>Caveat:</strong> Cách 2 bypass Snowplow provider → event chỉ vào Portal C core, KHÔNG vào Snowplow collector <code>ftracking.fpt.vn</code>. Cách 1 (helper) fire qua cả 2 endpoint.
+</div>
+
+<h3>6.3 Schema cho event mới — Snowplow side</h3>
+<p>Mọi event Snowplow phải có Iglu schema. Convention FPT Life:</p>
+<pre><code>iglu:vn.fpt.ftel.snowplow/&lt;event_name&gt;/jsonschema/1-0-0</code></pre>
+
+<p>Schema vẽ ở team BE Snowplow (tạo trên Iglu registry trước khi đẩy event). Tham khảo <code>cfg.snowplow.eventNames</code> + <code>cfg.snowplow.entities</code> trong Portal config.</p>
+
+<!-- ============== IDENTITY ============== -->
+<div class="anchor-pad" id="identity"></div>
+<h2>7. Identify user + session</h2>
+
+<h3>7.1 Identify sau khi login</h3>
+<div class="grid2">
+  <div>
+    <h4>iOS</h4>
+    <pre><code>// Trong LoginVC sau login thành công
+FSDKTracking.identify(
+    userId: user.id,
+    phoneNumber: user.phone
+)</code></pre>
+  </div>
+  <div>
+    <h4>Android</h4>
+    <pre><code>// Trong LoginActivity sau login thành công
+FSDKTracking.identify(
+    userId = user.id,
+    phoneNumber = user.phone
+)</code></pre>
+  </div>
+</div>
+
+<p>Identify cache UserDefaults / SharedPreferences → next cold start tự restore (không cần login lại để track).</p>
+
+<h3>7.2 Logout</h3>
+<pre><code>FSDKTracking.clearCachedIdentity()
+UniTrack.reset()   // clear core session + provider user context</code></pre>
+
+<h3>7.3 Session ID — khóa join chính</h3>
+<table>
+  <tbody>
+    <tr><td><code>UniTrack.currentSessionId()</code></td><td>UUID session hiện tại</td></tr>
+    <tr><td><code>UniTrack.sessionIndex()</code></td><td>Đếm session từ install (persist qua launch)</td></tr>
+    <tr><td><code>UniTrack.previousSessionId()</code></td><td>UUID session trước (null nếu first launch)</td></tr>
+    <tr><td><code>UniTrack.rotateSession()</code></td><td>Force mint session mới (vd switch account)</td></tr>
+  </tbody>
+</table>
+
+<p>session_id tự stamp vào <strong>mọi event</strong> qua Snowplow + Portal C core → operator có thể filter Portal theo session_id để xem journey 1 user.</p>
+
+<!-- ============== OFFLINE ============== -->
+<div class="anchor-pad" id="offline"></div>
+<h2>8. Offline queue + retry</h2>
+
+<p>Khi user offline (airplane mode, mạng yếu), SDK <strong>không drop event</strong>. Pipeline:</p>
+
+<div class="pipeline">[Tap event]
+     ↓
+SDK persist vào SQLite local
+     ↓
+HTTP queue thử send → fail vì offline
+     ↓ retry timer (exp backoff)
+[User mở lại mạng]
+     ↓
+SDK auto-drain queue → Portal/Snowplow
+     ↓
+Event vẫn giữ session_id + timestamp ORIGINAL (lúc tap)
+     ↓
+Operator Portal thấy event bay muộn nhưng attribute đúng session</div>
+
+<p>Cộng thêm <strong>kill detection</strong> (từ tag 0.3.11): nếu user force-kill app, lần cold start kế tiếp tự fire 1 <code>session_ended</code> với reason <code>killed_recovered</code> cho session đã chết — Portal sẽ thấy session đóng đúng thay vì bỏ ngỏ.</p>
+
+<h3>API kiểm tra queue</h3>
+<table>
+  <tbody>
+    <tr><td><code>UniTrack.pendingEventCounts()</code></td><td>Map&lt;event_name, count&gt; — số event đang chờ flush</td></tr>
+    <tr><td><code>UniTrack.flush()</code></td><td>Force flush ngay (vd trước khi background)</td></tr>
+  </tbody>
+</table>
+
+<!-- ============== REFRESH JSON ============== -->
+<div class="anchor-pad" id="refresh-json"></div>
+<h2>9. Refresh JSON config từ Portal</h2>
+
+<p>Khi anh thay đổi config trên Portal (vd thêm host vào tracing allowlist), FPT Life KHÔNG pickup vì frozen. Cần refresh JSON + rebuild:</p>
+
+<h3>Script copy-paste</h3>
+<pre><code>API_KEY=utk_2A4HetJnOKCotS3LBxrNM54L
+FLAVOR=production
+
+# iOS
+curl -s -H "Authorization: Bearer $API_KEY" \
+    "https://mobix.asia/event-tracking-mobile/config?flavor=$FLAVOR" \
+    | python3 -m json.tool \
+    > /Volumes/DucsM1/FPT-Life-FLI/FPTLife/FSDKTracking/PortalConfigFallback.json
+
+# Android
+curl -s -H "Authorization: Bearer $API_KEY" \
+    "https://mobix.asia/event-tracking-mobile/config?flavor=$FLAVOR" \
+    | python3 -m json.tool \
+    > /Volumes/DucsM1/android-fptlife-fli/app/src/main/assets/portal_config_fallback.json
+
+# Verify
+python3 -c "import json; d=json.load(open('/Volumes/DucsM1/FPT-Life-FLI/FPTLife/FSDKTracking/PortalConfigFallback.json')); print('iOS version:', d['version'])"
+python3 -c "import json; d=json.load(open('/Volumes/DucsM1/android-fptlife-fli/app/src/main/assets/portal_config_fallback.json')); print('Android version:', d['version'])"</code></pre>
+
+<p>Sau đó rebuild + commit. Production parity check: 2 file phải cùng version.</p>
+
+<!-- ============== DEBUG ============== -->
+<div class="anchor-pad" id="debug"></div>
+<h2>10. Debug + console log</h2>
+
+<h3>10.1 Verbose log toggle</h3>
+<p>Mặc định ON. Tắt cho release:</p>
+<div class="grid2">
+  <div>
+    <h4>iOS</h4>
+    <pre><code>// Sau khi gọi initialize
+UniTrack.verboseLogging = false   // release</code></pre>
+  </div>
+  <div>
+    <h4>Android</h4>
+    <pre><code>// Sau khi gọi bootstrap
+UniTrack.setVerboseLogging(false) // release</code></pre>
+  </div>
+</div>
+
+<h3>10.2 Log lines quan trọng</h3>
+<table>
+  <thead><tr><th>Log</th><th>Ý nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>[FSDK] bundled config loaded — version=56 ...</code></td><td>Frozen mode đã pickup JSON đúng</td></tr>
+    <tr><td><code>[UniTrack] track event="..." auto=yes/no</code></td><td>Mỗi event fire — yes là swizzler auto, no là DEV manual</td></tr>
+    <tr><td><code>[UniTrack] HTTP POST .../v1/events → 200</code></td><td>Batch flush thành công</td></tr>
+    <tr><td><code>[W3C] inject host=... traceparent: 00-...</code></td><td>Trace inject vào HTTP outbound</td></tr>
+    <tr><td><code>[W3C] skip host=... reason=...</code></td><td>Bỏ qua inject (host không trong allowlist)</td></tr>
+    <tr><td><code>[UniTrack] auto click SUPPRESSED — manual signal in window</code></td><td>Arbitration tự skip auto khi DEV đã track manual <span class="tag tag-ios">iOS only</span></td></tr>
+    <tr><td><code>session_ended reason=killed_recovered</code></td><td>Kill detection fired sau force-quit</td></tr>
+  </tbody>
+</table>
+
+<h3>10.3 Verify Portal</h3>
+<p>Mở <a href="https://mobix.asia">mobix.asia</a> → Project pid=8 (FPT Life) → tab <strong>Events</strong>:</p>
+<ul>
+  <li>Filter <code>session_id=&lt;UUID&gt;</code> để xem journey 1 user</li>
+  <li>Filter <code>event_name=camera_stream_started</code> để xem riêng 1 loại event</li>
+  <li>Tab <strong>Sessions</strong> hiển thị tổng quan session + events count</li>
+</ul>
+
+<!-- ============== TROUBLESHOOT ============== -->
+<div class="anchor-pad" id="troubleshoot"></div>
+<h2>11. Troubleshoot</h2>
+
+<h3>Q1. Console không thấy log <code>[FSDK] bundled config loaded</code></h3>
+<div class="panel danger">
+<strong>iOS:</strong> Verify <code>PortalConfigFallback.json</code> đã add vào Xcode target FPTLife → Build Phases → Copy Bundle Resources. <br>
+Test: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code> phải thấy 4 dòng.
+<br><br>
+<strong>Android:</strong> Verify file nằm ở <code>app/src/main/assets/portal_config_fallback.json</code> (chữ thường + underscore). KHÔNG đặt ở <code>res/raw</code>.
+</div>
+
+<h3>Q2. Event không bay lên Portal mà console thấy track</h3>
+<ul>
+  <li>Check network — SDK queue offline OK, sẽ flush sau khi có mạng</li>
+  <li>Check <code>UniTrack.pendingEventCounts()</code> — nếu &gt; 0 → đang queue, retry</li>
+  <li>Check Portal endpoint — <code>cfg.endpoint</code> phải là <code>https://mobix.asia/event-tracking-mobile/v1/events</code></li>
+  <li>Console log <code>HTTP POST ... → 4xx/5xx</code> → check server side</li>
+</ul>
+
+<h3>Q3. Snowplow side thiếu event nhưng Portal có</h3>
+<ul>
+  <li>Schema chưa register trên Iglu registry → Snowplow tracker drop event</li>
+  <li>Helper gọi <code>snowplow?.trackingClickEvent</code> hay <code>UniTrack.track</code> trực tiếp? Cách 2 bypass Snowplow (xem 6.2)</li>
+  <li><code>cfg.snowplow.enabled</code> phải <code>true</code> trong JSON</li>
+</ul>
+
+<h3>Q4. user_id null trong session</h3>
+<ul>
+  <li>FPT Life iOS từ tag 0.3.43 đã wire <code>UniTrack.identify()</code> trong <code>restoreCachedIdentity()</code> → call ở bootstrap, user_id restore ngay sau load JSON</li>
+  <li>Verify <code>UserDefaults</code> / <code>SharedPreferences</code> có <code>FSDKTracking.cachedUsername</code></li>
+  <li>Sau login phải gọi <code>FSDKTracking.identify(...)</code> để persist + fire UniTrack.identify</li>
+</ul>
+
+<h3>Q5. W3C trace_id không inject vào HTTP outbound</h3>
+<ul>
+  <li>Check <code>cfg.tracing.enabled = true</code> trong JSON (version 56 đã enable)</li>
+  <li>Check <code>cfg.tracing.allowlist_hosts</code> chứa host anh đang gọi</li>
+  <li>App nếu dùng Alamofire/OkHttp custom session phải đảm bảo dùng <code>URLSessionConfiguration.default</code> hoặc init AFTER UniTrack.initialize</li>
+  <li>iOS console: tìm log <code>[W3C] inject host=...</code> hoặc <code>[W3C] skip host=...</code></li>
+</ul>
+
+<h3>Q6. Build fail "duplicate class UniTrack" trên Android</h3>
+<div class="panel warn">Xảy ra khi host link CẢ Flutter plugin <code>unitrack</code> lẫn native <code>unitrack-sdk:unitrack</code>. Fix: set <code>unitrack.skipVendor=true</code> trong <code>gradle.properties</code> → plugin sẽ skip vendor binary.</div>
+
+<h3>Q7. Trace_id native + Flutter HTTP không link</h3>
+<p>Default 2 layer mint trace_id riêng. Để bridge: dùng <code>UniTrackHttpClient</code> wrap Dart HTTP (từ unitrack pub.dev 1.2.x). Native swizzler URLProtocol tự inject cho HTTP qua URLSession.</p>
+
+<hr style="margin: 40px 0; border: none; border-top: 1px solid var(--line)">
+
+<p class="sub" style="text-align:center">
+  Repo: <code>github.com/sieuvitdet/unitrack-sdk</code> ·
+  iOS SPM: <code>github.com/sieuvitdet/unitrack-ios-package</code> ·
+  Portal: <code>mobix.asia</code>
+</p>
+
+</div>
+</body>
+</html>
