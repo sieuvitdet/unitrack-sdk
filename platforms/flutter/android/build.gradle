@@ -1,5 +1,5 @@
 group 'com.unitrack.flutter'
-version '1.2.1'
+version '1.3.0'
 
 buildscript {
     repositories {
@@ -105,6 +105,14 @@ dependencies {
     // supply. Khi skipVendor=false, vendored source đã cung cấp class này nên
     // dòng dưới được lookup qua sourceSets, không kéo Maven.
     if (skipVendor) {
-        compileOnly 'com.github.sieuvitdet.unitrack-sdk:unitrack:0.3.11'
+        // Pin lockstep với native Android tag mới nhất (cùng tag RN dùng). Bump
+        // từ 0.3.11 → 0.3.37 vì Flutter plugin reference các API thêm sau 0.3.11:
+        // takeRecoveredCrashJsonForFlutter, pendingProviderRetryCount,
+        // attachFirebaseAdapter(Application), applicationContext,
+        // getRemoteBoolean/Int/Long/Double/String, pendingEventCounts,
+        // onFlushCompleted, sessionScreenCount, sessionHadError/Crash,
+        // incrementScreenCount, markSession*, resetSessionStats. Host app
+        // co-resident phải bring ≥0.3.37.
+        compileOnly 'com.github.sieuvitdet.unitrack-sdk:unitrack:0.3.37'
     }
 }
