@@ -3,8 +3,10 @@ jdk:
 
 # The Android SDK lives under platforms/android/, not the repo root. JitPack
 # defaults to `./gradlew install` at the root — we redirect to the right place
-# and publish the :unitrack, :unitrack-firebase, :unitrack-snowplow modules to
-# the local Maven repo that JitPack hosts under the resulting tag.
+# and publish the :unitrack + :unitrack-snowplow modules to the local Maven
+# repo that JitPack hosts under the resulting tag. (`:unitrack-firebase` was
+# removed in 677a999 — Firebase Analytics mirror moved into the built-in
+# FirebaseAdapter, so there's no separate module to publish anymore.)
 #
 # Step 1 (fetch_sqlite.sh): the SQLite amalgamation source is gitignored
 # (~10 MB, gets regenerated per upstream release). JitPack clones the tag
@@ -14,4 +16,4 @@ jdk:
 install:
   - bash scripts/fetch_sqlite.sh
   - cd platforms/android
-  - ./gradlew :unitrack:publishToMavenLocal :unitrack-firebase:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -x test
+  - ./gradlew :unitrack:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -x test
