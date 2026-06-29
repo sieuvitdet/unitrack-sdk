@@ -290,11 +290,73 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
         // crash khi gọi — registerLayer đã đủ cho dedup baseline.
         case "claimSubtree", "releaseSubtree":
             result(nil)
+
+        // ── Co-resident defaults ────────────────────────────────────────────
+        // Các method dưới chưa có ObjC bridge trong native SPM (@objc_
+        // counterpart không tồn tại). Trả default an toàn để Dart facade
+        // không crash / không thấy null. Khi native SPM thêm bridge, em
+        // sẽ route qua HostProxy như các method ở trên.
+
+        // Offline queue snapshot: native sở hữu SQLite, plugin không biết.
+        // Trả empty map — debug overlay sẽ hiện "0 pending" thay vì exception.
+        case "pendingEventCounts":
+            UniTrackPluginLog.info("co-resident: pendingEventCounts → native owns queue, returning empty map")
+            result([String: Int]())
+
+        // Provider retry queue cũng owned bởi native — trả 0.
+        case "pendingProviderRetryCount":
+            UniTrackPluginLog.info("co-resident: pendingProviderRetryCount → native owns providers, returning 0")
+            result(0)
+
+        // Firebase adapter attach: native phải attach từ host code (FPT Life
+        // host gọi UniTrack.attachFirebaseAdapter() trực tiếp). Return false
+        // để Dart UI hiển thị "Firebase not attached via plugin" và app tự
+        // gọi native API nếu cần.
+        case "attachFirebaseAdapter":
+            UniTrackPluginLog.info("co-resident: attachFirebaseAdapter → host phải attach qua native API; returning false")
+            result(false)
+
+        // applicationContext bag được native build từ device info — không
+        // share qua bridge. Trả empty map để Snowplow/Firebase Dart providers
+        // tự fallback (chúng đã handle empty bag).
+        case "applicationContext":
+            UniTrackPluginLog.info("co-resident: applicationContext → native owns device bag, returning empty map")
+            result([String: Any]())
+
+        // Remote config: native sở hữu portal config snapshot. Trả default
+        // (đã được Dart pass kèm) — Dart-side getRemoteValue<T> sẽ cast về T.
+        // Type hint "bool" → false; "int" → 0; "double" → 0.0; else "" .
+        case "getRemoteValue":
+            let kind = (args["type"] as? String) ?? "string"
+            UniTrackPluginLog.info("co-resident: getRemoteValue('\(kind)') → native owns config, returning typed default")
+            switch kind {
+            case "bool":   result(false)
+            case "int":    result(0)
+            case "double": result(0.0)
+            default:       result("")
+            }
+
+        // Session-stat sidebag: native maintains screen_count/had_error/had_crash
+        // ở session-level. Plugin trả default đọc (0/false) và no-op cho write
+        // — native sẽ track giùm vì autoCapture đã bật.
+        case "sessionScreenCount":
+            UniTrackPluginLog.info("co-resident: sessionScreenCount → native tracks via autoCapture, returning 0")
+            result(0)
+        case "sessionHadError", "sessionHadCrash":
+            UniTrackPluginLog.info("co-resident: \(call.method) → native tracks via autoCapture, returning false")
+            result(false)
+        case "incrementScreenCount", "markSessionError", "markSessionCrash", "resetSessionStats":
+            UniTrackPluginLog.info("co-resident: \(call.method) → native owns session stats, no-op")
+            result(nil)
+
+        // Flush callback subscription: native worker thread đã có riêng
+        // callback registry; plugin's controller stream sẽ rỗng. Đánh dấu
+        // no-op để Dart code path không nhận MissingPluginException.
+        case "setFlushCallbackEnabled":
+            UniTrackPluginLog.info("co-resident: setFlushCallbackEnabled → native owns flush callbacks, no-op")
+            result(nil)
+
         default:
-            // Mọi method khác (pendingEventCounts, attachFirebaseAdapter,
-            // applicationContext, …) chưa wire qua ObjC bridge. Trả không
-            // implemented để Dart side fallback hành vi cũ. Sẽ mở rộng khi
-            // có nhu cầu thực tế.
             UniTrackPluginLog.warn("co-resident: method '\(call.method)' chưa bridge → not implemented")
             result(FlutterMethodNotImplemented)
         }
