@@ -38,21 +38,20 @@ public enum UniTrackWebView {
     }()
 
     private static func swizzleLoad() {
-        let cls: AnyClass = WKWebView.self
-        let original = #selector(WKWebView.load(_:))
-        let replacement = #selector(WKWebView.ut_load(_:))
-        guard let m1 = class_getInstanceMethod(cls, original),
-              let m2 = class_getInstanceMethod(cls, replacement) else { return }
-        method_exchangeImplementations(m1, m2)
+        // Idempotent — see SwizzleHelper. Without this, a second module
+        // installing the same swap would un-swizzle and webview_open would
+        // stop firing silently.
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: WKWebView.self,
+            original: #selector(WKWebView.load(_:)),
+            replacement: #selector(WKWebView.ut_load(_:)))
     }
 
     private static func swizzleInit() {
-        let cls: AnyClass = WKWebView.self
-        let original = #selector(WKWebView.init(frame:configuration:))
-        let replacement = #selector(WKWebView.init(ut_frame:configuration:))
-        guard let m1 = class_getInstanceMethod(cls, original),
-              let m2 = class_getInstanceMethod(cls, replacement) else { return }
-        method_exchangeImplementations(m1, m2)
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: WKWebView.self,
+            original: #selector(WKWebView.init(frame:configuration:)),
+            replacement: #selector(WKWebView.init(ut_frame:configuration:)))
     }
 
     /// JavaScript injected at document start into every WKWebView. Idempotent

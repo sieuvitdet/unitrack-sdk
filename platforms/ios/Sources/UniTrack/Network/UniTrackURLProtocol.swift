@@ -199,14 +199,14 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
     }
 
     // Inject UniTrackURLProtocol into URLSessionConfiguration.default by
-    // swizzling the class method `default`.
+    // swizzling the class method `default`. Routed through SwizzleHelper so a
+    // second install attempt (host app + co-resident plugin both installing)
+    // becomes a no-op instead of un-swapping back to the unhooked default.
     private static func swizzleDefaultSessionConfiguration() {
-        let cls: AnyClass = URLSessionConfiguration.self
-        let sel1 = NSSelectorFromString("defaultSessionConfiguration")
-        let sel2 = #selector(URLSessionConfiguration.ut_defaultSessionConfiguration)
-        guard let m1 = class_getClassMethod(cls, sel1),
-              let m2 = class_getClassMethod(cls, sel2) else { return }
-        method_exchangeImplementations(m1, m2)
+        SwizzleHelper.swizzleClassMethod(
+            cls: URLSessionConfiguration.self,
+            original: NSSelectorFromString("defaultSessionConfiguration"),
+            replacement: #selector(URLSessionConfiguration.ut_defaultSessionConfiguration))
     }
 }
 

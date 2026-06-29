@@ -74,7 +74,10 @@ Thumbs.db
 # Backend
 backend/ingest.db*
 
-# Vendored C core copy for the CocoaPods build (regenerate with platforms/ios/sync_core.sh)
+# Legacy CocoaPods CoreVendor/ scratch dir (no longer used — core is now
+# committed under platforms/ios/Sources/UniTrackCore/). Kept in the ignore list
+# so a stale local directory left over from older checkouts can't accidentally
+# get committed.
 platforms/ios/CoreVendor/
 
 # SPM build cache (regenerated)
