@@ -22,10 +22,14 @@ let package = Package(
         .package(url: "https://github.com/snowplow/snowplow-ios-tracker.git", from: "6.0.0"),
     ],
     targets: [
-        // C/C++ core, vendored as real source files (copied from the monorepo's
-        // core/ — not a symlink, so this package is self-contained when cloned
-        // over SPM). SPM compiles the .cpp into the framework. Only include/
-        // is exposed publicly (the ABI-stable C header).
+        // C/C++ core, vendored as REAL committed source files (no symlinks —
+        // SPM rejects symlinks that escape the package root, and CocoaPods'
+        // lint sandbox can't see the monorepo's top-level core/ either). The
+        // copy under Sources/UniTrackCore/{src,include/unitrack} mirrors the
+        // monorepo's core/ layout 1:1; refresh it via platforms/ios/sync_core.sh
+        // whenever the C core changes. SPM compiles the .cpp into the
+        // framework. Only include/unitrack/unitrack.h is exposed publicly
+        // (the ABI-stable C header that every binding consumes).
         .target(
             name: "UniTrackCore",
             path: "Sources/UniTrackCore",

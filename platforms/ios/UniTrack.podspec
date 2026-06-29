@@ -16,23 +16,22 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '13.0'
   s.swift_versions = ['5.7']
 
-  # The C++ core is vendored into CoreVendor/ as REAL files by sync_core.sh
-  # (CocoaPods won't follow the SPM symlink out of the pod root). All paths stay
-  # inside this podspec's dir so they work with `:path => '../platforms/ios'`.
-  # Run platforms/ios/sync_core.sh before `pod install`.
-  s.prepare_command = 'bash sync_core.sh'
+  # The C/C++ core is vendored as REAL committed files inside
+  # Sources/UniTrackCore/ (same layout SPM uses) so `pod lib lint` works in a
+  # sandbox WITHOUT needing access to the monorepo's top-level core/ directory.
+  # Developers refresh the vendored copy via sync_core.sh before committing
+  # (manual, not at install time) — see that script for details.
   s.source_files = [
     'Sources/UniTrack/**/*.swift',
-    'Sources/UniTrackCore/include/unitrack.h',
-    'CoreVendor/src/**/*.{cpp,h}',
-    'CoreVendor/include/unitrack/*.h'
+    'Sources/UniTrackCore/src/**/*.{cpp,h}',
+    'Sources/UniTrackCore/include/unitrack/*.h'
   ]
-  s.public_header_files = 'Sources/UniTrackCore/include/unitrack.h'
+  s.public_header_files = 'Sources/UniTrackCore/include/unitrack/unitrack.h'
 
   s.libraries = 'sqlite3', 'c++'
   s.pod_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY' => 'libc++',
-    'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/CoreVendor/include" "$(PODS_TARGET_SRCROOT)/CoreVendor/src"'
+    'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/Sources/UniTrackCore/include" "$(PODS_TARGET_SRCROOT)/Sources/UniTrackCore/src"'
   }
 end

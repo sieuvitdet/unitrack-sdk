@@ -30,12 +30,12 @@ public enum UniTrackOpenURL {
     }
 
     private static let installOnce: Void = {
-        let cls: AnyClass = UIApplication.self
-        let original = #selector(UIApplication.open(_:options:completionHandler:))
-        let replacement = #selector(UIApplication.ut_open(_:options:completionHandler:))
-        guard let m1 = class_getInstanceMethod(cls, original),
-              let m2 = class_getInstanceMethod(cls, replacement) else { return }
-        method_exchangeImplementations(m1, m2)
+        // Idempotent — see SwizzleHelper. Two modules calling install()
+        // independently should land one swap, not zero.
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: UIApplication.self,
+            original: #selector(UIApplication.open(_:options:completionHandler:)),
+            replacement: #selector(UIApplication.ut_open(_:options:completionHandler:)))
     }()
 
     /// Classify a URL's scheme into a target tag. Public so external code
