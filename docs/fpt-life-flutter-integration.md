@@ -39,10 +39,10 @@ void main() async {
   // KHÔNG cần gọi UniTrack.initialize() — native iOS đã init rồi
   // (FSDKTracking.bootstrap() bên Swift). Flutter side chỉ piggyback
   // qua MethodChannel để dùng cùng C core + session_id.
-
-  // Bắt buộc: register layer để native swizzler biết Flutter có mặt
-  // và yield subtree khi user push Flutter route
-  await UniTrackLayerRegistry.register(UniTrackLayer.flutter);
+  //
+  // Layer registration (báo cho native swizzler biết Flutter có mặt và
+  // yield subtree khi user push Flutter route) là TỰ ĐỘNG bên trong
+  // `UniTrack.instance.initialize(...)` — không cần app gọi tay.
 
   runApp(
     UniTrackTapObserver(                       // ← wrap toàn app
@@ -115,7 +115,9 @@ ElevatedButton(
 ## Câu hỏi thường gặp
 
 **Q: Flutter SDK + Native SDK cùng init có conflict không?**
-A: Không. C core là singleton trong process. `UniTrackLayerRegistry.register` chỉ ghi bitmask. `UniTrack.initialize()` ở Dart side là no-op nếu native đã init.
+A: Không. C core là singleton trong process. Layer registry chỉ ghi bitmask
+(native và Dart side cùng đăng ký qua MethodChannel, idempotent).
+`UniTrack.instance.initialize()` ở Dart side là no-op nếu native đã init.
 
 **Q: Sao không inject UniTrack Dart vào App.xcframework từ phía iOS?**
 A: Bất khả — Flutter compile Dart thành snapshot AOT trong xcframework. Phải sửa source Dart + rebuild.

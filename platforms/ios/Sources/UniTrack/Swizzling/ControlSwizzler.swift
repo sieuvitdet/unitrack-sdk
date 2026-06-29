@@ -20,12 +20,14 @@ import ObjectiveC.runtime
 
 enum ControlSwizzler {
     static let installed: Void = {
-        let cls = UIApplication.self
-        guard let m1 = class_getInstanceMethod(cls,
-                #selector(UIApplication.sendAction(_:to:from:for:))),
-              let m2 = class_getInstanceMethod(cls,
-                #selector(UIApplication.ut_sendAction(_:to:from:for:))) else { return }
-        method_exchangeImplementations(m1, m2)
+        // Idempotent swizzle: try class_addMethod first so a SECOND call (from
+        // another module / host SDK that linked us twice) becomes a no-op
+        // instead of un-swizzling via method_exchangeImplementations. Pattern
+        // mirrors ViewControllerSwizzler — see that file for the full rationale.
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: UIApplication.self,
+            original: #selector(UIApplication.sendAction(_:to:from:for:)),
+            replacement: #selector(UIApplication.ut_sendAction(_:to:from:for:)))
     }()
 
     static func install() { _ = installed }

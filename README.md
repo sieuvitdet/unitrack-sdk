@@ -54,7 +54,6 @@ unitrack-sdk/
 │   └── release.sh         master pipeline
 │
 ├── tests/                 C++ test runner
-├── examples/              one-file integration samples
 └── .github/workflows/     CI matrix
 ```
 
@@ -67,12 +66,13 @@ cmake --build build/host -j
 ./build/host/tests/unitrack_tests
 ```
 
-Expected: `28 passed, 0 failed`.
+Expected: all 14 host-machine unit tests pass. See `tests/core_tests.cpp` for
+the test list.
 
 ## Build platform artifacts
 
 ```bash
-./scripts/release.sh 1.0.0
+./scripts/release.sh 1.2.0
 ```
 
 Skips toolchains not installed locally. Outputs go to `dist/`:

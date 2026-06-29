@@ -2,6 +2,12 @@
 
 ## 1.3.0 — 2026-06-29
 
+Cross-binary integration release + removal of the `unitrack_firebase`
+helper package. Khi 1 process iOS / Android host CẢ native UniTrack SDK
+(qua SPM / Maven) lẫn Flutter plugin (qua pub.dev), giờ chỉ còn 1 singleton
+— cùng `session_id`, cùng SQLite, cùng provider list — thay vì 2 SDK song
+song không join được ở Portal.
+
 ### Removed: `unitrack_firebase` package
 Firebase Analytics mirror is now provided exclusively by the built-in
 `FirebaseAdapter` (reflection-based, lives in the core `unitrack` plugin).
@@ -9,6 +15,49 @@ Host apps need to keep `firebase_core` + `firebase_analytics` declared, then
 call `UniTrack.instance.attachFirebaseAdapter()` once at bootstrap. The
 separate `unitrack_firebase` plugin has been removed from the SDK monorepo
 and will be unpublished from pub.dev.
+
+### Added
+
+- **iOS `UniTrackHostProxy` (co-resident routing)** — plugin Swift detect
+  native `UniTrack.UniTrack` qua `NSClassFromString` ở runtime. Nếu có →
+  mọi `track / setScreen / identify / reset / flush / setEnabled /
+  currentSessionId / sessionIndex / previousSessionId / rotateSession /
+  registerLayer / setScreenForLayer` forward qua `@objc` bridge (`objc_*`
+  selector) vào singleton native. Plugin KHÔNG init module-local
+  `UniTrack` ở mode này → zero duplicate singleton / SQLite / session_id.
+  Co-resident defaults cho các API chưa có ObjC bridge
+  (`pendingEventCounts`, `applicationContext`, `getRemoteValue`,
+  session-stat sidebag, Firebase attach, flush callback) — Dart facade
+  nhận default an toàn (empty map / false / 0 / typed-default) thay vì
+  `MissingPluginException`.
+- **Android `unitrack_sdk/` vendored core + sqlite into Flutter plugin** —
+  CMake self-contained, không reference root `core/` ngoài monorepo.
+  Consumer apps trên pub.dev không cần kéo core/ riêng; pod tự build JNI
+  shared library từ vendored source. Co-resident mode (`unitrack.skipVendor=true`
+  trong `gradle.properties`) skip vendor + đổi sang `compileOnly` để host
+  app supply native UniTrack Maven runtime singleton (tránh Gradle
+  duplicate class error khi 2 SDK cùng FQN `com.unitrack.sdk.UniTrack`).
+- **`UniTrackHttpClient` Dart facade** — wrapper `http.BaseClient` auto-
+  inject `traceparent` header theo Portal `traceContext.allowlistHosts`
+  + auto-emit `network_request` event với cùng `trace_id`. Apps muốn
+  W3C distributed tracing cross-binding không phải code interceptor tay.
+
+### Fixed
+
+- **`platforms/flutter/ios/sync_native.sh`** atomic-swap. Trước đây script
+  `rm -rf Native/` rồi `cp -R` — interrupt giữa chừng (Ctrl-C, build agent
+  killed) để lại partial tree → `flutter pub publish` ship archive thiếu
+  file, consumer apps Xcode crash "Cannot find 'UniTrack' in scope". Giờ
+  copy vào `Native.new/` rồi `rm -rf Native && mv Native.new Native` — 1
+  syscall replace, interrupt bất kỳ điểm nào cũng KHÔNG corrupt working tree.
+  Áp dụng cùng pattern cho `Classes/include/unitrack.h`.
+- **Android `compileOnly` co-resident pin** bump `0.3.11 → 0.3.37` để khớp
+  với native Android tag mới nhất (cùng tag React Native pin). Flutter
+  plugin reference 12 API thêm sau 0.3.11 (`takeRecoveredCrashJsonForFlutter`,
+  `pendingProviderRetryCount`, `applicationContext`, `getRemoteBoolean/Int/Long/
+  Double/String`, `pendingEventCounts`, `onFlushCompleted`, session-stat
+  sidebag, `attachFirebaseAdapter(Application)`) — host app co-resident pre-
+  0.3.37 sẽ compile fail. Pin trong build.gradle reflect requirement này.
 
 ## 1.2.1 — 2026-06-23
 

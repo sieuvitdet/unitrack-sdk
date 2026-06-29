@@ -144,12 +144,14 @@ object UniTrack {
     }
 
     /**
-     * Per-event Log of what flows through UniTrack/Snowplow/Firebase. Default ON
-     * so integrators see traffic immediately while wiring the SDK up; flip to OFF
-     * (UniTrack.verboseLogging = false) before shipping a release build.
+     * Per-event Log of what flows through UniTrack/Snowplow/Firebase. Default OFF
+     * because verbose logs include event payload bodies (FirebaseProvider's
+     * mirrorToPortal logs the JSON body), which leak PII in release builds.
+     * Integrators wiring up the SDK can opt-in with `UniTrack.verboseLogging = true`
+     * (typically guarded by BuildConfig.DEBUG on the app side).
      */
     @JvmField
-    var verboseLogging: Boolean = true
+    var verboseLogging: Boolean = false
 
     /**
      * Resolved event name fired by ActivityTracker's fragment lifecycle hook

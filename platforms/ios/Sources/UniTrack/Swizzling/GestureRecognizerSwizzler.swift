@@ -26,12 +26,13 @@ import ObjectiveC.runtime
 
 enum GestureRecognizerSwizzler {
     static let installed: Void = {
-        let cls: AnyClass = UIGestureRecognizer.self
-        guard let m1 = class_getInstanceMethod(cls,
-                #selector(setter: UIGestureRecognizer.state)),
-              let m2 = class_getInstanceMethod(cls,
-                #selector(UIGestureRecognizer.ut_setState(_:))) else { return }
-        method_exchangeImplementations(m1, m2)
+        // Idempotent — see SwizzleHelper. The static-let initializer only fires
+        // once per module, but two co-resident modules can each fire it; the
+        // helper ensures the second attempt is a no-op rather than an un-swap.
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: UIGestureRecognizer.self,
+            original: #selector(setter: UIGestureRecognizer.state),
+            replacement: #selector(UIGestureRecognizer.ut_setState(_:)))
     }()
 
     static func install() { _ = installed }

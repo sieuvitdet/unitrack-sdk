@@ -105,7 +105,7 @@
 </h1>
 
 <div class="meta">
-  <b>Áp dụng cho:</b> FPT Life iOS (UniTrack 0.3.36+), Android Native, MobiX Flutter có wire foreground re-fetch.<br>
+  <b>Áp dụng cho:</b> FPT Life iOS (UniTrack 0.3.36+) và Android Native. <b>MobiX Flutter</b> chưa wire — foreground re-fetch / SSE đang plan cho <span class="mono">unitrack 1.2.2</span>, hiện tại Flutter chỉ pickup config mới sau cold start.<br>
   <b>Cơ chế hot reload:</b> SSE stream (<span class="mono">/config/stream</span>) hoặc <span class="mono">onAppForeground</span> throttle 5'. Khi save Portal → SDK fetch lại → <span class="mono">FSDKTracking.start(remote:)</span> chạy lại → re-wire providers.<br>
   <b>Ngày cập nhật:</b> 24/06/2026
 </div>

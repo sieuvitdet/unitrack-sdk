@@ -11,31 +11,20 @@ import ObjectiveC.runtime
 
 enum ViewControllerSwizzler {
     static let installed: Void = {
-        swizzle(cls: UIViewController.self,
-                from: #selector(UIViewController.viewDidLoad),
-                to:   #selector(UIViewController.ut_viewDidLoad))
-        swizzle(cls: UIViewController.self,
-                from: #selector(UIViewController.viewDidAppear(_:)),
-                to:   #selector(UIViewController.ut_viewDidAppear(_:)))
+        // Idempotent install via SwizzleHelper — see that file for why the
+        // `class_addMethod` first / `method_exchangeImplementations` fallback
+        // pattern is the only one that survives a second install attempt.
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: UIViewController.self,
+            original: #selector(UIViewController.viewDidLoad),
+            replacement: #selector(UIViewController.ut_viewDidLoad))
+        SwizzleHelper.swizzleInstanceMethod(
+            cls: UIViewController.self,
+            original: #selector(UIViewController.viewDidAppear(_:)),
+            replacement: #selector(UIViewController.ut_viewDidAppear(_:)))
     }()
 
     static func install() { _ = installed }
-
-    private static func swizzle(cls: AnyClass, from sel1: Selector, to sel2: Selector) {
-        guard let m1 = class_getInstanceMethod(cls, sel1),
-              let m2 = class_getInstanceMethod(cls, sel2) else { return }
-
-        let added = class_addMethod(cls, sel1,
-                                    method_getImplementation(m2),
-                                    method_getTypeEncoding(m2))
-        if added {
-            class_replaceMethod(cls, sel2,
-                                method_getImplementation(m1),
-                                method_getTypeEncoding(m1))
-        } else {
-            method_exchangeImplementations(m1, m2)
-        }
-    }
 }
 
 private var utLoadStartKey: UInt8 = 0

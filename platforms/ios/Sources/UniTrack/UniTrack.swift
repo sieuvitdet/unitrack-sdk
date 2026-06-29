@@ -539,6 +539,16 @@ public final class UniTrack {
             id: id, endpoint: endpoint, format: format,
             headers: headers, batchSize: batchSize, flushInterval: flushInterval
         ))
+        // Mirror the init-time guard at initialize() — the URLProtocol's
+        // exclude list is built ONCE from config.endpoint at startup, but Portal
+        // hot-config can introduce NEW provider endpoints at runtime. Without
+        // this append, the SDK's own upload to the new endpoint would be
+        // intercepted as network_request → forwarded → intercepted → … . The
+        // append is idempotent inside UniTrackURLProtocol (duplicates are
+        // dropped), so calling it on every replace is safe.
+        if let host = endpoint.host, !host.isEmpty {
+            UniTrackURLProtocol.excludeURL(containing: host)
+        }
     }
 
     // ── W3C distributed tracing ────────────────────────────────────────────
