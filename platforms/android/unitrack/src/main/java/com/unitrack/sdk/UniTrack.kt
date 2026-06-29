@@ -551,14 +551,51 @@ object UniTrack {
 
     @JvmStatic
     fun identify(userId: String, traits: Map<String, Any?> = emptyMap()) {
+        // Cache cho customTrack(includeUser=true) stamp vào payload. App đã
+        // hash PII trước khi gọi identify — SDK chỉ stamp, không tự hash.
+        synchronized(identityLock) { identifiedUserId = userId }
         forEachProvider { it.setUser(userId, traits) }
         if (initialized) NativeBridge.identify(userId, JSONObject(traits).toString())
     }
 
     @JvmStatic
     fun reset() {
+        synchronized(identityLock) { identifiedUserId = null }
         forEachProvider { it.setUser(null, emptyMap()) }
         if (initialized) NativeBridge.reset()
+    }
+
+    private val identityLock = Any()
+    @Volatile private var identifiedUserId: String? = null
+
+    /**
+     * Custom event API — DEV gọi 1 dòng, SDK stamp `session_id` + `user_id`
+     * (nếu includeUser) + forward qua provider fan-out + core HTTP queue.
+     *
+     * 2 pattern phổ biến:
+     * 1. **1 schema = 1 action**: `customTrack("banner_clicked", data = ...)`
+     * 2. **1 schema = nhiều action**: `customTrack("payment_event",
+     *    action = "payment_completed", data = ...)`
+     *
+     * @param eventName tên event = Iglu schema name (snake_case).
+     * @param action giá trị `event_action` field. null → SDK dùng eventName.
+     * @param data map field tự do.
+     * @param includeUser true → stamp `user_id` từ `UniTrack.identify()` đã set.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun customTrack(eventName: String,
+                    action: String? = null,
+                    data: Map<String, Any?> = emptyMap(),
+                    includeUser: Boolean = false) {
+        val payload = data.toMutableMap()
+        payload["event_action"] = action ?: eventName
+        payload["session_id"]   = currentSessionId()
+        if (includeUser) {
+            val uid = synchronized(identityLock) { identifiedUserId }
+            if (!uid.isNullOrEmpty()) payload["user_id"] = uid
+        }
+        track(eventName, payload)
     }
 
     // ── Session API (iOS parity) ───────────────────────────────────────────

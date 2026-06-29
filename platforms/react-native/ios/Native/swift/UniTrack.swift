@@ -56,6 +56,12 @@ public final class UniTrack {
     public static let shared = UniTrack()
 
     private var context: OpaquePointer?
+
+    /// Internal read-only handle to the core context, used by sibling files in
+    /// the SDK (LayerRegistry, NativeScreenChannel…). Returns nil until
+    /// initialize() succeeds. NOT public — bindings should call high-level
+    /// APIs (LayerRegistry.register, setScreen, …) instead.
+    static var coreContext: OpaquePointer? { shared.context }
     private let coldStartAt = Date()
     private(set) public var isInitialized = false
 
@@ -96,6 +102,11 @@ public final class UniTrack {
     private let lastScreenLock = NSLock()
     private var lastScreen: String?
     private var lastScreenAt: Date?
+
+    // Cached user_id từ identify() — customTrack(includeUser:true) đọc lại
+    // stamp vào payload. SDK chỉ store value app đưa (app đã hash PII rồi).
+    private let identityLock = NSLock()
+    private var identifiedUserId: String?
 
     // Wire-event names for the screen boundary pair, sourced from
     // Config.screenStartEvent / screenEndEvent (typically set from portal
@@ -374,7 +385,7 @@ public final class UniTrack {
     /// Drop every registered provider. Call this before re-adding providers
     /// when the host re-reads portal config (vd flavor switch, SSE-driven
     /// realtime refresh). Without it, a re-init would leave the OLD
-    /// SnowplowProvider/FirebaseProvider in the fan-out list alongside the
+    /// SnowplowProvider/FirebaseAdapter in the fan-out list alongside the
     /// new one and every event would land twice — once at the old endpoint,
     /// once at the new one.
     public static func removeAllProviders() {
@@ -555,6 +566,11 @@ public final class UniTrack {
         shared.tracingHeaderName  = headerName.isEmpty ? "traceparent" : headerName
         shared.tracingAllowlist   = allowlistHosts
         shared.tracingSampledFlag = sampled
+        UniTrackURLProtocol.configureTracing(enabled: enabled,
+                                             headerName: headerName.isEmpty ? "traceparent" : headerName,
+                                             allowlistHosts: allowlistHosts,
+                                             sampled: sampled)
+        NSLog("[W3C] setTracing enabled=\(enabled) hosts=\(allowlistHosts.count) header=\(headerName)")
     }
 
     /// Snapshot the URLProtocol reads on each outbound request. Internal so
@@ -580,6 +596,12 @@ public final class UniTrack {
     }
 
     public static func identify(userId: String, traits: [String: Any] = [:]) {
+        // Cache cho customTrack(includeUser:true) stamp vào payload. App đã hash
+        // PII bên ngoài rồi truyền hashed value vào identify() — SDK chỉ stamp,
+        // không tự hash.
+        shared.identityLock.lock()
+        shared.identifiedUserId = userId
+        shared.identityLock.unlock()
         forEachProvider { $0.setUser(userId, traits) }
         guard let ctx = shared.context else { return }
         ut_identify(ctx, userId,
@@ -587,12 +609,74 @@ public final class UniTrack {
     }
 
     public static func reset() {
+        shared.identityLock.lock()
+        shared.identifiedUserId = nil
+        shared.identityLock.unlock()
         forEachProvider { $0.setUser(nil, [:]) }
         guard let ctx = shared.context else { return }
         ut_reset(ctx)
     }
 
+    /// Custom event API — DEV gọi 1 dòng, SDK stamp `session_id` + `user_id`
+    /// (nếu includeUser) + forward qua provider fan-out + core HTTP queue.
+    ///
+    /// 2 pattern phổ biến:
+    /// 1. **1 schema = 1 action**: `customTrack("banner_clicked", data: [...])`
+    /// 2. **1 schema = nhiều action**: `customTrack("payment_event",
+    ///    action: "payment_completed", data: [...])`
+    ///
+    /// - Parameters:
+    ///   - eventName: tên event = Iglu schema name (snake_case).
+    ///   - action: giá trị `event_action` field. nil → SDK dùng eventName.
+    ///   - data: dict field tự do.
+    ///   - includeUser: true → stamp `user_id` từ `UniTrack.identify()` đã set.
+    public static func customTrack(_ eventName: String,
+                                   action: String? = nil,
+                                   data: [String: Any] = [:],
+                                   includeUser: Bool = false) {
+        var payload: [String: Any] = data
+        payload["event_action"] = action ?? eventName
+        payload["session_id"]   = UniTrack.currentSessionId()
+        if includeUser {
+            shared.identityLock.lock()
+            let uid = shared.identifiedUserId
+            shared.identityLock.unlock()
+            if let uid = uid, !uid.isEmpty { payload["user_id"] = uid }
+        }
+        track(eventName, properties: payload)
+    }
+
     public static func track(_ event: String, properties: [String: Any] = [:]) {
+        track(event, properties: properties, isAuto: false)
+    }
+
+    /// Internal variant. `isAuto=true` được swizzler (control/gesture/screen/
+    /// URLProtocol) dùng khi event được auto-capture. Manual call từ DEV mặc
+    /// định `isAuto=false` → ghi signal vào ManualTrackSignal để arbitrate
+    /// với auto event cùng nhóm trong 200ms tiếp theo.
+    internal static func track(_ event: String,
+                               properties: [String: Any] = [:],
+                               isAuto: Bool) {
+        // Manual track signal: DEV gọi UniTrack.track() trực tiếp → ghi signal
+        // theo loại event để swizzler tap/screen/network có thể skip auto fire
+        // ngay sau đó. KHÔNG ghi cho event auto-emitted (tránh tự suppress chính
+        // mình).
+        if !isAuto {
+            switch event {
+            case "click":
+                ManualTrackSignal.recordManual(.click)
+            case "screen_view", "screen_viewed", "screen_exited":
+                ManualTrackSignal.recordManual(.screen)
+            case "network_request":
+                ManualTrackSignal.recordManual(.networkRequest)
+            default:
+                // Generic manual event (vd "purchase_click", "checkout_done")
+                // suy ra DEV đang track quanh moment 1 user tap → ghi click
+                // signal. Heuristic: tên event ko khớp screen/network thì coi
+                // như click. Đủ cho 90% case khách than "trùng tap".
+                ManualTrackSignal.recordManual(.click)
+            }
+        }
         let name = event
         let props = properties
         // Visibility — one line per event so the developer can see what's
@@ -600,8 +684,9 @@ public final class UniTrack {
         // UniTrack.verboseLogging so a release build can mute it.
         if UniTrack.verboseLogging {
             let provNames = shared.providers.map { String(describing: type(of: $0)) }.joined(separator: ",")
-            UniTrack.log("[UniTrack] track event=\"%@\" props=%@ → providers=[%@]",
+            UniTrack.log("[UniTrack] track event=\"%@\" props=%@ auto=%@ → providers=[%@]",
                          name, UniTrack.jsonString(from: props) ?? "{}",
+                         isAuto ? "yes" : "no",
                          provNames.isEmpty ? "(none)" : provNames)
         }
         // Forward to every registered provider (Snowplow, Firebase, …).
@@ -612,11 +697,21 @@ public final class UniTrack {
     }
 
     public static func setScreen(_ name: String) {
+        setScreen(name, layer: nil)
+    }
+
+    /// Layer-tagged variant called by the auto-capture swizzler so core's
+    /// cross-layer dedup can suppress a sibling Flutter/RN SDK firing the
+    /// same screen name within the dedup window. Public API stays the
+    /// untagged overload above — apps that call `setScreen("Home")`
+    /// directly behave exactly as before.
+    static func setScreen(_ name: String, layer: UniTrackLayer?) {
         // Trace so a "screen_viewed/screen_exited not firing" bug is one log
         // line away from a diagnosis. The core dedupes by screen-name equality
         // (same name twice in a row = no boundary events), so the next line
         // confirms the boundary path was even reached on the C++ side.
-        UniTrack.log("[UniTrack] setScreen → name=%@ (calls core ut_set_screen which fires screen_start/screen_view/screen_end)", name)
+        UniTrack.log("[UniTrack] setScreen → name=%@ layer=%@ (calls core ut_set_screen_for_layer which fires screen_start/screen_view/screen_end)",
+                     name, layer.map { String(describing: $0) } ?? "none")
         forEachProvider { $0.setScreen(name) }
         // Snapshot previous screen + transition timestamp on the binding side
         // so the boundary fan-out below can build matching screen_exited /
@@ -639,7 +734,16 @@ public final class UniTrack {
         shared.lastScreenLock.unlock()
 
         guard let ctx = shared.context else { return }
-        ut_set_screen(ctx, name)
+        if let layer = layer {
+            ut_set_screen_for_layer(ctx, name, ut_layer(rawValue: layer.rawValue))
+        } else {
+            ut_set_screen(ctx, name)
+        }
+        // Reverse-direction reverse channel: announce the new native screen
+        // to any cross-platform SDK in the process so its currentScreen (used
+        // for tap attribution) stays in sync without it racing the swizzler.
+        // No-op when no cross-platform layer is registered.
+        NativeScreenChannel.broadcast(screen: name, from: layer ?? .iOSNative)
 
         // Fan-out boundary events to providers. Match the field names the
         // core emits (screen / screen_name / dwell_ms / foreground_sec /
@@ -694,6 +798,32 @@ public final class UniTrack {
     /// the SDK never captures-and-re-forwards its own analytics traffic.
     public static func excludeFromNetworkCapture(urlContaining substring: String) {
         UniTrackURLProtocol.excludeURL(containing: substring)
+    }
+
+    // MARK: - Manual tracking arbitration
+
+    /// Báo cho SDK biết DEV vừa fire 1 manual event THẲNG qua provider khác
+    /// (Firebase Analytics, Snowplow, Countly …) BYPASS UniTrack.track().
+    /// SDK dùng signal này để skip auto-capture trùng trong window 200ms
+    /// (tap/screen) hoặc 500ms (network). Gọi NGAY trước/sau khi log
+    /// manual để arbitration đúng.
+    ///
+    /// Ví dụ:
+    ///   @objc func buyTapped() {
+    ///       UniTrack.recordManualSignal(.click)
+    ///       Analytics.logEvent("purchase_click", parameters: ...)
+    ///   }
+    ///
+    /// Nếu DEV chỉ dùng UniTrack.track() (không bypass), KHÔNG cần gọi —
+    /// signal được ghi tự động trong public track().
+    public static func recordManualSignal(_ kind: ManualTrackKind) {
+        ManualTrackSignal.recordManual(kind)
+    }
+
+    /// Master toggle. Default ON. Tắt khi muốn cả manual + auto cùng fire
+    /// (vd debug / migration period). KHÔNG persist — reset mỗi launch.
+    public static func setManualArbitration(_ enabled: Bool) {
+        ManualTrackSignal.enabled = enabled
     }
 
     // MARK: - Semantic events (Phase 3)
@@ -761,6 +891,71 @@ public final class UniTrack {
         return Trace(traceId: traceId, spanId: spanId, header: header)
     }
 
+    // MARK: - ObjC bridge for cross-binary singleton sharing
+    //
+    // Khi 1 process iOS host CẢ native UniTrack (SPM/Pod, module "UniTrack")
+    // VÀ Flutter unitrack plugin (xcframework, module "unitrack"), 2 binary
+    // mặc định không share singleton dù tên class trùng. Plugin Flutter dùng
+    // UniTrackHostProxy gọi qua ObjC runtime → vô đây → chính singleton native.
+    //
+    // Tất cả là class methods @objc-exposed, signature ObjC-compatible
+    // (NSString, NSNumber, JSON string). Không break Swift API hiện có.
+
+    @objc public static func objc_track(_ name: String, propertiesJson: String) {
+        let data = propertiesJson.data(using: .utf8) ?? Data()
+        let props = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        track(name, properties: props ?? [:], isAuto: false)
+    }
+
+    @objc public static func objc_setScreen(_ name: String) {
+        setScreen(name)
+    }
+
+    @objc public static func objc_setScreen(_ name: String, layer: NSNumber) {
+        let raw = UInt32(layer.uint32Value)
+        setScreen(name, layer: UniTrackLayer(rawValue: raw))
+    }
+
+    @objc public static func objc_identify(_ userId: String, traitsJson: String) {
+        let data = traitsJson.data(using: .utf8) ?? Data()
+        let traits = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        identify(userId: userId, traits: traits ?? [:])
+    }
+
+    @objc public static func objc_reset()  { reset() }
+    @objc public static func objc_flush()  { flush() }
+
+    @objc public static func objc_setEnabled(_ enabled: NSNumber) {
+        setEnabled(enabled.boolValue)
+    }
+
+    @objc public static func objc_currentSessionId() -> NSString {
+        return currentSessionId() as NSString
+    }
+
+    @objc public static func objc_sessionIndex() -> NSNumber {
+        return NSNumber(value: sessionIndex())
+    }
+
+    @objc public static func objc_previousSessionId() -> NSString {
+        return previousSessionId() as NSString
+    }
+
+    @objc public static func objc_rotateSession() { rotateSession() }
+
+    @objc public static func objc_registerLayer(_ layer: NSNumber) {
+        let raw = UInt32(layer.uint32Value)
+        if let l = UniTrackLayer(rawValue: raw) {
+            LayerRegistry.register(l)
+        }
+    }
+
+    @objc public static func objc_recordManualSignal(_ kind: NSNumber) {
+        if let k = ManualTrackKind(rawValue: kind.intValue) {
+            recordManualSignal(k)
+        }
+    }
+
     // MARK: - Internal
 
     var contextHandle: OpaquePointer? { context }
@@ -792,6 +987,14 @@ public final class UniTrack {
             return
         }
         ut_set_log_level(context, ut_log_level(rawValue: UInt32(config.logLevel.rawValue)))
+
+        // Cross-language layer registry: announce this binding so a sibling
+        // Flutter/RN SDK in the same process can detect us via active_layers
+        // and route screen-boundary events through cross-layer dedup. The
+        // dedup window default is 250 ms — set it explicitly here so the
+        // intent is one grep away from the swizzler that relies on it.
+        LayerRegistry.register(.iOSNative)
+        LayerRegistry.setScreenDedupWindow(ms: 250)
 
         // Seed the session-stat snapshot so AppLifecycleObserver + apps see
         // the right values immediately (vs racing the first background event).

@@ -103,6 +103,11 @@ public final class UniTrack {
     private var lastScreen: String?
     private var lastScreenAt: Date?
 
+    // Cached user_id từ identify() — customTrack(includeUser:true) đọc lại
+    // stamp vào payload. SDK chỉ store value app đưa (app đã hash PII rồi).
+    private let identityLock = NSLock()
+    private var identifiedUserId: String?
+
     // Wire-event names for the screen boundary pair, sourced from
     // Config.screenStartEvent / screenEndEvent (typically set from portal
     // sdk_config.screen_start_event / screen_end_event). Default to the
@@ -591,6 +596,12 @@ public final class UniTrack {
     }
 
     public static func identify(userId: String, traits: [String: Any] = [:]) {
+        // Cache cho customTrack(includeUser:true) stamp vào payload. App đã hash
+        // PII bên ngoài rồi truyền hashed value vào identify() — SDK chỉ stamp,
+        // không tự hash.
+        shared.identityLock.lock()
+        shared.identifiedUserId = userId
+        shared.identityLock.unlock()
         forEachProvider { $0.setUser(userId, traits) }
         guard let ctx = shared.context else { return }
         ut_identify(ctx, userId,
@@ -598,9 +609,41 @@ public final class UniTrack {
     }
 
     public static func reset() {
+        shared.identityLock.lock()
+        shared.identifiedUserId = nil
+        shared.identityLock.unlock()
         forEachProvider { $0.setUser(nil, [:]) }
         guard let ctx = shared.context else { return }
         ut_reset(ctx)
+    }
+
+    /// Custom event API — DEV gọi 1 dòng, SDK stamp `session_id` + `user_id`
+    /// (nếu includeUser) + forward qua provider fan-out + core HTTP queue.
+    ///
+    /// 2 pattern phổ biến:
+    /// 1. **1 schema = 1 action**: `customTrack("banner_clicked", data: [...])`
+    /// 2. **1 schema = nhiều action**: `customTrack("payment_event",
+    ///    action: "payment_completed", data: [...])`
+    ///
+    /// - Parameters:
+    ///   - eventName: tên event = Iglu schema name (snake_case).
+    ///   - action: giá trị `event_action` field. nil → SDK dùng eventName.
+    ///   - data: dict field tự do.
+    ///   - includeUser: true → stamp `user_id` từ `UniTrack.identify()` đã set.
+    public static func customTrack(_ eventName: String,
+                                   action: String? = nil,
+                                   data: [String: Any] = [:],
+                                   includeUser: Bool = false) {
+        var payload: [String: Any] = data
+        payload["event_action"] = action ?? eventName
+        payload["session_id"]   = UniTrack.currentSessionId()
+        if includeUser {
+            shared.identityLock.lock()
+            let uid = shared.identifiedUserId
+            shared.identityLock.unlock()
+            if let uid = uid, !uid.isEmpty { payload["user_id"] = uid }
+        }
+        track(eventName, properties: payload)
     }
 
     public static func track(_ event: String, properties: [String: Any] = [:]) {
