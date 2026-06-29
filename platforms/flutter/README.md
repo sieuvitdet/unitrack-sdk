@@ -12,7 +12,7 @@ queue, session journey tracking, and W3C trace propagation.
 - 🧭 **W3C trace context** — opt-in `traceparent` injection on outbound HTTP for
   backend correlation.
 - 🪝 **Provider fan-out** — every event is forwarded to optional providers
-  (`unitrack_snowplow`, `unitrack_firebase`, custom).
+  (`unitrack_snowplow`, built-in Firebase Analytics adapter, custom).
 - 📱 **Per-platform** — Swift on iOS, Kotlin on Android, C++ core inside both.
 
 ## Install
@@ -113,7 +113,7 @@ final sub = UniTrack.instance.onFlushCompleted((counts) {
 Resolve runtime flags / strings without a rebuild. Order:
 
 1. Portal `sdk_config.custom_values[key]` (operator-edited)
-2. Firebase Remote Config (via `unitrack_firebase`)
+2. Firebase Remote Config (if host app links Firebase + calls `UniTrack.instance.attachFirebaseAdapter()`)
 3. Caller's `defaultValue`
 
 ```dart
@@ -134,13 +134,15 @@ UniTrack.instance.setTracing(
 
 ## Provider fan-out
 
-Send the same events to Snowplow + Firebase by adding provider packages:
+Send the same events to Snowplow + Firebase. Snowplow is a separate package;
+Firebase Analytics mirror is built-in via reflection — host app links Firebase
+itself, SDK has zero Firebase dependency.
 
 ```yaml
 dependencies:
   unitrack: ^1.0.0
   unitrack_snowplow: ^1.0.0   # optional
-  unitrack_firebase: ^1.0.0   # optional
+  # firebase_core + firebase_analytics — provided by host app
 ```
 
 ```dart

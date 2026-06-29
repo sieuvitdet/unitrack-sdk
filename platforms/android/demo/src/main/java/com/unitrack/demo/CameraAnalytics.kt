@@ -56,12 +56,11 @@ object CameraAnalytics {
             Log.w("CameraAnalytics", "Snowplow provider init skipped: ${t.message}")
         }
 
-        // Firebase — left out of the demo because the Android FirebaseProvider
-        // uses FirebaseAnalytics.getInstance(), which needs a google-services.json
-        // and the google-services Gradle plugin. To enable it:
-        //   1. add `implementation project(':unitrack-firebase')` to build.gradle
-        //   2. apply the google-services plugin + drop in google-services.json
-        //   3. here:  if (cfg.firebase.optBoolean("enabled")) UniTrack.addProvider(FirebaseProvider())
+        // Firebase Analytics mirror — host app provides google-services.json
+        // + google-services Gradle plugin → FirebaseAnalytics auto-init →
+        // 1 dòng `UniTrack.attachFirebaseAdapter(app)` để stamp session_id
+        // vào mọi event Firebase. Adapter dùng reflection, không cần module
+        // riêng.
 
         // (Phase 2 rewrite-rule wiring removed — superseded by the convention
         // layer which routes raw event names → kinds → schemas in the

@@ -13,8 +13,7 @@ offline queue, session journey tracking, and W3C trace propagation.
   backend correlation.
 - 🪝 **Provider fan-out** — every event forwarded to optional providers
   ([`@unitrack/snowplow`](https://www.npmjs.com/package/@unitrack/snowplow),
-  [`@unitrack/firebase`](https://www.npmjs.com/package/@unitrack/firebase),
-  custom).
+  built-in Firebase Analytics adapter, custom).
 - 📱 **Per-platform** — Swift on iOS, Kotlin on Android, C++ core inside both.
 
 ## Install
@@ -85,7 +84,7 @@ const sub = UniTrack.onFlushCompleted((counts) => {
 Resolve runtime flags / strings without a rebuild. Order:
 
 1. Portal `sdk_config.custom_values[key]` (operator-edited)
-2. Firebase Remote Config (via `@unitrack/firebase`)
+2. Firebase Remote Config (if host app links Firebase + calls `UniTrack.attachFirebaseAdapter()`)
 3. Caller's defaultValue
 
 ```ts
@@ -114,16 +113,19 @@ import { UniTrackRouteObserver } from '@unitrack/react-native';
 
 ## Provider fan-out
 
+Snowplow is a separate npm package. Firebase Analytics mirror is built-in via
+reflection — host app links Firebase itself, SDK has zero Firebase dependency.
+
 ```ts
 import { UniTrack } from '@unitrack/react-native';
 import { SnowplowProvider } from '@unitrack/snowplow';
-import { FirebaseProvider } from '@unitrack/firebase';
 
 UniTrack.addProvider(new SnowplowProvider({
   endpoint: 'https://collector.your-app.com',
   appId: 'mobile-app',
 }));
-UniTrack.addProvider(new FirebaseProvider());
+// Host app: install @react-native-firebase/analytics + google-services config
+await UniTrack.attachFirebaseAdapter();
 await UniTrack.initialize(apiKey);
 ```
 

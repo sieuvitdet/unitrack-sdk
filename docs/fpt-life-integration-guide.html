@@ -15,8 +15,14 @@
     --ok: #16a34a;
     --warn: #d97706;
     --danger: #dc2626;
-    --code-bg: #1e293b;
-    --code-text: #e2e8f0;
+    --code-bg: #1f1f24;
+    --code-text: #ffffff;
+    --code-keyword: #ff7ab2;
+    --code-string:  #ff8170;
+    --code-comment: #6c7986;
+    --code-type:    #5dd8ff;
+    --code-fn:      #67b7a4;
+    --code-num:     #d0bf69;
     --tag-ios: #007aff;
     --tag-android: #34d399;
   }
@@ -53,6 +59,14 @@
     margin: 12px 0;
   }
   pre code { background: transparent; color: inherit; padding: 0; }
+  /* Xcode Dark — syntax tokens for Swift / Kotlin / JSON code blocks */
+  pre .kw { color: var(--code-keyword); }
+  pre .str { color: var(--code-string); }
+  pre .cm  { color: var(--code-comment); font-style: italic; }
+  pre .ty  { color: var(--code-type); }
+  pre .fn  { color: var(--code-fn); }
+  pre .num { color: var(--code-num); }
+  pre .key { color: #75b6c5; }    /* JSON keys */
   .tag {
     display: inline-block; padding: 2px 8px; border-radius: 999px;
     font-size: 11px; font-weight: 600; letter-spacing: .4px;
@@ -167,35 +181,35 @@
 
 <h3>2.2 JSON config</h3>
 <p>SDK cấu hình dựa trên file JSON đặt trong app bundle:</p>
-<pre><code>FPTLife/FSDKTracking/PortalConfigFallback.json</code></pre>
+<pre><code>FPTLife/FSDKTracking/trackingConfig.json</code></pre>
 
 <p>File này phải được add vào Xcode target <strong>FPTLife → Build Phases → Copy Bundle Resources</strong>. Verify:</p>
-<pre><code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code></pre>
+<pre><code>grep trackingConfig FPTLife.xcodeproj/project.pbxproj</code></pre>
 <p>Phải thấy 4 dòng (PBXBuildFile + PBXFileReference + group + Copy Resources).</p>
 
 <h3>2.3 Bootstrap trong AppDelegate</h3>
-<pre><code>import UniTrack
+<pre><code><span class="kw">import</span> <span class="ty">UniTrack</span>
 
-func application(_ application: UIApplication,
-                 didFinishLaunchingWithOptions launchOptions: ...) -&gt; Bool {
-    FSDKTracking.bootstrap {
-        FSDKTracking.sessionStarted()
-        // Optional: kiểm tra notification permission
-        self.checkNotificationPermission()
+<span class="kw">func</span> <span class="fn">application</span>(<span class="kw">_</span> application: <span class="ty">UIApplication</span>,
+                 didFinishLaunchingWithOptions launchOptions: ...) -&gt; <span class="ty">Bool</span> {
+    <span class="ty">FSDKTracking</span>.<span class="fn">bootstrap</span> {
+        <span class="ty">FSDKTracking</span>.<span class="fn">sessionStarted</span>()
+        <span class="cm">// Optional: kiểm tra notification permission</span>
+        <span class="kw">self</span>.<span class="fn">checkNotificationPermission</span>()
     }
-    // UNUserNotificationCenter delegate wrap để auto-capture notification clicks
-    let center = UNUserNotificationCenter.current()
-    center.delegate = UniTrackNotifications.wrap(center.delegate)
-    return true
+    <span class="cm">// UNUserNotificationCenter delegate wrap để auto-capture notification clicks</span>
+    <span class="kw">let</span> center = <span class="ty">UNUserNotificationCenter</span>.<span class="fn">current</span>()
+    center.delegate = <span class="ty">UniTrackNotifications</span>.<span class="fn">wrap</span>(center.delegate)
+    <span class="kw">return</span> <span class="kw">true</span>
 }
 
-func applicationDidEnterBackground(_ application: UIApplication) {
-    FSDKTracking.sessionEnded(reason: "backgrounded")
-    UniTrack.flush()
+<span class="kw">func</span> <span class="fn">applicationDidEnterBackground</span>(<span class="kw">_</span> application: <span class="ty">UIApplication</span>) {
+    <span class="ty">FSDKTracking</span>.<span class="fn">sessionEnded</span>(reason: <span class="str">"backgrounded"</span>)
+    <span class="ty">UniTrack</span>.<span class="fn">flush</span>()
 }
 
-func applicationWillEnterForeground(_ application: UIApplication) {
-    FSDKTracking.sessionStarted()
+<span class="kw">func</span> <span class="fn">applicationWillEnterForeground</span>(<span class="kw">_</span> application: <span class="ty">UIApplication</span>) {
+    <span class="ty">FSDKTracking</span>.<span class="fn">sessionStarted</span>()
 }</code></pre>
 
 <!-- ============== ANDROID SETUP ============== -->
@@ -209,8 +223,7 @@ unitrack = "0.3.11"
 
 [libraries]
 unitrack          = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack",          version.ref = "unitrack" }
-unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-snowplow", version.ref = "unitrack" }
-unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-firebase", version.ref = "unitrack" }</code></pre>
+unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-snowplow", version.ref = "unitrack" }</code></pre>
 
 <p><code>settings.gradle</code> — add Jitpack repo:</p>
 <pre><code>dependencyResolutionManagement {
@@ -225,33 +238,30 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 <pre><code>dependencies {
     implementation libs.unitrack
     implementation libs.unitrack.snowplow
-    implementation libs.unitrack.firebase
 }</code></pre>
 
 <h3>3.2 JSON config</h3>
 <p>SDK cấu hình dựa trên file JSON đặt trong assets:</p>
-<pre><code>app/src/main/assets/portal_config_fallback.json</code></pre>
+<pre><code>app/src/main/assets/tracking_config.json</code></pre>
 <p>Android tự động pick từ <code>assets/</code> — không cần khai báo build.gradle.</p>
 
 <h3>3.3 Bootstrap trong Application</h3>
-<pre><code>class FPTLifeApp : Application() {
-    override fun onCreate() {
-        super.onCreate()
+<pre><code><span class="kw">class</span> <span class="ty">FPTLifeApp</span> : <span class="ty">Application</span>() {
+    <span class="kw">override fun</span> <span class="fn">onCreate</span>() {
+        <span class="kw">super</span>.<span class="fn">onCreate</span>()
 
-        FSDKTracking.bootstrap(
-            app       = this,
-            apiKey    = BuildConfig.FSDK_TRACKING_API_KEY,
-            configURL = BuildConfig.FSDK_TRACKING_CONFIG_URL,
-            flavor    = BuildConfig.FLAVOR
+        <span class="ty">FSDKTracking</span>.<span class="fn">bootstrap</span>(
+            app    = <span class="kw">this</span>,
+            flavor = <span class="ty">BuildConfig</span>.FLAVOR
         ) {
-            FSDKTracking.sessionStarted()
+            <span class="ty">FSDKTracking</span>.<span class="fn">sessionStarted</span>()
         }
     }
 }</code></pre>
 
 <p>Đăng ký <code>FPTLifeApp</code> trong <code>AndroidManifest.xml</code>:</p>
 <pre><code>&lt;application
-    android:name=".FPTLifeApp"
+    android:name=<span class="str">".FPTLifeApp"</span>
     ... /&gt;</code></pre>
 
 <!-- ============== JSON CONFIG ============== -->
@@ -260,55 +270,73 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 
 <p>File JSON định nghĩa toàn bộ runtime config: ingest endpoint, Snowplow provider, sdk_config (batch / sampling / auto-capture), tracing W3C. Đường dẫn:</p>
 <ul>
-  <li><span class="tag tag-ios">iOS</span> <code>FPTLife/FSDKTracking/PortalConfigFallback.json</code></li>
-  <li><span class="tag tag-android">Android</span> <code>app/src/main/assets/portal_config_fallback.json</code></li>
+  <li><span class="tag tag-ios">iOS</span> <code>FPTLife/FSDKTracking/trackingConfig.json</code></li>
+  <li><span class="tag tag-android">Android</span> <code>app/src/main/assets/tracking_config.json</code></li>
 </ul>
 
 <h3>4.1 Schema</h3>
 <pre><code>{
-  "version": 56,
-  "endpoint": "https://ingest.example.com/events",
+  <span class="key">"version"</span>: <span class="num">56</span>,
+  <span class="key">"endpoint"</span>: <span class="str">""</span>,                          <span class="cm">// để rỗng — FPT Life forward 100% qua Snowplow</span>
+  <span class="key">"pii_salt"</span>: <span class="str">"fe04...3886"</span>,
 
-  "snowplow": {
-    "enabled": true,
-    "endpoint": "https://ftracking.fpt.vn",
-    "appId": "fpt-life-fli",
-    "namespace": "FPTLife",
-    "iglu_vendor": "vn.fpt.ftel.snowplow",
-    "default_version": "1-0-0",
-    "options": {
-      "base64Encoding": true,
-      "platformContext": true,
-      "applicationContext": true,
-      "sessionContext": true,
-      "screenContext": true,
-      "lifecycleAutotracking": true,
-      "screenViewAutotracking": false
+  <span class="key">"snowplow"</span>: {
+    <span class="key">"enabled"</span>: <span class="kw">true</span>,
+    <span class="key">"endpoint"</span>: <span class="str">"https://ftracking.fpt.vn"</span>,
+    <span class="key">"appId"</span>: <span class="str">"fpt-life-fli"</span>,
+    <span class="key">"namespace"</span>: <span class="str">"FPTLife"</span>,
+    <span class="key">"iglu_vendor"</span>: <span class="str">"vn.fpt.ftel.snowplow"</span>,
+    <span class="key">"default_version"</span>: <span class="str">"1-0-0"</span>,
+    <span class="key">"options"</span>: {
+      <span class="key">"base64Encoding"</span>: <span class="kw">true</span>,
+      <span class="key">"platformContext"</span>: <span class="kw">true</span>,
+      <span class="key">"applicationContext"</span>: <span class="kw">true</span>,
+      <span class="key">"sessionContext"</span>: <span class="kw">true</span>,
+      <span class="key">"screenContext"</span>: <span class="kw">true</span>,
+      <span class="key">"lifecycleAutotracking"</span>: <span class="kw">false</span>,
+      <span class="key">"screenEngagementAutotracking"</span>: <span class="kw">true</span>,
+      <span class="key">"screenViewAutotracking"</span>: <span class="kw">false</span>
     }
   },
 
-  "firebase": { "enabled": true },
+  <span class="key">"firebase"</span>: { <span class="key">"enabled"</span>: <span class="kw">true</span> },
 
-  "sdk_config": {
-    "batchSize": 10,
-    "flushIntervalMs": 3000,
-    "samplingRate": 1.0,
-    "autoCapture": true,
-    "trackScreens": true,
-    "trackTaps": true,
-    "trackNetwork": false,
-    "logLevel": "info"
+  <span class="key">"sdk_config"</span>: {
+    <span class="key">"batchSize"</span>: <span class="num">10</span>,
+    <span class="key">"flushIntervalMs"</span>: <span class="num">3000</span>,
+    <span class="key">"samplingRate"</span>: <span class="num">1.0</span>,
+    <span class="key">"autoCapture"</span>: <span class="kw">true</span>,
+    <span class="key">"trackScreens"</span>: <span class="kw">true</span>,
+    <span class="key">"trackTaps"</span>: <span class="kw">true</span>,
+    <span class="key">"trackNetwork"</span>: <span class="kw">false</span>,
+    <span class="key">"logLevel"</span>: <span class="str">"warn"</span>
   },
 
-  "tracing": {
-    "enabled": true,
-    "header_name": "traceparent",
-    "sampled": true,
-    "allowlist_hosts": [
-      "api-fptlife-beta.fcam.vn",
-      "api-fptlife-beta.fptsmarthome.vn",
-      "beta-api-gateway.fcam.vn"
+  <span class="key">"tracing"</span>: {
+    <span class="key">"enabled"</span>: <span class="kw">true</span>,
+    <span class="key">"header_name"</span>: <span class="str">"traceparent"</span>,
+    <span class="key">"sampled"</span>: <span class="kw">true</span>,
+    <span class="key">"allowlist_hosts"</span>: [
+      <span class="str">"api-fptlife.fcam.vn"</span>,
+      <span class="str">"api-gateway.fcam.vn"</span>
     ]
+  },
+
+  <span class="cm">// 4.4 — per-flavor override</span>
+  <span class="key">"flavors"</span>: {
+    <span class="key">"beta"</span>: {
+      <span class="key">"sdk_config"</span>: { <span class="key">"logLevel"</span>: <span class="str">"debug"</span> },
+      <span class="key">"tracing"</span>: {
+        <span class="key">"allowlist_hosts"</span>: [
+          <span class="str">"api-fptlife-beta.fcam.vn"</span>,
+          <span class="str">"beta-api-gateway.fcam.vn"</span>
+        ]
+      }
+    },
+    <span class="key">"uat"</span>: {
+      <span class="key">"sdk_config"</span>: { <span class="key">"logLevel"</span>: <span class="str">"debug"</span> },
+      <span class="key">"tracing"</span>: { <span class="key">"allowlist_hosts"</span>: [<span class="str">"api-fptlife-uat.fcam.vn"</span>] }
+    }
   }
 }</code></pre>
 
@@ -316,7 +344,7 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 <table>
   <thead><tr><th>Field</th><th>Ý nghĩa</th></tr></thead>
   <tbody>
-    <tr><td><code>endpoint</code></td><td>URL ingest cho core HTTP queue gửi event lên BE</td></tr>
+    <tr><td><code>endpoint</code></td><td>URL ingest cho core HTTP queue. FPT Life để rỗng — event forward 100% qua <code>snowplow.endpoint</code>. Chỉ set khi có BE FPT nội bộ nhận format UniTrack.</td></tr>
     <tr><td><code>snowplow.enabled</code></td><td>Bật/tắt Snowplow provider</td></tr>
     <tr><td><code>snowplow.endpoint</code></td><td>Snowplow collector URL</td></tr>
     <tr><td><code>snowplow.appId</code></td><td>App identifier trên Snowplow side</td></tr>
@@ -336,6 +364,128 @@ unitrack-firebase = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 
 <div class="panel warn">
   <strong>Lưu ý quan trọng:</strong> 2 file JSON iOS + Android phải <strong>identical</strong> để parity. Mỗi lần đổi config, update CẢ HAI file rồi rebuild app.
+</div>
+
+<h3>4.3 Tránh duplicate event giữa UniTrack + Snowplow autotracking</h3>
+
+<p>UniTrack và Snowplow SDK có những lớp swizzler chạy độc lập. Nếu bật cùng lúc các cặp cờ dưới đây, mỗi screen / lifecycle sẽ bắn ra <strong>2 event song song</strong> với event_name khác nhau — BE phải dedupe phía downstream:</p>
+
+<table>
+  <thead>
+    <tr><th>UniTrack flag</th><th>Snowplow flag (trong <code>snowplow.options</code>)</th><th>Hậu quả nếu bật cả hai</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>sdk_config.trackScreens = true</code></td>
+      <td><code>screenViewAutotracking = true</code></td>
+      <td>Mỗi UIViewController appear bắn 2 event:<br>
+        <code>screen_viewed</code> (UniTrack, screen_name strip module prefix) +
+        <code>screen_view</code> (Snowplow, raw class name "MyApp.HomeVC").
+        <strong>Tránh:</strong> giữ <code>screenViewAutotracking = false</code> (mặc định của SDK).</td>
+    </tr>
+    <tr>
+      <td><code>FSDKTracking.sessionStarted()</code> / <code>sessionEnded()</code> manual ở AppDelegate</td>
+      <td><code>lifecycleAutotracking = true</code></td>
+      <td>App foreground/background bắn 2 event:<br>
+        <code>session_started</code> / <code>session_ended</code> (FSDKTracking manual) +
+        <code>application_foreground</code> / <code>application_background</code> (Snowplow).
+        Khác event_name nên không phải duplicate cứng, nhưng cùng nhịp lifecycle gây nhiễu phân tích.
+        <strong>Tránh:</strong> giữ <code>lifecycleAutotracking = false</code> khi đã wire FSDKTracking.sessionStarted/Ended.</td>
+    </tr>
+    <tr>
+      <td><code>sdk_config.trackScreens = true</code></td>
+      <td>DEV tự gọi <code>UniTrack.setScreen(...)</code> trong <code>viewDidAppear</code></td>
+      <td>UniTrack swizzler tự bắn screen + DEV bắn thủ công → 2 <code>screen_viewed</code>.
+        SDK có <strong>manual arbitration</strong> (window 200ms) sẽ tự suppress auto khi DEV manual track,
+        nhưng chỉ có hiệu lực trên iOS từ 0.3.36.
+        <strong>Tránh:</strong> chọn 1 trong 2 — auto swizzler HOẶC manual setScreen, không trộn.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="panel ok">
+  <strong>Config mặc định của FPT Life hiện tại an toàn:</strong> <code>trackScreens = true</code> + <code>screenViewAutotracking</code> không khai báo (default = false) + <code>lifecycleAutotracking = false</code> → 0 duplicate. Khi update JSON, đừng bật <code>screenViewAutotracking</code> hay <code>lifecycleAutotracking</code> nếu chưa rõ hậu quả.
+</div>
+
+<h3>4.4 Override theo flavor (dev / beta / uat / prod)</h3>
+
+<p>Base config trong file JSON là <strong>config prod</strong>. Khi app chạy build khác prod, SDK đọc thêm block <code>flavors.&lt;currentFlavor&gt;</code> và <strong>deep-merge override vào base</strong> (đệ quy không giới hạn cấp). Array trong override thay thế hoàn toàn array base, không concat. Nhờ deep merge, anh có thể override tới mọi cấp con: <code>flavors.beta.snowplow.ios.endpoint</code> chỉ thay 1 field này mà <code>snowplow.options.*</code>, <code>snowplow.event_names.*</code>, <code>snowplow.android.*</code>... vẫn giữ giá trị base.</p>
+
+<h4>Flavor mapping giữa app code và JSON key</h4>
+<table>
+  <thead><tr><th>Platform</th><th>Source</th><th>Giá trị flavor đẩy vào SDK</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag tag-ios">iOS</span></td><td><code>EnvManager.shared.env.rawValue</code> (từ <code>APP_ENV</code> Info.plist)</td><td><code>dev</code> / <code>beta</code> / <code>uat</code> / <code>prod</code></td></tr>
+    <tr><td><span class="tag tag-android">Android</span></td><td><code>BuildConfig.FCAM_ENV</code> (build-logic convention)</td><td><code>beta</code> / <code>prod</code></td></tr>
+  </tbody>
+</table>
+
+<h4>Quy tắc merge</h4>
+<table>
+  <thead><tr><th>Loại field</th><th>Hành vi</th></tr></thead>
+  <tbody>
+    <tr><td>Scalar (string/number/bool) ở bất kỳ cấp nào</td><td>override scalar replace base scalar</td></tr>
+    <tr><td>Nested object (vd <code>sdk_config</code>, <code>tracing</code>, <code>snowplow</code>, <code>snowplow.ios</code>, <code>snowplow.options</code>)</td><td><strong>deep merge đệ quy</strong> — chỉ key có trong override mới thay, key khác giữ nguyên base</td></tr>
+    <tr><td>Array (vd <code>allowlist_hosts</code>, <code>http_providers</code>)</td><td><strong>thay thế hoàn toàn</strong>, KHÔNG concat. Muốn giữ host base thì copy lại trong override.</td></tr>
+    <tr><td>Flavor không có trong block <code>flavors</code></td><td>SDK dùng base config y nguyên + log <code>flavor=X không có override, dùng base config</code></td></tr>
+  </tbody>
+</table>
+
+<h4>Ví dụ effective config khi build beta</h4>
+<pre><code><span class="cm">// 1. SDK behaviour</span>
+<span class="cm">// base.sdk_config.logLevel = "warn"</span>
+<span class="cm">// flavors.beta.sdk_config.logLevel = "debug"</span>
+<span class="cm">// → effective sdk_config.logLevel = "debug"</span>
+<span class="cm">// → effective sdk_config.batchSize = 10 (giữ base vì beta không override)</span>
+
+<span class="cm">// 2. Snowplow collector — override sâu tới snowplow.ios.endpoint</span>
+<span class="cm">// base.snowplow.endpoint = "https://ftracking.fpt.vn"</span>
+<span class="cm">// base.snowplow.appId   = "505"</span>
+<span class="cm">// base.snowplow.options.base64Encoding = true</span>
+<span class="cm">// flavors.beta.snowplow.endpoint   = "https://ftracking-beta.fpt.vn"</span>
+<span class="cm">// flavors.beta.snowplow.appId      = "505-beta"</span>
+<span class="cm">// flavors.beta.snowplow.ios.endpoint = "https://ftracking-beta.fpt.vn"</span>
+<span class="cm">// flavors.beta.snowplow.ios.appId    = "505-beta"</span>
+<span class="cm">// → effective snowplow.endpoint = "https://ftracking-beta.fpt.vn"</span>
+<span class="cm">// → effective snowplow.ios.endpoint = "https://ftracking-beta.fpt.vn"</span>
+<span class="cm">// → effective snowplow.options.base64Encoding = true   (giữ base vì beta không nhắc)</span>
+<span class="cm">// → effective snowplow.event_names.* = base values     (giữ base hoàn toàn)</span>
+
+<span class="cm">// 3. Tracing — array replace hoàn toàn</span>
+<span class="cm">// base.tracing.allowlist_hosts        = ["api-fptlife.fcam.vn", ...]</span>
+<span class="cm">// flavors.beta.tracing.allowlist_hosts = ["api-fptlife-beta.fcam.vn", ...]</span>
+<span class="cm">// → effective allowlist_hosts = ["api-fptlife-beta.fcam.vn", ...]   (KHÔNG concat)</span>
+
+<span class="cm">// 4. Tắt Snowplow ở dev chỉ với 1 dòng:</span>
+<span class="cm">// flavors.dev.snowplow.enabled = false  → dev không gửi event lên collector</span></code></pre>
+
+<h4>Sample <code>flavors</code> block thực tế</h4>
+<pre><code><span class="key">"flavors"</span>: {
+  <span class="key">"beta"</span>: {
+    <span class="key">"sdk_config"</span>: { <span class="key">"logLevel"</span>: <span class="str">"debug"</span> },
+    <span class="key">"snowplow"</span>: {
+      <span class="key">"endpoint"</span>: <span class="str">"https://ftracking-beta.fpt.vn"</span>,
+      <span class="key">"appId"</span>: <span class="str">"505-beta"</span>,
+      <span class="key">"ios"</span>:     { <span class="key">"endpoint"</span>: <span class="str">"https://ftracking-beta.fpt.vn"</span>, <span class="key">"appId"</span>: <span class="str">"505-beta"</span> },
+      <span class="key">"android"</span>: { <span class="key">"endpoint"</span>: <span class="str">"https://ftracking-beta.fpt.vn"</span>, <span class="key">"appId"</span>: <span class="str">"505-beta"</span> }
+    },
+    <span class="key">"tracing"</span>: {
+      <span class="key">"allowlist_hosts"</span>: [
+        <span class="str">"api-fptlife-beta.fcam.vn"</span>,
+        <span class="str">"beta-api-gateway.fcam.vn"</span>
+      ]
+    }
+  },
+  <span class="key">"uat"</span>:  { <span class="cm">/* tương tự beta nhưng host UAT */</span> },
+  <span class="key">"dev"</span>:  {
+    <span class="key">"sdk_config"</span>: { <span class="key">"logLevel"</span>: <span class="str">"debug"</span> },
+    <span class="key">"snowplow"</span>:   { <span class="key">"enabled"</span>: <span class="kw">false</span> },
+    <span class="key">"tracing"</span>:    { <span class="key">"allowlist_hosts"</span>: [] }
+  }
+}</code></pre>
+
+<div class="panel warn">
+  <strong>Đừng dùng <code>flavors</code> để đổi <code>pii_salt</code> theo env.</strong> Mỗi flavor 1 salt = mỗi env hash khác nhau → BE không thể join cross-env. Salt phải <strong>identical</strong> giữa các flavor. Đặt <code>pii_salt</code> ở base config, không bao giờ vào block <code>flavors.*</code>.
 </div>
 
 <!-- ============== BUILT-IN EVENTS ============== -->
@@ -576,6 +726,104 @@ UniTrack.reset()   // clear core session + provider user context</code></pre>
 
 <p>session_id tự stamp vào <strong>mọi event</strong> qua Snowplow + core HTTP → backend có thể filter theo session_id để xem journey 1 user.</p>
 
+<h3>7.4 PII hashing (SHA-256 + salt) — bắt buộc cho user_id / phone_number / user_name</h3>
+
+<div class="panel warn">
+  <strong>CSOC chặn payload chứa số điện thoại / username raw.</strong> Vì FPT Life dùng số điện thoại làm <code>user_id</code>, <strong>SDK phải hash trước khi attach</strong> vào outbound event payload. Hash dùng SHA-256 với <strong>salt cố định</strong> trong <code>trackingConfig.json</code> để chống rainbow-table / brute-force trên không gian phone Việt Nam (~10<sup>9</sup> combination).
+</div>
+
+<h4>Công thức hash</h4>
+<pre><code><span class="kw">hash</span> = <span class="fn">sha256_hex</span>( pii_salt || raw_value )    <span class="cm">// concat string, lowercase 64-char hex output</span></code></pre>
+
+<p>Salt 32-byte (64 hex chars) đọc từ field <code>pii_salt</code> trong <code>trackingConfig.json</code> / <code>tracking_config.json</code>. Cùng salt → cùng hash deterministic → BE vẫn dedup được theo hash.</p>
+
+<h4>Cache 2 tầng</h4>
+<table>
+  <thead><tr><th>Layer</th><th>Storage</th><th>Lifecycle</th></tr></thead>
+  <tbody>
+    <tr><td>In-memory</td><td>Dictionary trong <code>PIIHash</code></td><td>Process — cold start mất</td></tr>
+    <tr><td>Persistent</td><td>iOS <code>UserDefaults</code> · Android <code>SharedPreferences</code> (prefs name <code>FSDKTrackingPIIHash</code>)</td><td>Reset khi logout (qua <code>clearCachedIdentity()</code> iOS / <code>clearIdentity()</code> Android)</td></tr>
+  </tbody>
+</table>
+
+<p>Cache key gồm prefix 8 hex char đầu của <code>sha256(salt)</code> → đổi salt = key namespace đổi → cache cũ tự miss, không cần manual invalidate.</p>
+
+<h4>Chỗ áp dụng hash</h4>
+<table>
+  <thead><tr><th>Call site</th><th>Field bị hash</th></tr></thead>
+  <tbody>
+    <tr><td><code>FSDKTracking.identify(userId:phoneNumber:)</code></td><td>userId, phoneNumber, user_name (= username slot)</td></tr>
+    <tr><td><code>FSDKTracking.applyAuthFromToken(_:)</code> (iOS)</td><td>Auto chạy khi Flutter báo accessToken; parse JWT → identify với phone hashed</td></tr>
+    <tr><td><code>FSDKTracking.restoreCachedIdentity()</code> (iOS)</td><td>userId, phoneNumber, user_name (cold start re-attach)</td></tr>
+    <tr><td><code>baseData(includeUser: true)</code> (iOS) · <code>outboundUserId()</code> (Android)</td><td>user_id trong mọi event payload (session_started, camera_stream_*, error, ...)</td></tr>
+    <tr><td><code>snowplow?.setUser(uid, traits)</code></td><td>user_id + user_context entity attached vào mọi event</td></tr>
+  </tbody>
+</table>
+
+<h4>Output ví dụ</h4>
+
+<pre><code><span class="cm">// trackingConfig.json</span>
+<span class="key">"pii_salt"</span>: <span class="str">"fe0430c4b75ff6ba73552117691ca0aba862a1633e5db6b0c1c8fa6b35203886"</span>
+
+<span class="cm">// raw user input</span>
+phone_number = <span class="str">"0816361617"</span>
+
+<span class="cm">// hash result (đã verify với openssl)</span>
+sha256(salt + phone) = <span class="str">"4a396957c9774848c80f1b5911f1d26e291c6a49a69c39da993e31730ff9b91f"</span></code></pre>
+
+<div class="panel danger">
+  <strong>Đổi salt = mọi user phải re-hash.</strong> Cache cũ tự miss + hash mới khác hash cũ → BE phải bắt đầu join lại theo hash mới. Đừng đổi salt nếu chưa thông báo cho data team.
+</div>
+
+<div class="panel note">
+  <strong>Không reversible (về lý thuyết):</strong> SHA-256 là one-way. Có salt 256-bit → brute-force public không khả thi nữa (attacker không build rainbow table sẵn vì không biết salt). Để link hash với real user, BE phải tự hash số điện thoại từ DB nội bộ (cùng salt) rồi join.
+</div>
+
+<h4>Hand-off cho đội Data</h4>
+
+<p>Khi bàn giao tracking flow cho data engineer / analyst, cung cấp <strong>4 thông tin</strong>:</p>
+
+<table>
+  <thead><tr><th>#</th><th>Item</th><th>Giá trị / nơi lấy</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><strong>Salt value</strong> — secret, gửi qua kênh nội bộ (Slack DM / 1Password, KHÔNG email / chat group)</td>
+      <td>Field <code>pii_salt</code> trong <code>trackingConfig.json</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Công thức hash</strong> — để BE/data team replicate được khi cần join phone DB nội bộ</td>
+      <td><code>sha256_hex(salt + raw_phone)</code>, UTF-8, lowercase hex, no separator giữa salt và raw</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Test vector</strong> — để team self-verify implementation</td>
+      <td>raw <code>"0816361617"</code> với salt fe04…3886 → <code>4a396957c9774848c80f1b5911f1d26e291c6a49a69c39da993e31730ff9b91f</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>Schema impact</strong> — field nào trong Iglu schema bây giờ chứa hash, không chứa raw</td>
+      <td>3 field: <code>user_id</code> + <code>user_name</code> + <code>phone_number</code> trong entity <code>user_context</code> + field <code>user_id</code> trong base event data</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Sample SQL cho data team (BigQuery / Snowflake / Postgres)</h4>
+<pre><code><span class="cm">-- Join event với DB customer để biết hash này là user nào</span>
+<span class="cm">-- (chạy ở phía data warehouse với salt được cấp riêng)</span>
+<span class="kw">WITH</span> hashed_customers <span class="kw">AS</span> (
+  <span class="kw">SELECT</span>
+    customer_id,
+    phone_number,
+    sha256(<span class="str">'fe0430c4b75ff6ba73552117691ca0aba862a1633e5db6b0c1c8fa6b35203886'</span> || phone_number) <span class="kw">AS</span> phone_hash
+  <span class="kw">FROM</span> dim_customer
+)
+<span class="kw">SELECT</span> e.event_name, e.session_id, c.customer_id, c.phone_number
+<span class="kw">FROM</span> fact_events e
+<span class="kw">LEFT JOIN</span> hashed_customers c <span class="kw">ON</span> e.user_id = c.phone_hash
+<span class="kw">WHERE</span> e.event_name = <span class="str">'camera_stream_started'</span>;</code></pre>
+
 <!-- ============== OFFLINE ============== -->
 <div class="anchor-pad" id="offline"></div>
 <h2>8. Offline queue + retry</h2>
@@ -646,9 +894,9 @@ UniTrack.setVerboseLogging(false) // release</code></pre>
 <h3>Q1. Console không thấy log <code>[FSDK] config loaded</code></h3>
 <div class="panel danger">
 <strong>iOS:</strong> Verify file JSON đã add vào Xcode target FPTLife → Build Phases → Copy Bundle Resources. <br>
-Test: <code>grep PortalConfigFallback FPTLife.xcodeproj/project.pbxproj</code> phải thấy 4 dòng.
+Test: <code>grep trackingConfig FPTLife.xcodeproj/project.pbxproj</code> phải thấy 4 dòng.
 <br><br>
-<strong>Android:</strong> Verify file nằm ở <code>app/src/main/assets/portal_config_fallback.json</code> (chữ thường + underscore). KHÔNG đặt ở <code>res/raw</code>.
+<strong>Android:</strong> Verify file nằm ở <code>app/src/main/assets/tracking_config.json</code> (chữ thường + underscore). KHÔNG đặt ở <code>res/raw</code>.
 </div>
 
 <h3>Q2. Event không bay lên BE mà console thấy track</h3>

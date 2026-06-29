@@ -5,7 +5,7 @@
 namespace unitrack {
 
 struct Config {
-    std::string endpoint        = "https://ingest.unitrack.io/v1/events";
+    std::string endpoint        = "";
     std::string api_key;
     std::string db_path         = "unitrack_queue.db";
     int         batch_size      = 50;

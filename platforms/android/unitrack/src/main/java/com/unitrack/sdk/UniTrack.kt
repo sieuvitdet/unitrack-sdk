@@ -67,7 +67,7 @@ object UniTrack {
     //
     // Resolve runtime values in order:
     //   1. Portal sdk_config.custom_values[key] (operator-edited)
-    //   2. Any registered RemoteValueProvider (FirebaseProvider conforms)
+    //   2. Any registered RemoteValueProvider (FirebaseAdapter conforms)
     //   3. Caller's defaultValue
     //
     // Portal first lets ops override Firebase RC without touching the app
@@ -255,7 +255,7 @@ object UniTrack {
     /** Drop every registered provider. Call before re-adding providers when
      *  the host re-reads portal config (vd flavor switch, SSE-driven realtime
      *  refresh). Without it, a re-init would leave the OLD SnowplowProvider /
-     *  FirebaseProvider in the fan-out list alongside the new one and every
+     *  FirebaseAdapter in the fan-out list alongside the new one and every
      *  event would land twice — once at the old endpoint, once at the new
      *  one. Mirrors iOS UniTrack.removeAllProviders(). */
     @JvmStatic
@@ -866,7 +866,7 @@ object UniTrack {
 
     /**
      * Exclude a URL (matched by substring, e.g. a host) from network
-     * auto-capture. Providers (FirebaseProvider, SnowplowProvider) call this
+     * auto-capture. Providers (FirebaseAdapter, SnowplowProvider) call this
      * for their own collector/upload URLs to break the capture-forward-capture
      * cycle.
      */

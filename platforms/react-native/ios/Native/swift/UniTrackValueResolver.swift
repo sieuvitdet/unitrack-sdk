@@ -23,10 +23,10 @@
 import Foundation
 
 /// Conformed by analytics providers that also expose a remote-config bag
-/// (e.g. UniTrackFirebase's FirebaseProvider). The resolver iterates over
-/// every registered provider that conforms and returns the first non-nil hit.
+/// (e.g. built-in FirebaseAdapter). The resolver iterates over every
+/// registered provider that conforms and returns the first non-nil hit.
 ///
-/// Lives in the core UniTrack module (not in UniTrackFirebase) so the
+/// Lives in the core UniTrack module (host app supplies Firebase deps) so the
 /// resolver can refer to the protocol without importing Firebase.
 public protocol RemoteValueProvider: AnyObject {
     /// Look up `key` and return it as `T` if available. Return nil to defer

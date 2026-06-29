@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — 2026-06-29
+
+### Removed: `unitrack_firebase` package
+Firebase Analytics mirror is now provided exclusively by the built-in
+`FirebaseAdapter` (reflection-based, lives in the core `unitrack` plugin).
+Host apps need to keep `firebase_core` + `firebase_analytics` declared, then
+call `UniTrack.instance.attachFirebaseAdapter()` once at bootstrap. The
+separate `unitrack_firebase` plugin has been removed from the SDK monorepo
+and will be unpublished from pub.dev.
+
 ## 1.2.1 — 2026-06-23
 
 ### FirebaseAdapter — stamp session_id qua `setDefaultEventParameters`

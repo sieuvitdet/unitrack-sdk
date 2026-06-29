@@ -25,11 +25,12 @@ enum class ProviderResult {
  * (Snowplow, Firebase, …) or custom HTTP backends (Kibana / ELK / FPT nội bộ).
  *
  * The core `unitrack` module depends on NOTHING third-party. A provider lives
- * in its own module (`unitrack-snowplow`, `unitrack-firebase`) that pulls in
- * the heavy SDK, implements this interface, and is registered by the app:
+ * in its own module (e.g. `unitrack-snowplow`) that pulls in the heavy SDK,
+ * implements this interface, and is registered by the app. Firebase Analytics
+ * mirror sẵn có qua `UniTrack.attachFirebaseAdapter(app)` (reflection-based).
  *
  *     UniTrack.addProvider(SnowplowProvider(endpoint = ..., appId = ...))
- *     UniTrack.addProvider(FirebaseProvider())
+ *     UniTrack.attachFirebaseAdapter(app)   // built-in, không cần module riêng
  *     UniTrack.initialize(app, UniTrackConfig(apiKey = ...))
  *
  * Every event UniTrack captures (manual track() and all auto-capture) is

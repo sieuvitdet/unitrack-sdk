@@ -205,14 +205,14 @@ Same keys are available in Kotlin (`UniTrackConfig`), RN (`UniTrackConfig` type)
 
 ## Optional providers
 
-UniTrack ships two opt-in providers that fan a copy of every event out to a third-party pipeline. Wire them once at init; the rest of the app keeps calling `UniTrack.track(...)`.
+UniTrack ships one opt-in provider package plus a built-in adapter that fan a copy of every event out to a third-party pipeline. Wire them once at init; the rest of the app keeps calling `UniTrack.track(...)`.
 
 | Provider | What it does | When to add |
 |---|---|---|
-| `UniTrackSnowplow` | Forwards events to a Snowplow collector (self-described JSON, atomic schemas, entities). | You already operate a Snowplow pipeline for warehouse-grade analytics. |
-| `UniTrackFirebase` | Mirrors events into **Firebase Analytics** (Console funnels, audiences, BigQuery export). | Marketing already uses Firebase Console and you don't want to maintain two SDKs to feed it. |
+| `UniTrackSnowplow` (separate package) | Forwards events to a Snowplow collector (self-described JSON, atomic schemas, entities). | You already operate a Snowplow pipeline for warehouse-grade analytics. |
+| `FirebaseAdapter` (built-in, reflection) | Mirrors events into **Firebase Analytics** (Console funnels, audiences, BigQuery export). | Marketing already uses Firebase Console and you don't want to maintain two SDKs to feed it. Host app links Firebase itself; SDK has zero Firebase dependency. |
 
-`UniTrackFirebase` is **Analytics-only**. Earlier releases shipped helper façades for Firebase Messaging / Crashlytics / Remote Config; those were removed in `0.4.0` / `1.1.0` to keep this SDK scoped to tracking. Apps that need those Firebase modules wire them directly — UniTrack stays out of the way.
+The Firebase mirror is now provided by the built-in `FirebaseAdapter` (resolves `FIRAnalytics` / `FirebaseAnalytics` via runtime reflection). Earlier releases shipped a separate `UniTrackFirebase` wrapper package; that was removed in `0.4.x` / `1.3.0` so SDK doesn't ship any Firebase code itself. Host apps link `firebase_core` + `firebase_analytics` (or platform equivalents), then call `UniTrack.attachFirebaseAdapter(...)` once.
 
 ## License
 
