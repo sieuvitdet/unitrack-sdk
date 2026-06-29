@@ -11,6 +11,7 @@
 #include <jni.h>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include "unitrack/unitrack.h"
 
 static inline ut_context* ctx_of(jlong p) {
@@ -229,8 +230,17 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeNewTrace(JNIEnv* env, jobject) {
     ut_trace_ids ids = ut_new_trace();
     jclass strCls = env->FindClass("java/lang/String");
     jobjectArray out = env->NewObjectArray(2, strCls, nullptr);
-    env->SetObjectArrayElement(out, 0, env->NewStringUTF(ids.trace_id));
-    env->SetObjectArrayElement(out, 1, env->NewStringUTF(ids.span_id));
+    // Release the class local ref now that NewObjectArray captured it; the
+    // jstrings get the same treatment after SetObjectArrayElement copies the
+    // ref into the array. Per-call cleanup keeps the local-ref table from
+    // ballooning when callers invoke this in a tight OkHttp interceptor loop.
+    env->DeleteLocalRef(strCls);
+    jstring s0 = env->NewStringUTF(ids.trace_id);
+    jstring s1 = env->NewStringUTF(ids.span_id);
+    env->SetObjectArrayElement(out, 0, s0);
+    env->SetObjectArrayElement(out, 1, s1);
+    env->DeleteLocalRef(s0);
+    env->DeleteLocalRef(s1);
     return out;
 }
 
@@ -285,9 +295,14 @@ namespace {
 static jobject     g_flush_listener   = nullptr;   // global ref to Kotlin lambda holder
 static jmethodID   g_flush_listener_m = nullptr;   // FlushListener.onFlushed(String)
 static JavaVM*     g_vm_for_flush     = nullptr;
+// Guards swap-of and read-of g_flush_listener / g_flush_listener_m. The setter
+// runs on the JVM caller thread; the thunk runs on the core worker thread.
+// Without this lock a swap during nativeSetFlushListener can DeleteGlobalRef
+// the very jobject the thunk is about to CallVoidMethod on → use-after-free.
+static std::mutex  g_flush_mu;
 
 extern "C" void unitrack_flush_thunk(const char* counts_json, void* /*ud*/) {
-    if (!g_vm_for_flush || !g_flush_listener || !g_flush_listener_m) return;
+    if (!g_vm_for_flush) return;
     JNIEnv* env = nullptr;
     bool detach = false;
     jint st = g_vm_for_flush->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
@@ -297,10 +312,17 @@ extern "C" void unitrack_flush_thunk(const char* counts_json, void* /*ud*/) {
     } else if (st != JNI_OK || !env) {
         return;
     }
-    jstring js = env->NewStringUTF(counts_json ? counts_json : "{}");
-    env->CallVoidMethod(g_flush_listener, g_flush_listener_m, js);
-    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
-    env->DeleteLocalRef(js);
+    {
+        std::lock_guard<std::mutex> lk(g_flush_mu);
+        if (!g_flush_listener || !g_flush_listener_m) {
+            if (detach) g_vm_for_flush->DetachCurrentThread();
+            return;
+        }
+        jstring js = env->NewStringUTF(counts_json ? counts_json : "{}");
+        env->CallVoidMethod(g_flush_listener, g_flush_listener_m, js);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        env->DeleteLocalRef(js);
+    }
     if (detach) g_vm_for_flush->DetachCurrentThread();
 }
 
@@ -309,10 +331,15 @@ extern "C" void unitrack_flush_thunk(const char* counts_json, void* /*ud*/) {
 JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetFlushListener(
     JNIEnv* env, jobject, jlong p, jobject listener) {
-    if (g_flush_listener) {
-        env->DeleteGlobalRef(g_flush_listener);
-        g_flush_listener   = nullptr;
-        g_flush_listener_m = nullptr;
+    // See g_flush_mu declaration above — hold across the swap so a concurrent
+    // unitrack_flush_thunk on the worker thread never sees a freed jobject.
+    {
+        std::lock_guard<std::mutex> lk(g_flush_mu);
+        if (g_flush_listener) {
+            env->DeleteGlobalRef(g_flush_listener);
+            g_flush_listener   = nullptr;
+            g_flush_listener_m = nullptr;
+        }
     }
     ut_context* ctx = ctx_of(p);
     if (!ctx) return;
@@ -323,14 +350,18 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetFlushListener(
     }
 
     env->GetJavaVM(&g_vm_for_flush);
-    g_flush_listener = env->NewGlobalRef(listener);
-    jclass cls = env->GetObjectClass(g_flush_listener);
-    g_flush_listener_m = env->GetMethodID(cls, "onFlushed", "(Ljava/lang/String;)V");
+    jobject  newRef = env->NewGlobalRef(listener);
+    jclass   cls    = env->GetObjectClass(newRef);
+    jmethodID mid   = env->GetMethodID(cls, "onFlushed", "(Ljava/lang/String;)V");
     env->DeleteLocalRef(cls);
-    if (!g_flush_listener_m) {
-        env->DeleteGlobalRef(g_flush_listener);
-        g_flush_listener = nullptr;
+    if (!mid) {
+        env->DeleteGlobalRef(newRef);
         return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_flush_mu);
+        g_flush_listener   = newRef;
+        g_flush_listener_m = mid;
     }
     ut_set_flush_callback(ctx, &unitrack_flush_thunk, nullptr);
 }
