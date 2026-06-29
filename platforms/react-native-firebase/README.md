@@ -1,27 +1,31 @@
 # @unitrack/firebase
 
-Firebase provider for [@unitrack/react-native](https://www.npmjs.com/package/@unitrack/react-native).
-Forwards UniTrack events to Firebase Analytics and bundles optional helpers for
-FCM (token + push), Crashlytics (non-fatal errors), and Remote Config.
+Firebase **Analytics** provider for
+[@unitrack/react-native](https://www.npmjs.com/package/@unitrack/react-native).
+Mirrors every UniTrack event into Firebase Analytics so marketing keeps their
+funnels, audiences, and BigQuery export — without wiring two SDKs by hand.
+
+> **Analytics only.** Earlier releases shipped helper façades for Firebase
+> Messaging (FCM), Crashlytics, and Remote Config. Those were removed in
+> `1.1.0` to keep this package scoped to tracking. Apps that need those
+> Firebase modules wire them directly — UniTrack stays out of the way.
 
 ## Install
 
 ```bash
 npm install @unitrack/firebase \
-  @react-native-firebase/app @react-native-firebase/analytics
-# Optional, only install what you use:
-npm install @react-native-firebase/messaging \
-            @react-native-firebase/crashlytics \
-            @react-native-firebase/remote-config
+  @react-native-firebase/app \
+  @react-native-firebase/analytics
 cd ios && pod install
 ```
 
 You also need the standard `@react-native-firebase` setup:
 
-- Android: `android/app/google-services.json` + `com.google.gms.google-services` Gradle plugin.
-- iOS: `ios/<App>/GoogleService-Info.plist` added to the Runner target.
+- Android: `android/app/google-services.json` + the
+  `com.google.gms.google-services` Gradle plugin.
+- iOS: `ios/<App>/GoogleService-Info.plist` added to your app target.
 
-## Wire Analytics
+## Wire it up
 
 ```ts
 import { UniTrack } from '@unitrack/react-native';
@@ -31,58 +35,41 @@ UniTrack.addProvider(new FirebaseProvider());
 await UniTrack.initialize('utk_your_api_key');
 ```
 
-## FCM Messaging helper
+That's it. Every call to `UniTrack.track(...)`, every auto-captured screen
+view / tap / network event, and every `UniTrack.identify(...)` will fan a copy
+into Firebase Analytics.
 
-```ts
-import messaging from '@react-native-firebase/messaging';
-import { UniTrackFirebaseMessaging } from '@unitrack/firebase';
+## What gets forwarded
 
-messaging().onTokenRefresh(UniTrackFirebaseMessaging.handleTokenUpdate);
-messaging().onMessage(UniTrackFirebaseMessaging.handleNotificationReceivedForeground);
-messaging().onNotificationOpenedApp(UniTrackFirebaseMessaging.handleNotificationClicked);
+| UniTrack call | Firebase Analytics call |
+| --- | --- |
+| `UniTrack.track(name, props)` | `logEvent(name, props)` |
+| `UniTrack.identify(userId, traits)` | `setUserId(userId)` + `setUserProperty(...)` per trait |
+| auto-captured `screen_view` | `logScreenView({ screen_name, screen_class })` |
 
-const initial = await messaging().getInitialMessage();
-if (initial) UniTrackFirebaseMessaging.handleNotificationClicked(initial);
-```
+Event and parameter names are sanitised to match Firebase's rules:
 
-Result: `fcm_token_updated` + `notification` events flow through UniTrack →
-portal + Snowplow + Firebase Analytics.
+- Names: alphanumeric + underscore, must start with a letter, ≤ 40 chars.
+- Values: string / number / boolean only; longer strings truncated to 100 chars.
 
-## Crashlytics helper
+So calling `UniTrack.track('user-logged-in', { plan: 'pro' })` reaches
+Firebase as `user_logged_in` with `plan=pro`. Non-conforming names are
+prefixed with `e_` rather than dropped.
 
-```ts
-import { UniTrackFirebaseCrashlytics } from '@unitrack/firebase';
+## Session stamping (1.1.0)
 
-try { await riskyCall(); }
-catch (e) { await UniTrackFirebaseCrashlytics.recordError(e); }
+The native `FirebaseAdapter` underneath `@unitrack/react-native` calls
+`Analytics.setDefaultEventParameters({ session_id })` at initialize, when the
+session rotates, and on identity change. Result: even events the app fires
+**directly** through `@react-native-firebase/analytics` (bypassing UniTrack)
+carry the current UniTrack `session_id`.
 
-UniTrackFirebaseCrashlytics.log('entering checkout flow');
-await UniTrackFirebaseCrashlytics.setCustomKey('cart_size', 3);
-```
+Requires:
 
-`recordError` does both: symbolicated stack to Crashlytics, plus an
-`application_error` event through UniTrack so the portal sees the same incident.
+- Firebase iOS SDK 8.4+
+- Firebase Android SDK 21.0.0+
 
-## Remote Config
-
-Plug Firebase RC into UniTrack's unified resolver. Order:
-
-1. Portal `sdk_config.custom_values[key]`
-2. Firebase Remote Config
-3. Caller's defaultValue
-
-```ts
-import { UniTrack } from '@unitrack/react-native';
-import { UniTrackFirebaseRemoteConfig } from '@unitrack/firebase';
-
-await UniTrackFirebaseRemoteConfig.activate({
-  defaults: { feature_camera_grid: false, home_banner_copy: 'Welcome' },
-  minimumFetchIntervalMillis: 3600_000,
-});
-
-const on  = await UniTrack.getRemoteValue('feature_camera_grid', false);
-const txt = await UniTrack.getRemoteValue('home_banner_copy', '');
-```
+Older SDKs are detected at runtime and become a safe no-op.
 
 ## License
 
