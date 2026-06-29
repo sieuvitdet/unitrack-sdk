@@ -38,6 +38,18 @@ class UniTrackTracingInterceptor : Interceptor {
         // don't overwrite — that's another tracing tool (or a manual call).
         if (req.header(snap.headerName) != null) return chain.proceed(req)
 
+        // Honor UniTrack.excludeFromNetworkCapture(...): if the request URL
+        // matches a registered substring (case-insensitive), skip trace
+        // injection too — providers register their own collector hosts here
+        // and we should not propagate trace headers into them.
+        val urlLc = req.url.toString().lowercase()
+        val exclusions = UniTrack.networkExclusions
+        for (i in exclusions.indices) {
+            if (urlLc.contains(exclusions[i].lowercase())) {
+                return chain.proceed(req)
+            }
+        }
+
         if (!UniTrack.shouldInjectTrace(req.url.host, snap.allowlist)) {
             return chain.proceed(req)
         }

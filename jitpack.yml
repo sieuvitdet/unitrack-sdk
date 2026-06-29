@@ -14,4 +14,4 @@ jdk:
 install:
   - bash scripts/fetch_sqlite.sh
   - cd platforms/android
-  - ./gradlew :unitrack:publishToMavenLocal :unitrack-firebase:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -x test
+  - ./gradlew :unitrack:publishToMavenLocal :unitrack-firebase:publishToMavenLocal :unitrack-snowplow:publishToMavenLocal -PVERSION_NAME=$VERSION -x test

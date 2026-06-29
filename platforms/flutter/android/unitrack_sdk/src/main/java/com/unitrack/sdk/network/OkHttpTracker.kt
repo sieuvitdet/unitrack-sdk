@@ -45,6 +45,18 @@ object OkHttpTracker {
     private class TrackingInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val req = chain.request()
+            // Honor UniTrack.excludeFromNetworkCapture(...): if the request URL
+            // contains any registered substring (case-insensitive), skip
+            // tracking entirely. Providers add their own collector hosts here
+            // to break the capture-forward-capture feedback loop.
+            val urlStr = req.url.toString()
+            val urlLc  = urlStr.lowercase()
+            val exclusions = UniTrack.networkExclusions
+            for (i in exclusions.indices) {
+                if (urlLc.contains(exclusions[i].lowercase())) {
+                    return chain.proceed(req)
+                }
+            }
             val started = System.currentTimeMillis()
             val reqBytes = req.body?.contentLength() ?: 0L
             var status   = 0
