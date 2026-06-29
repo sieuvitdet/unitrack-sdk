@@ -49,9 +49,29 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         found
     } catch (_: Throwable) { null }
 
+    // Stash wall-clock onCreate to measure load_ms at onResume (mirrors iOS
+     // ViewControllerSwizzler viewDidLoad → viewDidAppear). Activity-based
+     // screens cần load event đúng như Fragment để parity.
+    private val activityCreatedAtMs = java.util.WeakHashMap<Activity, Long>()
+
+    override fun onActivityCreated(a: Activity, b: Bundle?) {
+        activityCreatedAtMs[a] = android.os.SystemClock.elapsedRealtime()
+    }
+
     override fun onActivityResumed(activity: Activity) {
         val name = resolveScreenName(activity)
         UniTrack.setScreen(name)
+
+        // Fire screen_load_completed với create → resume delta. Cleared sau
+        // khi fire để onPause/onStop/onResume cycle thứ 2 không double-fire.
+        val createdAt = activityCreatedAtMs.remove(activity)
+        if (createdAt != null) {
+            val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
+            UniTrack.track(UniTrack.screenLoadEventName, mapOf(
+                "screen"  to name,
+                "load_ms" to loadMs,
+            ))
+        }
 
         if (activity is FragmentActivity) {
             try {
@@ -71,11 +91,12 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     }
 
     // No-ops for the rest.
-    override fun onActivityCreated(a: Activity, b: Bundle?) {}
     override fun onActivityStarted(a: Activity) {}
     override fun onActivityStopped(a: Activity) {}
     override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
-    override fun onActivityDestroyed(a: Activity) {}
+    override fun onActivityDestroyed(a: Activity) {
+        activityCreatedAtMs.remove(a)
+    }
 
     private fun resolveScreenName(a: Activity): String {
         // Use the Activity's CLASS NAME as the stable screen name (mirrors the
