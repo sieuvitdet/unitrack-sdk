@@ -29,8 +29,15 @@ enum HTTPBridge {
             guard let urlC = urlC, let methodC = methodC, let bodyC = bodyC else {
                 return -1
             }
-            guard let url = URL(string: String(cString: urlC)) else {
-                return -2
+            let urlString = String(cString: urlC)
+            // Endpoint rỗng / missing scheme / missing host → app không config
+            // ingest URL (vd FPT Life chỉ dùng provider fan-out, không core HTTP).
+            // Trả 200 fake để core xoá event khỏi queue thay vì retry forever
+            // và URLSession KHÔNG được gọi → không có TLS / network error log.
+            guard let url = URL(string: urlString),
+                  let scheme = url.scheme, !scheme.isEmpty,
+                  let host = url.host, !host.isEmpty else {
+                return 200
             }
             var req = URLRequest(url: url)
             req.httpMethod = String(cString: methodC)

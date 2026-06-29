@@ -254,9 +254,17 @@ public struct UniTrackRemoteConfig: Codable {
         let resolveFailure: () -> UniTrackRemoteConfig = {
             cached(apiKey: apiKey) ?? fallback ?? .builtinDefault()
         }
+        // Skip nếu app không có configURL — frozen mode local JSON không cần
+        // remote fetch. Tránh URLSession spam URL invalid log.
+        let parsed = URL(string: configURL)
+        if configURL.isEmpty
+            || parsed?.scheme?.isEmpty ?? true
+            || parsed?.host?.isEmpty ?? true {
+            completion(resolveFailure()); return
+        }
         // Append ?flavor=... if provided. URLComponents handles existing query
         // strings (some operators paste configURL with ?api_key=... already).
-        var finalURL = URL(string: configURL)
+        var finalURL = parsed
         if let flavor = flavor, !flavor.isEmpty,
            var comps = URLComponents(string: configURL) {
             var items = comps.queryItems ?? []

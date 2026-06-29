@@ -61,6 +61,14 @@ public final class UniTrackConfigStream: NSObject {
                       streamURL: String,
                       flavor: String? = nil,
                       onConfigChanged: @escaping () -> Void) {
+        // Skip nếu app không config stream URL — app dùng frozen mode local
+        // JSON không cần SSE. Tránh URLSession spam "URL không được hỗ trợ".
+        let parsed = URL(string: streamURL)
+        if streamURL.isEmpty
+            || parsed?.scheme?.isEmpty ?? true
+            || parsed?.host?.isEmpty ?? true {
+            return
+        }
         // Same-args re-call: keep current connection.
         if self.task != nil
             && self.apiKey == apiKey
