@@ -79,6 +79,24 @@ enum UniTrackHostProxy {
                           name as NSString, json as NSString)
     }
 
+    /// Custom event qua singleton native. ObjC bridge nhận 1 dict JSON gói
+    /// tất cả 4 arg (eventName, action, data, includeUser) vì
+    /// `invokeClassMethod` chỉ support 2 arg max.
+    static func customTrack(_ eventName: String,
+                            action: String?,
+                            data: [String: Any],
+                            includeUser: Bool) {
+        var bag: [String: Any] = [
+            "eventName":   eventName,
+            "data":        data,
+            "includeUser": includeUser,
+        ]
+        if let a = action { bag["action"] = a }
+        let json = (try? JSONSerialization.data(withJSONObject: bag))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        invokeClassMethod("objc_customTrack:", json as NSString)
+    }
+
     static func setScreen(_ name: String) {
         invokeClassMethod("objc_setScreen:", name as NSString)
     }

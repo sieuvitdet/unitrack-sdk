@@ -91,6 +91,15 @@ class UniTrackPlugin : FlutterPlugin, MethodCallHandler {
                 )
                 result.success(null)
             }
+            "customTrack" -> {
+                UniTrack.customTrack(
+                    eventName   = call.argument<String>("eventName") ?: "",
+                    action      = call.argument<String>("action"),
+                    data        = jsonToMap(call.argument<String>("data")),
+                    includeUser = call.argument<Boolean>("includeUser") ?: false,
+                )
+                result.success(null)
+            }
             "setScreen"  -> {
                 UniTrack.setScreen(call.argument<String>("name") ?: "")
                 result.success(null)

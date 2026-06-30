@@ -907,6 +907,20 @@ public final class UniTrack {
         track(name, properties: props ?? [:], isAuto: false)
     }
 
+    /// Forward customTrack từ Flutter plugin (co-resident) qua 1 JSON bag để
+    /// vượt giới hạn 2-arg của `UniTrackHostProxy.invokeClassMethod`. Bag chứa:
+    /// `eventName: String`, `action: String?`, `data: [String:Any]`,
+    /// `includeUser: Bool`.
+    @objc public static func objc_customTrack(_ bagJson: String) {
+        let data = bagJson.data(using: .utf8) ?? Data()
+        guard let bag = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let name = bag["eventName"] as? String, !name.isEmpty else { return }
+        let action      = bag["action"] as? String
+        let payloadData = (bag["data"] as? [String: Any]) ?? [:]
+        let includeUser = (bag["includeUser"] as? Bool) ?? false
+        customTrack(name, action: action, data: payloadData, includeUser: includeUser)
+    }
+
     @objc public static func objc_setScreen(_ name: String) {
         setScreen(name)
     }

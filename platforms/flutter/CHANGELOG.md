@@ -1,6 +1,30 @@
 # Changelog
 
-## 1.3.0 — 2026-06-29
+## 1.3.0 — 2026-06-30
+
+### Added: `UniTrack.customTrack(...)` Dart API
+Parity với native iOS `UniTrack.customTrack` + Android Kotlin
+`UniTrack.customTrack`. Native side stamp `session_id`, `event_action` (=
+[action] ?? [eventName]), và `user_id` (nếu `includeUser: true`, lấy từ
+cache `identify()` đã set).
+
+```dart
+// Pattern 1 — 1 schema = 1 action
+UniTrack.instance.customTrack('banner_clicked', data: {
+  'banner_id': 'home_top',
+  'position':  1,
+});
+
+// Pattern 2 — 1 schema = nhiều action
+UniTrack.instance.customTrack('payment_event',
+    action: 'payment_completed',
+    data:   {'amount': 199_000, 'currency': 'VND'},
+    includeUser: true);
+```
+
+HostProxy co-resident (Flutter add-to-app embed vào native iOS đã có
+`UniTrack` SPM) cũng route customTrack qua singleton native — zero
+duplicate session/SQLite.
 
 ### Removed: `unitrack_firebase` package
 Firebase Analytics mirror is now provided exclusively by the built-in

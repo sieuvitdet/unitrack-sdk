@@ -455,6 +455,34 @@ class UniTrack {
     });
   }
 
+  /// Custom event API — parity với iOS Swift `UniTrack.customTrack` và Android
+  /// Kotlin `UniTrack.customTrack`. Native side stamp `session_id` +
+  /// `event_action` (= [action] ?? [eventName]) và `user_id` (nếu [includeUser]
+  /// = true, lấy từ cache `identify()` đã set).
+  ///
+  /// 2 pattern:
+  /// 1. **1 schema = 1 action**:
+  ///    `UniTrack.instance.customTrack('banner_clicked', data: {...});`
+  /// 2. **1 schema = nhiều action**:
+  ///    `UniTrack.instance.customTrack('payment_event',
+  ///        action: 'payment_completed', data: {...}, includeUser: true);`
+  Future<void> customTrack(String eventName,
+      {String? action,
+      Map<String, Object?> data = const {},
+      bool includeUser = false}) {
+    if (verboseLogging) {
+      log('[UniTrack] customTrack name="$eventName" '
+          'action="${action ?? eventName}" includeUser=$includeUser '
+          'data=${jsonEncode(data)}');
+    }
+    return _channel.invokeMethod('customTrack', {
+      'eventName': eventName,
+      if (action != null) 'action': action,
+      'data': jsonEncode(data),
+      'includeUser': includeUser,
+    });
+  }
+
   Future<void> setScreen(String name) {
     if (verboseLogging) log('[UniTrack] setScreen="$name"');
     _forEachProvider((p) => p.setScreen(name));

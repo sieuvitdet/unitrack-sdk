@@ -108,6 +108,13 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
                            properties: dict(from: args["props"]))
             result(nil)
 
+        case "customTrack":
+            UniTrack.customTrack(args["eventName"] as? String ?? "",
+                                 action: args["action"] as? String,
+                                 data: dict(from: args["data"]),
+                                 includeUser: args["includeUser"] as? Bool ?? false)
+            result(nil)
+
         case "setScreen":
             UniTrack.setScreen(args["name"] as? String ?? "")
             result(nil)
@@ -267,6 +274,12 @@ public class UniTrackPlugin: NSObject, FlutterPlugin {
             let event = args["event"] as? String ?? ""
             let props = dict(from: args["props"])
             UniTrackHostProxy.track(event, properties: props)
+            result(nil)
+        case "customTrack":
+            UniTrackHostProxy.customTrack(args["eventName"] as? String ?? "",
+                                          action: args["action"] as? String,
+                                          data: dict(from: args["data"]),
+                                          includeUser: args["includeUser"] as? Bool ?? false)
             result(nil)
         case "setScreen":
             UniTrackHostProxy.setScreen(args["name"] as? String ?? "")
