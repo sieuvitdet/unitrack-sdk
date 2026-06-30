@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 — 2026-06-30
+
+### Fixed: iOS build trên Flutter add-to-app
+- `Classes/include/unitrack.h` (umbrella header CocoaPods xuất ra Swift module) outdated, thiếu `ut_layer` enum + 6 cross-layer C symbol (`ut_register_layer`, `ut_active_layers`, `ut_claim_subtree`, `ut_release_subtree`, `ut_subtree_claimed_by`, `ut_set_screen_dedup_window_ms`, `ut_set_screen_for_layer`). Bây giờ là copy đầy đủ của `Native/core/include/unitrack/unitrack.h`.
+- `Native/swift/Arbitration/ManualTrackSignal.swift` không có trong package 1.3.0 → Swift compile fail `cannot find type 'ManualTrackKind'`. Đã thêm.
+- `unitrack.podspec` `s.version` sync với pubspec (1.3.0 podspec vẫn còn ghi 1.2.1).
+
+Ai chưa publish app: bump trực tiếp `^1.3.1`. Ai đã build với `^1.3.0`: build sẽ fail iOS — bắt buộc bump 1.3.1.
+
 ## 1.3.0 — 2026-06-30
 
 ### Added: `UniTrack.customTrack(...)` Dart API
