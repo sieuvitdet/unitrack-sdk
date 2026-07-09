@@ -7,7 +7,9 @@ plugins {
 android {
     namespace 'com.unitrack.sdk'
     compileSdk 34
-    ndkVersion '26.1.10909125'
+    // NDK 27+ mặc định emit `-Wl,-z,max-page-size=16384` (bắt buộc cho
+    // Android 15 + Play Store enforce 2025-11). NDK 26.x KHÔNG có flag này.
+    ndkVersion '27.1.12297006'
 
     defaultConfig {
         minSdk 21
@@ -20,6 +22,8 @@ android {
                 // Core uses try/catch (e.g. ut_init in capi.cpp), so exceptions
                 // must stay enabled — do NOT add -fno-exceptions here.
                 cppFlags '-std=c++17', '-fvisibility=hidden'
+                // 16 KB page-size: khai báo linker flag ở CMakeLists.txt
+                // (target_link_options) — chắc chắn ăn hơn CMake args ở đây.
                 arguments '-DUT_USE_BUNDLED_SQLITE=OFF',
                           '-DUT_USE_LIBCURL=OFF',
                           '-DCMAKE_BUILD_TYPE=Release'

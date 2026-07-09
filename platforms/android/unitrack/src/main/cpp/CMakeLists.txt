@@ -55,3 +55,10 @@ endif()
 
 find_library(log-lib log)
 target_link_libraries(unitrack_jni ${log-lib})
+
+# 16 KB page-size support cho Android 15+ (Play Store enforce 2025-11).
+# NDK 27+ đã tự add nhưng khai báo tường minh ở đây để nếu build agent nào
+# fallback về NDK 26 thì AAR vẫn 16 KB-aligned. Verify sau khi build:
+#   llvm-readelf -l lib/arm64-v8a/libunitrack_jni.so | grep LOAD
+# Align phải là 0x4000, KHÔNG 0x1000.
+target_link_options(unitrack_jni PRIVATE "-Wl,-z,max-page-size=16384")
