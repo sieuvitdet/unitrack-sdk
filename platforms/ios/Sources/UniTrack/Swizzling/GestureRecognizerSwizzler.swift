@@ -60,7 +60,8 @@ private extension UIGestureRecognizer {
         var extra: [String: Any] = ["recognizer": String(describing: type(of: self))]
         if let v = view { extra["view_class"] = String(describing: type(of: v)) }
         if let lbl = view as? UILabel, let t = lbl.text, !t.isEmpty { extra["text"] = t }
-        if let img = view as? UIImageView { extra["is_image"] = img.image != nil }
+        // ponytail: string ("true"/"false") — schema parity.
+        if let img = view as? UIImageView { extra["is_image"] = (img.image != nil) ? "true" : "false" }
 
         UniTrack.log("[UniTrack] tap-gesture captured key=%@ screen=%@ class=%@",
                      key, screen, className)

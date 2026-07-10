@@ -757,7 +757,10 @@ public final class UniTrack {
                 "screen_name":     prev,
                 "dwell_ms":        dwellMs,
                 "foreground_sec":  foregroundSec,
-                "is_exit_screen":  false,
+                // ponytail: string ("true"/"false") thay vì bool để parity với
+                // Iglu schema application_context (is_debug/is_rooted đã string).
+                // Downstream consumer (Snowplow enricher) expect string form.
+                "is_exit_screen":  "false",
             ]
             dispatchToProviders(shared.screenEndEventName, endPayload)
         }
@@ -905,6 +908,19 @@ public final class UniTrack {
         let data = propertiesJson.data(using: .utf8) ?? Data()
         let props = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         track(name, properties: props ?? [:], isAuto: false)
+    }
+
+    // JSON bag pattern: HostProxy packs (eventName, action, data, includeUser)
+    // vào 1 JSON vì invokeClassMethod chỉ support 2 arg. Match key names ở
+    // UniTrackHostProxy.customTrack(_:action:data:includeUser:).
+    @objc public static func objc_customTrack(_ bagJson: String) {
+        let data = bagJson.data(using: .utf8) ?? Data()
+        guard let bag = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let eventName = bag["eventName"] as? String else { return }
+        let action      = bag["action"] as? String
+        let payload     = (bag["data"] as? [String: Any]) ?? [:]
+        let includeUser = (bag["includeUser"] as? Bool) ?? false
+        customTrack(eventName, action: action, data: payload, includeUser: includeUser)
     }
 
     @objc public static func objc_setScreen(_ name: String) {

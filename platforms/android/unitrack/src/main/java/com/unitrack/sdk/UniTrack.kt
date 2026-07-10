@@ -810,7 +810,9 @@ object UniTrack {
                     "screen_name"     to prev,
                     "dwell_ms"        to dwellMs,
                     "foreground_sec"  to foregroundSec,
-                    "is_exit_screen"  to false,
+                    // ponytail: string "false" thay vì Boolean để parity iOS
+                    // + tránh Snowplow schema reject (boolean found, string expected).
+                    "is_exit_screen"  to "false",
                 )
                 dispatchToProviders(screenEndEventName, endPayload)
             }
@@ -879,7 +881,8 @@ object UniTrack {
         }
         source?.let { p["source"] = it }
         val elapsed = android.os.SystemClock.elapsedRealtime() - bootElapsedMs
-        p["is_cold"] = elapsed in 0..coldDeeplinkWindowMs
+        // ponytail: string "true"/"false" — schema parity, tránh bad-event.
+        p["is_cold"] = (elapsed in 0..coldDeeplinkWindowMs).toString()
         track("deeplink", p)
     }
 
