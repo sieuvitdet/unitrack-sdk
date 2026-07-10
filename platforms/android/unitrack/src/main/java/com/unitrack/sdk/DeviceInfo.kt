@@ -74,8 +74,13 @@ internal object DeviceInfo {
             o.put("cellular_subtype", net["cellular_subtype"] ?: "")
             o.put("network_label", net["label"] ?: "")
             o.put("network_strength", net["strength"] ?: "")
-            o.put("is_debug", isDebuggable(app))
-            o.put("is_rooted", isRooted())
+            // Iglu schema application_context/1-0-0 khai 2 field này là string
+            // ("true"/"false"), không phải boolean. Nếu put Boolean thẳng vào
+            // JSONObject → validator Snowplow reject vào bad-events với
+            // ValidationError: "boolean found, string expected". iOS đã cast
+            // sẵn, giữ parity ở đây.
+            o.put("is_debug", isDebuggable(app).toString())
+            o.put("is_rooted", isRooted().toString())
             // device_imei: Android cấm READ_PHONE_STATE từ API 29+ trừ system app.
             // SDK fill bằng ANDROID_ID (Settings.Secure.ANDROID_ID) — stable
             // per app signing key + device, reset khi factory reset.
