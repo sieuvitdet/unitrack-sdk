@@ -60,6 +60,9 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         val name = resolveScreenName(activity)
+        // Capture previous screen BEFORE setScreen overwrites lastScreen so
+        // screen_load_completed can stamp previous_screen_name.
+        val prev = UniTrack.previousScreenName()
         UniTrack.setScreen(name)
 
         // Fire screen_load_completed với create → resume delta. Cleared sau
@@ -67,10 +70,16 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         val createdAt = activityCreatedAtMs.remove(activity)
         if (createdAt != null) {
             val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
-            UniTrack.track(UniTrack.screenLoadEventName, mapOf(
-                "screen"  to name,
-                "load_ms" to loadMs,
-            ))
+            // is_cached heuristic: sub-100ms load = cache hit (view already
+            // decoded, no cold render). Above the threshold = fresh render.
+            val props = mutableMapOf<String, Any?>(
+                "screen"        to name,
+                "screen_name"   to name,
+                "load_time_ms"  to loadMs.toString(),
+                "is_cached"     to if (loadMs < 100) "true" else "false",
+            )
+            if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
+            UniTrack.track(UniTrack.screenLoadEventName, props)
         }
 
         if (activity is FragmentActivity) {
@@ -126,6 +135,8 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             val name = f.javaClass.simpleName
             if (isNoiseFragmentName(name)) return
+            // Capture previous screen BEFORE setScreen overwrites lastScreen.
+            val prev = UniTrack.previousScreenName()
             UniTrack.setScreen(name)
 
             // Fire screen_load_completed with the create → resume delta. The
@@ -135,10 +146,14 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // runs.
             val createdAt = createdAtMs.remove(f) ?: return
             val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
-            UniTrack.track(UniTrack.screenLoadEventName, mapOf(
-                "screen"  to name,
-                "load_ms" to loadMs,
-            ))
+            val props = mutableMapOf<String, Any?>(
+                "screen"        to name,
+                "screen_name"   to name,
+                "load_time_ms"  to loadMs.toString(),
+                "is_cached"     to if (loadMs < 100) "true" else "false",
+            )
+            if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
+            UniTrack.track(UniTrack.screenLoadEventName, props)
         }
     }
 }

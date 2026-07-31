@@ -45,6 +45,17 @@ object UniTrack {
     private val screenLock = Any()
     private var lastScreen: String? = null
     private var lastScreenAtMs: Long = 0L
+
+    /**
+     * Screen name of the most recent setScreen() call, or null at cold
+     * start. Callers should read this BEFORE invoking setScreen() when
+     * they need the outgoing screen (e.g. ActivityTracker stamping
+     * `previous_screen_name` on screen_load_completed).
+     */
+    @JvmStatic
+    fun previousScreenName(): String? {
+        synchronized(screenLock) { return lastScreen }
+    }
     private var screenStartEventName: String = "screen_view"
     private var screenEndEventName:   String = "screen_view"
     private var screenLifecycleEnabled: Boolean = true
@@ -810,6 +821,10 @@ object UniTrack {
                     "screen_name"     to prev,
                     "dwell_ms"        to dwellMs,
                     "foreground_sec"  to foregroundSec,
+                    // Background dwell of the most recent bg→fg transition,
+                    // or 0 if the app has never backgrounded. Lets the data
+                    // team tell "exited via bg" from "exited via nav".
+                    "background_sec"  to com.unitrack.sdk.lifecycle.AppLifecycleObserver.backgroundDwellSec().toString(),
                     // ponytail: string "false" thay vì Boolean để parity iOS
                     // + tránh Snowplow schema reject (boolean found, string expected).
                     "is_exit_screen"  to "false",

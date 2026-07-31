@@ -318,12 +318,12 @@ public final class SnowplowProvider: AnalyticsProvider {
     }
 
     public func setScreen(_ name: String) {
-        guard let tracker = tracker else { return }
-        let sv = ScreenView(name: name)
-        _ = sv.entities(buildEntities(forEventName: name, screen: name,
-                                      elementKey: nil, extra: nil,
-                                      skipGlobalContexts: false))
-        tracker.track(sv)
+        // No-op — firing Snowplow's builtin ScreenView(name:) here emits a
+        // second event under vendor `com.snowplowanalytics.mobile/screen_view`
+        // alongside UniTrack's own FPT-vendor `f_screen_view` (dispatched via
+        // track("screen_viewed", ...)). The data team queries the FPT vendor
+        // only; the builtin duplicate just adds noise. Keep the method so
+        // AnalyticsProvider protocol still compiles.
     }
 
     // MARK: - Convention schema/entity plumbing
@@ -382,7 +382,8 @@ public final class SnowplowProvider: AnalyticsProvider {
             if let userRaw = entities["user_context"],
                let userSchema = normalizeEntityURI(userRaw),
                !userContext.isEmpty {
-                out.append(SelfDescribingJson(schema: userSchema, andData: userContext))
+                out.append(SelfDescribingJson(schema: userSchema,
+                                              andData: Self.stringifyAll(userContext)))
             }
             if let coreRaw = entities["core_action"],
                let coreSchema = normalizeEntityURI(coreRaw) {
@@ -402,7 +403,8 @@ public final class SnowplowProvider: AnalyticsProvider {
                 // shared with Portal + custom HTTP providers.
                 let sid = UniTrack.currentSessionId()
                 if !sid.isEmpty { data["session_id"] = sid }
-                out.append(SelfDescribingJson(schema: coreSchema, andData: data))
+                out.append(SelfDescribingJson(schema: coreSchema,
+                                              andData: Self.stringifyAll(data)))
             }
             // application_context — built from the device/app bag UniTrack
             // already collected at init (DeviceInfo). The SDK fills the
@@ -412,7 +414,8 @@ public final class SnowplowProvider: AnalyticsProvider {
                let appSchema = normalizeEntityURI(appRaw) {
                 let bag = UniTrack.applicationContext()
                 if !bag.isEmpty {
-                    out.append(SelfDescribingJson(schema: appSchema, andData: bag))
+                    out.append(SelfDescribingJson(schema: appSchema,
+                                                  andData: Self.stringifyAll(bag)))
                 }
             }
         }
@@ -424,6 +427,50 @@ public final class SnowplowProvider: AnalyticsProvider {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f.string(from: Date())
+    }
+
+    /// Cast every leaf value in a payload to String so downstream Iglu
+    /// schemas that declare all fields as string don't reject the event
+    /// into bad-events ("boolean/number found, string expected"). Rules:
+    ///   • String → unchanged
+    ///   • Bool   → "true" / "false"
+    ///   • Number (Int/Int64/Double/NSNumber) → decimal string
+    ///   • Dict   → recurse, then JSON-serialize to a single string leaf
+    ///   • Array  → recurse, then JSON-serialize to a single string leaf
+    ///   • nil / NSNull → "" (keep key, avoid missing-field surprises)
+    ///   • Anything else → String(describing:)
+    /// Called at the last mile before handing data to Snowplow so callers
+    /// (auto-capture, swizzlers, helpers, host app) don't have to remember.
+    private static func stringifyAll(_ dict: [String: Any]) -> [String: String] {
+        var out: [String: String] = [:]
+        for (k, v) in dict { out[k] = stringifyValue(v) }
+        return out
+    }
+
+    private static func stringifyValue(_ v: Any) -> String {
+        if v is NSNull { return "" }
+        if let s = v as? String { return s }
+        if let n = v as? NSNumber {
+            // NSNumber wraps Bool too; check via ObjCType so Bool serialize
+            // to "true"/"false", not "1"/"0".
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return n.boolValue ? "true" : "false" }
+            return n.stringValue
+        }
+        if let b = v as? Bool { return b ? "true" : "false" }
+        if let d = v as? [String: Any] {
+            let inner = stringifyAll(d)
+            if JSONSerialization.isValidJSONObject(inner),
+               let data = try? JSONSerialization.data(withJSONObject: inner),
+               let s = String(data: data, encoding: .utf8) { return s }
+            return String(describing: inner)
+        }
+        if let a = v as? [Any] {
+            let inner = a.map { stringifyValue($0) }
+            if let data = try? JSONSerialization.data(withJSONObject: inner),
+               let s = String(data: data, encoding: .utf8) { return s }
+            return String(describing: inner)
+        }
+        return String(describing: v)
     }
 
     /// Internal: fire one self-describing event under `schema` with the
@@ -438,13 +485,17 @@ public final class SnowplowProvider: AnalyticsProvider {
             NSLog("[UniTrackSnowplow] SKIP \"\(eventName)\" — tracker not initialized")
             return
         }
-        let cleaned = data.filter { !$0.key.hasPrefix("_") }
-        let screen     = (cleaned["screen"]      ?? cleaned["screen_name"]) as? String
-        let elementKey = (cleaned["element_key"] ?? cleaned["element"])     as? String
+        let filtered = data.filter { !$0.key.hasPrefix("_") }
+        let screen     = (filtered["screen"]      ?? filtered["screen_name"]) as? String
+        let elementKey = (filtered["element_key"] ?? filtered["element"])     as? String
         let ctxs = buildEntities(forEventName: eventName,
                                  screen: screen, elementKey: elementKey,
                                  extra: extraContexts,
                                  skipGlobalContexts: skipGlobalContexts)
+        // Stringify at the boundary so ALL Iglu schemas that declare fields
+        // as string stop rejecting events into bad-events, no matter what
+        // type upstream (swizzlers, auto-capture, host helpers) passed in.
+        let cleaned = Self.stringifyAll(filtered)
         let ev = SelfDescribing(schema: schema, payload: cleaned)
         _ = ev.entities(ctxs)
         tracker.track(ev)

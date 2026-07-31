@@ -10,6 +10,19 @@ enum AppLifecycleObserver {
     // Track when the app went to background so foreground can compute the
     // background dwell + decide whether the previous session timed out.
     private static var backgroundedAt: Date?
+    // Last background→foreground transition timestamp — used to stamp
+    // `background_sec` on `screen_exited` events so consumers can tell
+    // "user exited via bg" from "user just tapped another screen".
+    private static var lastForegroundedAt: Date?
+    // Total seconds the app has spent in background since the last
+    // foreground. Rolled over on didBecomeActive.
+    private static var lastBackgroundDwellSec: Int = 0
+
+    /// Seconds the app spent in background between the previous foreground
+    /// and the current one. 0 if the app never backgrounded since launch.
+    /// Called by UniTrack.setScreen() to stamp `background_sec` on
+    /// screen_exited events.
+    static func backgroundDwellSec() -> Int { lastBackgroundDwellSec }
     // Snapshot of the session in progress at the moment we backgrounded —
     // used to populate session_ended fields (duration, screen_count, …) when
     // the foreground resolve confirms a rotation.
@@ -27,6 +40,12 @@ enum AppLifecycleObserver {
         let nc = NotificationCenter.default
         nc.addObserver(forName: UIApplication.didBecomeActiveNotification,
                        object: nil, queue: .main) { _ in
+            // Freeze the dwell BEFORE clearing backgroundedAt so subsequent
+            // screen_exited events can stamp background_sec.
+            if let bgAt = backgroundedAt {
+                lastBackgroundDwellSec = Int(Date().timeIntervalSince(bgAt))
+            }
+            lastForegroundedAt = Date()
             UniTrack.track("app_foreground", properties: [:])
             // Resolve the session — if background dwell exceeded the timeout,
             // the core rotates internally + we fire session_ended for the

@@ -174,11 +174,13 @@ class SnowplowProvider(
     }
 
     override fun setScreen(name: String) {
-        val t = tracker ?: return
-        val sv = ScreenView(name)
-        sv.entities.addAll(buildEntities(name, screen = name, elementKey = null,
-                                         extra = null, skipGlobalContexts = false))
-        t.track(sv)
+        // No-op — firing Snowplow's builtin ScreenView(name) here emits a
+        // second event under com.snowplowanalytics.mobile/screen_view —
+        // duplicating every screen transition alongside UniTrack's own
+        // vn.fpt.ftel.snowplow/screen_view (dispatched via
+        // track("screen_viewed", ...)). Data team queries the FPT vendor
+        // only; the builtin duplicate was pure noise. Method kept as no-op
+        // so the AnalyticsProvider protocol still compiles.
     }
 
     // ── Convention schema/entity plumbing ────────────────────────────────
@@ -233,8 +235,7 @@ class SnowplowProvider(
         if (!skipGlobalContexts) {
             val userSchema = entities["user_context"]?.let { normalizeEntityURI(it) }
             if (userSchema != null && userContext.isNotEmpty()) {
-                out.add(SelfDescribingJson(userSchema,
-                    userContext.mapValues { it.value ?: "" }))
+                out.add(SelfDescribingJson(userSchema, stringifyAll(userContext)))
             }
             val coreSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
             if (coreSchema != null) {
@@ -253,7 +254,7 @@ class SnowplowProvider(
                 // with Portal + custom HTTP providers.
                 val sid = com.unitrack.sdk.UniTrack.currentSessionId()
                 if (sid.isNotEmpty()) data["session_id"] = sid
-                out.add(SelfDescribingJson(coreSchema, data.mapValues { it.value ?: "" }))
+                out.add(SelfDescribingJson(coreSchema, stringifyAll(data)))
             }
             // application_context — built from the device/app bag UniTrack
             // already collected at init. The SDK fills the common fields;
@@ -262,8 +263,7 @@ class SnowplowProvider(
             if (appSchema != null) {
                 val bag = com.unitrack.sdk.UniTrack.applicationContext()
                 if (bag.isNotEmpty()) {
-                    out.add(SelfDescribingJson(appSchema,
-                        bag.mapValues { it.value ?: "" }))
+                    out.add(SelfDescribingJson(appSchema, stringifyAll(bag)))
                 }
             }
         }
@@ -280,6 +280,49 @@ class SnowplowProvider(
         return out
     }
 
+    /**
+     * Cast every leaf value in a payload to String so downstream Iglu schemas
+     * that declare all fields as string don't reject events into bad-events
+     * ("boolean/number found, string expected"). Rules:
+     *   • String → unchanged
+     *   • Boolean → "true" / "false"
+     *   • Number (Int/Long/Double/Float) → decimal string
+     *   • Map → recurse, then JSON-serialize to a single string leaf
+     *   • Iterable/Array → recurse, then JSON-serialize to a single string leaf
+     *   • null → "" (keep key, avoid missing-field surprises)
+     *   • Anything else → toString()
+     * Called at the last mile before handing data to Snowplow so callers
+     * (auto-capture, swizzlers, helpers, host app) don't have to remember.
+     */
+    private fun stringifyAll(m: Map<String, Any?>): Map<String, String> {
+        val out = LinkedHashMap<String, String>(m.size)
+        for ((k, v) in m) out[k] = stringifyValue(v)
+        return out
+    }
+
+    private fun stringifyValue(v: Any?): String = when (v) {
+        null       -> ""
+        is String  -> v
+        is Boolean -> if (v) "true" else "false"
+        is Number  -> v.toString()
+        is Map<*, *> -> {
+            @Suppress("UNCHECKED_CAST")
+            val inner = stringifyAll(v as Map<String, Any?>)
+            org.json.JSONObject(inner as Map<*, *>).toString()
+        }
+        is Iterable<*> -> {
+            val arr = org.json.JSONArray()
+            for (item in v) arr.put(stringifyValue(item))
+            arr.toString()
+        }
+        is Array<*> -> {
+            val arr = org.json.JSONArray()
+            for (item in v) arr.put(stringifyValue(item))
+            arr.toString()
+        }
+        else -> v.toString()
+    }
+
     private fun trackSelfDescribingInternal(schema: String,
                                             eventName: String,
                                             data: Map<String, Any?>,
@@ -289,11 +332,15 @@ class SnowplowProvider(
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$eventName\" — tracker not initialized")
             return
         }
-        val cleaned = cleanedData(data)
-        val screen     = (cleaned["screen"]      ?: cleaned["screen_name"]) as? String
-        val elementKey = (cleaned["element_key"] ?: cleaned["element"])     as? String
+        val filtered = cleanedData(data)
+        val screen     = (filtered["screen"]      ?: filtered["screen_name"]) as? String
+        val elementKey = (filtered["element_key"] ?: filtered["element"])     as? String
         val ctxs = buildEntities(eventName, screen, elementKey, extra, skipGlobalContexts)
-        val ev = SelfDescribing(SelfDescribingJson(schema, cleaned.mapValues { it.value ?: "" }))
+        // Stringify at the boundary so ALL Iglu schemas that declare fields
+        // as string stop rejecting events into bad-events, no matter what
+        // type upstream (auto-capture, swizzlers, host helpers) passed in.
+        val cleaned = stringifyAll(filtered)
+        val ev = SelfDescribing(SelfDescribingJson(schema, cleaned))
         ev.entities.addAll(ctxs)
         t.track(ev)
         logTracking(schema, eventName, cleaned, ctxs)
@@ -527,7 +574,7 @@ class SnowplowProvider(
     // ── Pretty log envelope (verbose only) ───────────────────────────────
 
     private fun logTracking(schema: String, eventName: String,
-                            data: Map<String, Any?>, contexts: List<SelfDescribingJson>) {
+                            data: Map<String, *>, contexts: List<SelfDescribingJson>) {
         if (!com.unitrack.sdk.UniTrack.verboseLogging) return
         val ctxsArr = org.json.JSONArray()
         for (c in contexts) {

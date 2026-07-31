@@ -139,9 +139,20 @@ private extension UIViewController {
         if !ut_loadReported, ut_loadStart > 0 {
             ut_loadReported = true
             let ms = Int((CACurrentMediaTime() - ut_loadStart) * 1000)
+            // is_cached heuristic: sub-100ms load = cache hit (view already
+            // decoded, no cold render). Above the threshold = fresh render.
+            let isCached = ms < 100
+            var props: [String: Any] = [
+                "screen":        screen,
+                "screen_name":   screen,
+                "load_time_ms":  String(ms),
+                "is_cached":     isCached ? "true" : "false",
+            ]
+            if let prev = UniTrack.previousScreenName(), !prev.isEmpty {
+                props["previous_screen_name"] = prev
+            }
             UniTrack.track(UniTrack.screenLoadEventName,
-                           properties: ["screen": screen, "load_ms": ms],
-                           isAuto: true)
+                           properties: props, isAuto: true)
         }
     }
 }

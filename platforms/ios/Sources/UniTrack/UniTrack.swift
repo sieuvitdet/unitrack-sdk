@@ -103,6 +103,16 @@ public final class UniTrack {
     private var lastScreen: String?
     private var lastScreenAt: Date?
 
+    /// Screen name of the most recent setScreen() call, or nil at cold start.
+    /// Used by the ViewControllerSwizzler to stamp `previous_screen_name` on
+    /// screen_load_completed events fired BEFORE the 50ms-deferred
+    /// setScreen() overwrites it.
+    public static func previousScreenName() -> String? {
+        shared.lastScreenLock.lock()
+        defer { shared.lastScreenLock.unlock() }
+        return shared.lastScreen
+    }
+
     // Cached user_id từ identify() — customTrack(includeUser:true) đọc lại
     // stamp vào payload. SDK chỉ store value app đưa (app đã hash PII rồi).
     private let identityLock = NSLock()
@@ -757,6 +767,10 @@ public final class UniTrack {
                 "screen_name":     prev,
                 "dwell_ms":        dwellMs,
                 "foreground_sec":  foregroundSec,
+                // Background dwell of the most recent bg→fg transition, or 0
+                // if the app has never backgrounded. Lets the data team tell
+                // "exited via bg" from "exited via nav" in the same event.
+                "background_sec":  String(AppLifecycleObserver.backgroundDwellSec()),
                 // ponytail: string ("true"/"false") thay vì bool để parity với
                 // Iglu schema application_context (is_debug/is_rooted đã string).
                 // Downstream consumer (Snowplow enricher) expect string form.

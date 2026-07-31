@@ -21,6 +21,16 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
 
     private var started = 0
     @Volatile private var inForeground = false
+    // Timestamp of the last 1→0 transition (going background). Cleared
+    // when we come back foreground so `backgroundDwellSec` reports the
+    // MOST RECENT bg→fg gap, not a running total.
+    @Volatile private var backgroundedAtMs: Long = 0L
+    // Seconds the app spent in background between the previous foreground
+    // and the current one. Rolled over on the 0→1 transition. Read by
+    // UniTrack.setScreen() to stamp `background_sec` on screen_exited.
+    @Volatile private var lastBackgroundDwellSec: Int = 0
+
+    fun backgroundDwellSec(): Int = lastBackgroundDwellSec
 
     fun install(app: Application) {
         app.registerActivityLifecycleCallbacks(this)
@@ -57,6 +67,12 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     override fun onActivityStarted(a: Activity) {
         if (started == 0 && !inForeground) {
             inForeground = true
+            // Freeze the bg dwell BEFORE clearing backgroundedAtMs so
+            // subsequent screen_exited events can stamp background_sec.
+            if (backgroundedAtMs > 0L) {
+                lastBackgroundDwellSec = ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
+                backgroundedAtMs = 0L
+            }
             NativeBridge.logForeground()
             UniTrack.dispatchForegroundCallback()
         }
@@ -67,6 +83,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         started = (started - 1).coerceAtLeast(0)
         if (started == 0 && inForeground) {
             inForeground = false
+            backgroundedAtMs = System.currentTimeMillis()
             NativeBridge.logBackground()
             UniTrack.dispatchBackgroundCallback()
         }
