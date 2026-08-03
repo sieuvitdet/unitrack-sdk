@@ -181,6 +181,8 @@ class SnowplowProvider(
         // track("screen_viewed", ...)). Data team queries the FPT vendor
         // only; the builtin duplicate was pure noise. Method kept as no-op
         // so the AnalyticsProvider protocol still compiles.
+        com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
+            "setScreen no-op — builtin ScreenView(\"$name\") SUPPRESSED. Convention event fires via track() path.")
     }
 
     // ── Convention schema/entity plumbing ────────────────────────────────
@@ -606,7 +608,16 @@ class SnowplowProvider(
                 .put("schema", schema)
                 .put("data",   org.json.JSONObject(data.mapValues { it.value ?: org.json.JSONObject.NULL })))
             .put("contexts", ctxsArr)
+        // Screen family gets its own tag so filtering by "SCREEN-VIEW" in
+        // logcat isolates exactly the events the data team asks about
+        // (screen_viewed / screen_exited / screen_load_completed all share
+        // the same "screen_view" schema).
+        val eventAction = (data["event_action"] as? String).orEmpty()
+        val isScreen = schema.contains("/screen_view/") ||
+            eventName == "screen_view" ||
+            eventAction.startsWith("screen_")
+        val tag = if (isScreen) "SCREEN-VIEW" else "Snowplow Tracking"
         com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
-            "\n─── Snowplow Tracking ───  (convention event=\"$eventName\")\n${envelope.toString(2)}")
+            "\n─── $tag ───  (convention event=\"$eventName\")\n${envelope.toString(2)}")
     }
 }
