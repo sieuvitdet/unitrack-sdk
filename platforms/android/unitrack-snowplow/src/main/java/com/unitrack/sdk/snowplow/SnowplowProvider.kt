@@ -230,7 +230,8 @@ class SnowplowProvider(
                               screen: String?,
                               elementKey: String?,
                               extra: List<SelfDescribingJson>?,
-                              skipGlobalContexts: Boolean): List<SelfDescribingJson> {
+                              skipGlobalContexts: Boolean,
+                              actionName: String? = null): List<SelfDescribingJson> {
         val out = mutableListOf<SelfDescribingJson>()
         if (!skipGlobalContexts) {
             val userSchema = entities["user_context"]?.let { normalizeEntityURI(it) }
@@ -240,8 +241,13 @@ class SnowplowProvider(
             val coreSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
             if (coreSchema != null) {
                 val now = java.time.Instant.now().toString()
+                // Prefer the raw event name (screen_viewed / screen_exited /
+                // screen_load_completed) over the schema kind (screen_view)
+                // so the data team can pivot on core_action.action_name
+                // without cracking the event data payload.
+                val resolvedActionName = actionName?.takeIf { it.isNotEmpty() } ?: eventName
                 val data = mutableMapOf<String, Any?>(
-                    "action_name" to eventName,
+                    "action_name" to resolvedActionName,
                     "timestamp"   to now,
                     // start_time mirrors iOS — the event was created on the
                     // client at this instant. Kept alongside `timestamp` so
@@ -335,7 +341,11 @@ class SnowplowProvider(
         val filtered = cleanedData(data)
         val screen     = (filtered["screen"]      ?: filtered["screen_name"]) as? String
         val elementKey = (filtered["element_key"] ?: filtered["element"])     as? String
-        val ctxs = buildEntities(eventName, screen, elementKey, extra, skipGlobalContexts)
+        // `event_action` được stamp trong track() với raw name — dùng nó cho
+        // core_action.action_name để phân biệt lifecycle event share cùng schema.
+        val rawActionName = filtered["event_action"] as? String
+        val ctxs = buildEntities(eventName, screen, elementKey, extra, skipGlobalContexts,
+                                 actionName = rawActionName)
         // Stringify at the boundary so ALL Iglu schemas that declare fields
         // as string stop rejecting events into bad-events, no matter what
         // type upstream (auto-capture, swizzlers, host helpers) passed in.

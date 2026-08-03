@@ -324,6 +324,7 @@ public final class SnowplowProvider: AnalyticsProvider {
         // track("screen_viewed", ...)). The data team queries the FPT vendor
         // only; the builtin duplicate just adds noise. Keep the method so
         // AnalyticsProvider protocol still compiles.
+        UniTrack.log("[UniTrackSnowplow] setScreen no-op — builtin ScreenView(\"%@\") SUPPRESSED. Convention event fires via track() path.", name)
     }
 
     // MARK: - Convention schema/entity plumbing
@@ -376,7 +377,8 @@ public final class SnowplowProvider: AnalyticsProvider {
                                screen: String?,
                                elementKey: String?,
                                extra: [SelfDescribingJson]?,
-                               skipGlobalContexts: Bool) -> [SelfDescribingJson] {
+                               skipGlobalContexts: Bool,
+                               actionName: String? = nil) -> [SelfDescribingJson] {
         var out: [SelfDescribingJson] = []
         if !skipGlobalContexts {
             if let userRaw = entities["user_context"],
@@ -388,8 +390,13 @@ public final class SnowplowProvider: AnalyticsProvider {
             if let coreRaw = entities["core_action"],
                let coreSchema = normalizeEntityURI(coreRaw) {
                 let now = isoNow()
+                // Prefer the raw event name (screen_viewed / screen_exited /
+                // screen_load_completed) over the schema kind (screen_view)
+                // so the data team can pivot on core_action.action_name
+                // without cracking the event data payload.
+                let resolvedActionName = actionName?.isEmpty == false ? actionName! : name
                 var data: [String: Any] = [
-                    "action_name": name,
+                    "action_name": resolvedActionName,
                     "timestamp":   now,
                     // start_time mirrors the Iglu schema FPT Life consumes —
                     // the event was created on the client at this instant.
@@ -488,10 +495,15 @@ public final class SnowplowProvider: AnalyticsProvider {
         let filtered = data.filter { !$0.key.hasPrefix("_") }
         let screen     = (filtered["screen"]      ?? filtered["screen_name"]) as? String
         let elementKey = (filtered["element_key"] ?? filtered["element"])     as? String
+        // `event_action` được stamp trong track() với raw name (screen_viewed,
+        // screen_exited, ...) — dùng nó cho core_action.action_name để phân
+        // biệt được các lifecycle event share cùng schema.
+        let rawActionName = filtered["event_action"] as? String
         let ctxs = buildEntities(forEventName: eventName,
                                  screen: screen, elementKey: elementKey,
                                  extra: extraContexts,
-                                 skipGlobalContexts: skipGlobalContexts)
+                                 skipGlobalContexts: skipGlobalContexts,
+                                 actionName: rawActionName)
         // Stringify at the boundary so ALL Iglu schemas that declare fields
         // as string stop rejecting events into bad-events, no matter what
         // type upstream (swizzlers, auto-capture, host helpers) passed in.
@@ -770,8 +782,16 @@ public final class SnowplowProvider: AnalyticsProvider {
             "event":    ["schema": schema, "data": data],
             "contexts": ctxsArr,
         ]
-        UniTrack.log("\n─── Snowplow Tracking ───  (convention event=\"%@\")\n%@",
-                     eventName, prettyJSON(envelope))
+        // Screen family gets its own tag so filtering by "SCREEN-VIEW" in
+        // Xcode console isolates the exact events the data team asks about
+        // (screen_viewed / screen_exited / screen_load_completed all go
+        // through the same schema "screen_view").
+        let isScreen = schema.contains("/screen_view/")
+                       || eventName == "screen_view"
+                       || (data["event_action"] as? String)?.hasPrefix("screen_") == true
+        let tag = isScreen ? "SCREEN-VIEW" : "Snowplow Tracking"
+        UniTrack.log("\n─── %@ ───  (convention event=\"%@\")\n%@",
+                     tag, eventName, prettyJSON(envelope))
     }
 
     private static func prettyJSON(_ value: Any) -> String {
