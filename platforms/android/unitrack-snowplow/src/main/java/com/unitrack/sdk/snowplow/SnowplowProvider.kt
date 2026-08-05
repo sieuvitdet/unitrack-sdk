@@ -165,7 +165,10 @@ class SnowplowProvider(
      *  → use the raw name as kind. Mirror of iOS SnowplowProvider.kindForRawEvent. */
     private fun kindForRawEvent(name: String): String? = when (name) {
         "click", "tap" -> "click"
-        "screen_view", "screen_viewed", "screen_exited", "screen_load_completed" -> "screen_view"
+        // Screen family split: entry + load-completed → screen_view; exit → screen_end.
+        // Data team publishes iglu:<vendor>/screen_view + iglu:<vendor>/screen_end.
+        "screen_view", "screen_viewed", "screen_load_completed" -> "screen_view"
+        "screen_exited" -> "screen_end"
         "network_request" -> "api"
         "crash", "application_error" -> "crash"
         "session_started", "session_ended", "session_start", "session_end" -> "session"
@@ -177,6 +180,7 @@ class SnowplowProvider(
         "click"       -> "event_click"
         "result"      -> "event_result"
         "screen_view" -> "event_screen_view"
+        "screen_end"  -> "screen_end"
         "crash"       -> "event_crash"
         "api"         -> "event_api"
         "session"     -> "event_session"

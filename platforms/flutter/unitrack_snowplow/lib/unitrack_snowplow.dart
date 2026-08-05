@@ -341,11 +341,14 @@ class SnowplowProvider extends AnalyticsProvider {
     switch (raw) {
       case 'click':
         return 'click';
+      // Screen family split: entry + load-completed → screen_view; exit → screen_end.
+      // Data team publishes iglu:<vendor>/screen_view + iglu:<vendor>/screen_end.
       case 'screen_load_completed':
       case 'screen_viewed':
-      case 'screen_exited':
       case 'screen_view':
         return 'screen_view';
+      case 'screen_exited':
+        return 'screen_end';
       case 'crash':
       case 'application_error':
         return 'crash';
@@ -363,6 +366,7 @@ class SnowplowProvider extends AnalyticsProvider {
       case 'click':       return 'event_click';
       case 'result':      return 'event_result';
       case 'screen_view': return 'event_screen_view';
+      case 'screen_end':  return 'screen_end';
       case 'crash':       return 'event_crash';
       case 'api':         return 'event_api';
       case 'session':     return 'event_session';

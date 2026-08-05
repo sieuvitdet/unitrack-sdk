@@ -297,9 +297,14 @@ public final class SnowplowProvider: AnalyticsProvider {
         // Click family
         case "click", "tap":
             return "click"
-        // Screen family — 3 lifecycle events share `screen_view` kind
-        case "screen_view", "screen_viewed", "screen_exited", "screen_load_completed":
+        // Screen family — split into 2 kinds so exit gets its own iglu schema:
+        //   screen_view  ← entry + load-completed (share entry schema)
+        //   screen_end   ← exit (separate schema; carries dwell_ms, foreground_sec, …)
+        // Data team publishes iglu:<vendor>/screen_view + iglu:<vendor>/screen_end.
+        case "screen_view", "screen_viewed", "screen_load_completed":
             return "screen_view"
+        case "screen_exited":
+            return "screen_end"
         // Network / API family
         case "network_request":
             return "api"
@@ -323,6 +328,7 @@ public final class SnowplowProvider: AnalyticsProvider {
         case "click":       return "event_click"
         case "result":      return "event_result"
         case "screen_view": return "event_screen_view"
+        case "screen_end":  return "screen_end"
         case "crash":       return "event_crash"
         case "api":         return "event_api"
         case "session":     return "event_session"

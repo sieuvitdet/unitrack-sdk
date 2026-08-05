@@ -31,6 +31,7 @@ export type ConventionKind =
   | 'click'
   | 'result'
   | 'screen_view'
+  | 'screen_end'
   | 'crash'
   | 'api'
   | 'session';
@@ -77,6 +78,7 @@ const DEFAULT_EVENT_NAMES: Record<ConventionKind, string> = {
   click: 'event_click',
   result: 'event_result',
   screen_view: 'event_screen_view',
+  screen_end: 'screen_end',
   crash: 'event_crash',
   api: 'event_api',
   session: 'event_session',
