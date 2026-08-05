@@ -29,6 +29,10 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     // and the current one. Rolled over on the 0→1 transition. Read by
     // UniTrack.setScreen() to stamp `background_sec` on screen_exited.
     @Volatile private var lastBackgroundDwellSec: Int = 0
+    // Timestamp of the most recent 0→1 foreground transition (or cold start).
+    // Used to compute `foreground_sec` on the screen_exited event fired at
+    // background-time. 0 until the first foreground.
+    @Volatile private var lastForegroundedAtMs: Long = 0L
 
     fun backgroundDwellSec(): Int = lastBackgroundDwellSec
 
@@ -74,6 +78,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                 lastBackgroundDwellSec = ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
                 backgroundedAtMs = 0L
             }
+            lastForegroundedAtMs = System.currentTimeMillis()
             NativeBridge.logForeground()
             // Re-fire screen_viewed for the top Activity on resume. Android
             // doesn't automatically re-call onResume when the process comes
@@ -101,9 +106,18 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             // screen_exited.
             val current = UniTrack.previousScreenName()
             if (!current.isNullOrEmpty()) {
+                // foreground_sec = giây ở foreground kể từ lần bg→fg gần nhất
+                // (hoặc cold-start) tới lúc exit này.
+                val fgSec: Int = if (lastForegroundedAtMs > 0L) {
+                    ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+                } else 0
                 UniTrack.track("screen_exited", mapOf(
                     "screen"         to current,
                     "screen_name"    to current,
+                    "foreground_sec" to fgSec,
+                    // background_sec = dwell của bg→fg lần trước, giữ để schema
+                    // field-list đồng nhất (consumer khỏi null-check).
+                    "background_sec" to lastBackgroundDwellSec.toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))

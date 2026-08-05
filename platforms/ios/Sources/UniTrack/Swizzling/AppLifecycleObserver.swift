@@ -74,9 +74,24 @@ enum AppLifecycleObserver {
             // lifecycle transition downstream. Product spec: "app bị pop /
             // exit" counts as screen_exited.
             if let current = UniTrack.previousScreenName(), !current.isEmpty {
+                // foreground_sec = giây ở foreground kể từ lần bg→fg gần nhất
+                // (hoặc cold-start) tới lúc exit này. Downstream dùng để tính
+                // engagement per-foreground-session, phân biệt với dwell_ms
+                // của navigate-away.
+                let fgSec: Int
+                if let fgAt = lastForegroundedAt {
+                    fgSec = Int(Date().timeIntervalSince(fgAt))
+                } else {
+                    fgSec = 0
+                }
                 let endPayload: [String: Any] = [
                     "screen":         current,
                     "screen_name":    current,
+                    "foreground_sec": fgSec,
+                    // background_sec = 0 vì đây là bg-EXIT event, chưa vào bg;
+                    // chỉ set khi resume (screen_viewed sau bg→fg). Kept để
+                    // schema field-list đồng nhất — consumer không phải null-check.
+                    "background_sec": String(lastBackgroundDwellSec),
                     "is_exit_screen": "true",
                     "reason":         "app_backgrounded",
                 ]
