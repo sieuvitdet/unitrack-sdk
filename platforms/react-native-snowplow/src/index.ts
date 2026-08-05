@@ -62,6 +62,10 @@ export interface SnowplowProviderConfig {
   /** Entity name → schema URI. SDK auto-fills data for user_context,
    *  core_action, application_context; other names need extraContexts. */
   entities?: Record<string, string>;
+  /** Raw event names to drop before hitting the collector. Portal
+   *  `snowplow.drop_events` — used for SDK-emitted lifecycle events
+   *  (app_foreground / app_background / …) without matching iglu schemas. */
+  dropEvents?: string[];
   /** Snapshot of DeviceInfo (platform, app_version, network_type, …) used to
    *  populate the application_context entity. Pass from the app at init time
    *  (RN doesn't have a `UniTrack.applicationContext()` static helper yet). */
@@ -171,6 +175,10 @@ export class SnowplowProvider implements AnalyticsProvider {
    *  typed tracking* helpers below — they pre-fill action_name + screen +
    *  element_key into the core_action entity. */
   track(name: string, properties: EventProperties): void {
+    // Portal-configured blocklist — drop before URL build so events without
+    // a published iglu schema (app_foreground, app_background, …) don't
+    // turn into bad rows at the enricher.
+    if (this.cfg.dropEvents?.includes(name)) return;
     const schema = this.schemaFor(name);
     if (!schema) return;
     this.trackSelfDescribing(

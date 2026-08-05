@@ -98,6 +98,12 @@ public final class SnowplowProvider: AnalyticsProvider {
     // for it via the helper's `extraContexts:` parameter.
     private var entities: [String: String]
 
+    // Raw event names to drop before hitting the collector. Set via portal
+    // `snowplow.drop_events` — apps register the SDK-emitted lifecycle events
+    // (app_foreground / app_background / …) here when the data team hasn't
+    // published matching iglu schemas, so those events don't become bad rows.
+    private var dropEvents: Set<String>
+
     // user_context bag. Mutated by setUser(_:_:) so traits land on the next
     // event without the integrator having to re-register the provider.
     private var userContext: [String: Any]
@@ -112,7 +118,8 @@ public final class SnowplowProvider: AnalyticsProvider {
                 igluVendor: String? = nil,
                 defaultVersion: String = "1-0-0",
                 eventNames: [String: String] = [:],
-                entities: [String: String] = [:]) {
+                entities: [String: String] = [:],
+                dropEvents: [String] = []) {
         self.endpoint = endpoint
         self.appId = appId
         self.namespace = namespace
@@ -122,6 +129,7 @@ public final class SnowplowProvider: AnalyticsProvider {
         self.defaultVersion = defaultVersion
         self.eventNames = eventNames
         self.entities = entities
+        self.dropEvents = Set(dropEvents)
     }
 
     public func initializeProvider() {
@@ -214,6 +222,7 @@ public final class SnowplowProvider: AnalyticsProvider {
     public func updateUserContext(_ ctx: [String: Any]) { userContext = ctx }
     public func setEventNames(_ map: [String: String])  { eventNames = map }
     public func setEntities(_ map: [String: String])    { entities = map }
+    public func setDropEvents(_ names: [String])        { dropEvents = Set(names) }
 
     /// Tear down the underlying Snowplow tracker so a re-init (vd portal
     /// pushed a new endpoint) doesn't leak the old tracker. Without this,
@@ -253,6 +262,10 @@ public final class SnowplowProvider: AnalyticsProvider {
         // UniTrack carry `_skip_snowplow: true`. Tracking them again would
         // double-emit to the collector and loop infinitely.
         if (properties["_skip_snowplow"] as? Bool) == true { return }
+        // Portal-configured blocklist — drop before URL build so events
+        // without a published iglu schema (app_foreground, app_background, …)
+        // don't turn into bad rows at the enricher.
+        if dropEvents.contains(name) { return }
         // Auto-capture / screen-lifecycle events get routed to the right kind
         // so they all share 1 schema (vd: screen_viewed + screen_exited +
         // screen_load_completed → kind=screen_view → 1 iglu schema). When the
@@ -821,13 +834,15 @@ public final class SnowplowProvider: AnalyticsProvider {
                 igluVendor: String? = nil,
                 defaultVersion: String = "1-0-0",
                 eventNames: [String: String] = [:],
-                entities: [String: String] = [:]) {}
+                entities: [String: String] = [:],
+                dropEvents: [String] = []) {}
     public func initializeProvider() {
         NSLog("[UniTrackSnowplow] SnowplowTracker not available")
     }
     public func updateUserContext(_ ctx: [String: Any]) {}
     public func setEventNames(_ map: [String: String]) {}
     public func setEntities(_ map: [String: String]) {}
+    public func setDropEvents(_ names: [String]) {}
     public func track(_ name: String, _ properties: [String: Any]) {}
     public func setUser(_ userId: String?, _ traits: [String: Any]) {}
     public func setScreen(_ name: String) {}

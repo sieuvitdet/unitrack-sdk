@@ -46,13 +46,15 @@ class SnowplowProvider extends AnalyticsProvider {
     this.defaultVersion = '1-0-0',
     Map<String, String> eventNames = const {},
     Map<String, String> entities = const {},
+    List<String> dropEvents = const [],
     this.portalEndpoint,
     this.portalApiKey,
   })  : userContext = userContext == null
             ? <String, Object?>{}
             : Map<String, Object?>.from(userContext),
         _eventNames = Map<String, String>.from(eventNames),
-        _entities = Map<String, String>.from(entities);
+        _entities = Map<String, String>.from(entities),
+        _dropEvents = dropEvents.toSet();
 
   /// Build [SnowplowProvider] hoàn chỉnh từ Portal config — đọc endpoint,
   /// appId, iglu_vendor, event_names, entities, options, default_version
@@ -90,6 +92,9 @@ class SnowplowProvider extends AnalyticsProvider {
             (sp['event_names'] as Map).map((k, v) =>
                 MapEntry(k.toString(), v.toString())))
         : <String, String>{};
+    final dropEvents = (sp['drop_events'] is List)
+        ? List<String>.from((sp['drop_events'] as List).map((e) => e.toString()))
+        : const <String>[];
 
     final provider = SnowplowProvider(
       endpoint: ep,
@@ -99,6 +104,7 @@ class SnowplowProvider extends AnalyticsProvider {
       defaultVersion: version,
       eventNames: eventNames,
       entities: cfg.snowplowEntityURIs,
+      dropEvents: dropEvents,
       userContext: (sp['userContext'] is Map)
           ? Map<String, Object?>.from(sp['userContext'] as Map)
           : null,
@@ -154,6 +160,12 @@ class SnowplowProvider extends AnalyticsProvider {
   Map<String, String> _entities;
   Map<String, String> get entities => _entities;
 
+  /// Raw event names to drop before hitting the collector. Portal
+  /// `snowplow.drop_events` — used for SDK-emitted lifecycle events
+  /// (app_foreground / app_background / …) without matching iglu schemas.
+  Set<String> _dropEvents;
+  Set<String> get dropEvents => _dropEvents;
+
   /// Per-user properties attached to every event under the user_context entity
   /// (if `entities['user_context']` is set). Mutate via [updateUserContext] or
   /// the SDK's identify() — both round-trip through here.
@@ -172,6 +184,12 @@ class SnowplowProvider extends AnalyticsProvider {
   void setEntities(Map<String, String> next) {
     _entities = Map<String, String>.from(next);
     debugPrint('[unitrack_snowplow] entities updated: ${_entities.length} entries');
+  }
+
+  /// Replace the blocklist of raw event names dropped before send.
+  void setDropEvents(Iterable<String> next) {
+    _dropEvents = next.toSet();
+    debugPrint('[unitrack_snowplow] drop_events updated: ${_dropEvents.length} entries');
   }
 
   /// Update the user-context entity values at runtime (e.g. after login).
@@ -720,6 +738,10 @@ class SnowplowProvider extends AnalyticsProvider {
       });
       return;
     }
+    // Portal-configured blocklist — drop before URL build so events
+    // without a published iglu schema (app_foreground, app_background, …)
+    // don't turn into bad rows at the enricher.
+    if (_dropEvents.contains(name)) return;
     // Convention-kind routing. The 6 built-in kinds (click / result /
     // screen_view / crash / api / session) resolve via portal `event_names`
     // so the iglu schema becomes the wire name (e.g. click → event_click).

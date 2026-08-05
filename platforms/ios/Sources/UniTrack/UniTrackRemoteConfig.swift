@@ -121,6 +121,11 @@ public struct UniTrackRemoteConfig: Codable {
         public var eventNames: [String: String]?
         /// Auto-attached context entities: entity name → iglu schema URI.
         public var entities: [String: String]?
+        /// Raw event names to drop before sending to the collector. Used for
+        /// SDK-emitted lifecycle events (app_foreground, app_background, …)
+        /// when the data team hasn't published matching iglu schemas — the
+        /// enricher would otherwise turn them into bad rows.
+        public var dropEvents: [String]?
         enum CodingKeys: String, CodingKey {
             case enabled, endpoint, appId, namespace, options
             case userContext
@@ -129,6 +134,7 @@ public struct UniTrackRemoteConfig: Codable {
             case defaultVersion = "default_version"
             case eventNames     = "event_names"
             case entities
+            case dropEvents     = "drop_events"
         }
     }
 

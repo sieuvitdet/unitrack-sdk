@@ -71,6 +71,11 @@ class SnowplowProvider(
     private var eventNames: Map<String, String> = emptyMap(),
     /** Auto-attached context entity name → schema URI. */
     private var entities: Map<String, String> = emptyMap(),
+    /** Raw event names to drop before hitting the collector. Portal
+     *  `snowplow.drop_events` — used for SDK-emitted lifecycle events
+     *  (app_foreground / app_background / …) when the data team hasn't
+     *  published matching iglu schemas, so those events don't become bad rows. */
+    private var dropEvents: Set<String> = emptySet(),
 ) : AnalyticsProvider {
 
     private var tracker: TrackerController? = null
@@ -104,6 +109,7 @@ class SnowplowProvider(
     }
     fun setEventNames(map: Map<String, String>) { eventNames = map }
     fun setEntities(map: Map<String, String>)   { entities = map }
+    fun setDropEvents(names: Collection<String>) { dropEvents = names.toSet() }
 
     /** Tear down the underlying Snowplow tracker so a re-init (vd portal
      *  pushed a new endpoint) doesn't leak the old tracker. Without this,
@@ -129,6 +135,10 @@ class SnowplowProvider(
     override fun track(name: String, properties: Map<String, Any?>) {
         if (properties["_skip_snowplow"] == true) {
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$name\" — _skip_snowplow=true")
+            return
+        }
+        if (name in dropEvents) {
+            com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$name\" — in snowplow.drop_events")
             return
         }
         // Auto-capture / lifecycle events get routed to the right convention
