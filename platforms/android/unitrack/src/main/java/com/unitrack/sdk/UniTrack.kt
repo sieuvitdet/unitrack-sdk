@@ -815,21 +815,25 @@ object UniTrack {
         if (screenLifecycleEnabled) {
             val prev = previous
             if (prev != null && prev.isNotEmpty()) {
-                val foregroundSec = ((dwellMs + 500L) / 1000L).toInt()
+                // Per-screen counters — Snowplow builtin screen_summary/1-0-0
+                // semantic. foreground_sec = tổng giây user active trên
+                // screen vừa close. background_sec = tổng giây screen đó ở
+                // bg. Roll về 0 ngay sau để screen mới đếm lại.
+                val obs = com.unitrack.sdk.lifecycle.AppLifecycleObserver
+                val fgSec = obs.foregroundDwellSec()
+                val bgSec = obs.backgroundDwellSec()
                 val endPayload: Map<String, Any?> = mapOf(
                     "screen"          to prev,
                     "screen_name"     to prev,
-                    "dwell_ms"        to dwellMs,
-                    "foreground_sec"  to foregroundSec,
-                    // Background dwell of the most recent bg→fg transition,
-                    // or 0 if the app has never backgrounded. Lets the data
-                    // team tell "exited via bg" from "exited via nav".
-                    "background_sec"  to com.unitrack.sdk.lifecycle.AppLifecycleObserver.backgroundDwellSec().toString(),
+                    "dwell_ms"        to dwellMs.toString(),
+                    "foreground_sec"  to fgSec.toString(),
+                    "background_sec"  to bgSec.toString(),
                     // ponytail: string "false" thay vì Boolean để parity iOS
                     // + tránh Snowplow schema reject (boolean found, string expected).
                     "is_exit_screen"  to "false",
                 )
                 dispatchToProviders(screenEndEventName, endPayload)
+                obs.rollScreenCounters()
             }
         }
         // screen start — dispatched with the app-configured raw name so

@@ -761,22 +761,26 @@ public final class UniTrack {
         // Snowplow's schema-aligned consumers see one canonical payload
         // regardless of which path delivered the event.
         if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
-            let foregroundSec = (dwellMs + 500) / 1000
+            // Per-screen counters — Snowplow builtin screen_summary/1-0-0
+            // semantic. foreground_sec = tổng giây user active trên screen
+            // vừa close (dwell trừ đi các window bg giữa chừng).
+            // background_sec = tổng giây screen đó ở bg. Roll counters về 0
+            // ngay sau đây để screen mới bắt đầu đếm từ 0.
+            let fgSec = AppLifecycleObserver.foregroundDwellSec()
+            let bgSec = AppLifecycleObserver.backgroundDwellSec()
             let endPayload: [String: Any] = [
                 "screen":          prev,
                 "screen_name":     prev,
-                "dwell_ms":        dwellMs,
-                "foreground_sec":  foregroundSec,
-                // Background dwell of the most recent bg→fg transition, or 0
-                // if the app has never backgrounded. Lets the data team tell
-                // "exited via bg" from "exited via nav" in the same event.
-                "background_sec":  String(AppLifecycleObserver.backgroundDwellSec()),
+                "dwell_ms":        String(dwellMs),
+                "foreground_sec":  String(fgSec),
+                "background_sec":  String(bgSec),
                 // ponytail: string ("true"/"false") thay vì bool để parity với
                 // Iglu schema application_context (is_debug/is_rooted đã string).
                 // Downstream consumer (Snowplow enricher) expect string form.
                 "is_exit_screen":  "false",
             ]
             dispatchToProviders(shared.screenEndEventName, endPayload)
+            AppLifecycleObserver.rollScreenCounters()
         }
         // screen start — dispatched with the app-configured raw name
         // (screen_viewed by default in FPT Life config) so consumers

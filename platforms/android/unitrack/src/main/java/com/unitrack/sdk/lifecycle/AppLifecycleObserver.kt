@@ -28,28 +28,37 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     // Timestamp of the most recent 0→1 foreground transition (or cold start).
     // 0 until the first foreground.
     @Volatile private var lastForegroundedAtMs: Long = 0L
-    // Cumulative seconds spent in bg / fg WITHIN THE CURRENT SESSION. Reset
-    // on session rotation via resetSessionCountersIfNeeded(). Bg counter
-    // rolled forward on bg→fg, fg counter rolled forward on fg→bg.
-    @Volatile private var sessionBackgroundSec: Int = 0
-    @Volatile private var sessionForegroundSec: Int = 0
-    // The session_id these counters were opened against. When the current
-    // session_id changes (rotation), we reset before stamping so counters
-    // never leak across sessions.
-    @Volatile private var countersOpenedForSession: String = ""
 
-    fun backgroundDwellSec(): Int {
-        resetSessionCountersIfNeeded()
-        return sessionBackgroundSec
+    // ── Per-screen counters (match Snowplow screen_summary semantic) ───────
+    // foreground_sec = giây user active trên SCREEN NÀY (từ setScreen tới
+    //                  lúc close screen). Reset per-screen.
+    // background_sec = giây SCREEN NÀY ở bg (app bg trong khi screen đang
+    //                  active). Reset per-screen.
+    // Roll-forward:
+    //   • setScreen(newName)   → close screen cũ, rollScreenCounters() cho screen mới
+    //   • onActivityStopped    → +fg dwell hiện tại vào screenForegroundSec
+    //   • onActivityStarted    → +bg dwell hiện tại vào screenBackgroundSec
+    @Volatile private var screenForegroundSec: Int = 0
+    @Volatile private var screenBackgroundSec: Int = 0
+
+    /** Cumulative giây screen hiện tại đã ở bg. Đọc bởi setScreen(). */
+    fun backgroundDwellSec(): Int = screenBackgroundSec
+
+    /** Cumulative giây screen hiện tại đã ở fg. Bao gồm window fg đang mở. */
+    fun foregroundDwellSec(): Int {
+        var total = screenForegroundSec
+        if (lastForegroundedAtMs > 0L) {
+            total += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+        }
+        return total
     }
 
-    private fun resetSessionCountersIfNeeded() {
-        val sid = UniTrack.currentSessionId()
-        if (sid != countersOpenedForSession) {
-            sessionBackgroundSec = 0
-            sessionForegroundSec = 0
-            countersOpenedForSession = sid
-        }
+    /** Called by UniTrack.setScreen() sau khi đã stamp counters vào
+     *  screen_exited payload. Reset để screen mới đếm lại từ 0. */
+    fun rollScreenCounters() {
+        screenForegroundSec = 0
+        screenBackgroundSec = 0
+        lastForegroundedAtMs = System.currentTimeMillis()
     }
 
     fun install(app: Application) {
@@ -88,11 +97,9 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         if (started == 0 && !inForeground) {
             val isResume = backgroundedAtMs > 0L   // false on very first launch
             inForeground = true
-            // Add the bg dwell we just completed to the session's cumulative
-            // total BEFORE clearing backgroundedAtMs.
-            resetSessionCountersIfNeeded()
+            // Roll bg window vừa completed vào per-screen counter.
             if (backgroundedAtMs > 0L) {
-                sessionBackgroundSec += ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
+                screenBackgroundSec += ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
                 backgroundedAtMs = 0L
             }
             lastForegroundedAtMs = System.currentTimeMillis()
@@ -117,11 +124,9 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         started = (started - 1).coerceAtLeast(0)
         if (started == 0 && inForeground) {
             inForeground = false
-            // Roll the fg window we just closed into the session's cumulative
-            // total BEFORE stamping / firing anything downstream.
-            resetSessionCountersIfNeeded()
+            // Roll fg window vừa closed vào per-screen counter BEFORE stamping.
             if (lastForegroundedAtMs > 0L) {
-                sessionForegroundSec += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+                screenForegroundSec += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
                 lastForegroundedAtMs = 0L
             }
             // Fire screen_exited for the top Activity BEFORE app_background so
@@ -133,12 +138,10 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                 UniTrack.track("screen_exited", mapOf(
                     "screen"         to current,
                     "screen_name"    to current,
-                    // Cumulative per-session. background_sec = tổng giây app
-                    // đã ở bg trong session hiện tại (chưa tính lần bg đang
-                    // chuẩn bị bắt đầu). foreground_sec = tổng giây app đã ở
-                    // fg trong session. String parity Iglu schema.
-                    "foreground_sec" to sessionForegroundSec.toString(),
-                    "background_sec" to sessionBackgroundSec.toString(),
+                    // Per-screen semantics — match Snowplow screen_summary/1-0-0.
+                    // String parity Iglu schema.
+                    "foreground_sec" to screenForegroundSec.toString(),
+                    "background_sec" to screenBackgroundSec.toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))
