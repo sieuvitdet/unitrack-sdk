@@ -114,9 +114,9 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                 UniTrack.track("screen_exited", mapOf(
                     "screen"         to current,
                     "screen_name"    to current,
-                    "foreground_sec" to fgSec,
-                    // background_sec = dwell của bg→fg lần trước, giữ để schema
-                    // field-list đồng nhất (consumer khỏi null-check).
+                    // String để parity Iglu schema (is_debug/is_rooted/... đã
+                    // string); enricher expect string form.
+                    "foreground_sec" to fgSec.toString(),
                     "background_sec" to lastBackgroundDwellSec.toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",

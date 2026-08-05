@@ -87,10 +87,9 @@ enum AppLifecycleObserver {
                 let endPayload: [String: Any] = [
                     "screen":         current,
                     "screen_name":    current,
-                    "foreground_sec": fgSec,
-                    // background_sec = 0 vì đây là bg-EXIT event, chưa vào bg;
-                    // chỉ set khi resume (screen_viewed sau bg→fg). Kept để
-                    // schema field-list đồng nhất — consumer không phải null-check.
+                    // String để parity Iglu schema (is_debug/is_rooted/... đã
+                    // string); enricher expect string form.
+                    "foreground_sec": String(fgSec),
                     "background_sec": String(lastBackgroundDwellSec),
                     "is_exit_screen": "true",
                     "reason":         "app_backgrounded",
