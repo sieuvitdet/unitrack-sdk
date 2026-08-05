@@ -25,16 +25,32 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     // when we come back foreground so `backgroundDwellSec` reports the
     // MOST RECENT bg→fg gap, not a running total.
     @Volatile private var backgroundedAtMs: Long = 0L
-    // Seconds the app spent in background between the previous foreground
-    // and the current one. Rolled over on the 0→1 transition. Read by
-    // UniTrack.setScreen() to stamp `background_sec` on screen_exited.
-    @Volatile private var lastBackgroundDwellSec: Int = 0
     // Timestamp of the most recent 0→1 foreground transition (or cold start).
-    // Used to compute `foreground_sec` on the screen_exited event fired at
-    // background-time. 0 until the first foreground.
+    // 0 until the first foreground.
     @Volatile private var lastForegroundedAtMs: Long = 0L
+    // Cumulative seconds spent in bg / fg WITHIN THE CURRENT SESSION. Reset
+    // on session rotation via resetSessionCountersIfNeeded(). Bg counter
+    // rolled forward on bg→fg, fg counter rolled forward on fg→bg.
+    @Volatile private var sessionBackgroundSec: Int = 0
+    @Volatile private var sessionForegroundSec: Int = 0
+    // The session_id these counters were opened against. When the current
+    // session_id changes (rotation), we reset before stamping so counters
+    // never leak across sessions.
+    @Volatile private var countersOpenedForSession: String = ""
 
-    fun backgroundDwellSec(): Int = lastBackgroundDwellSec
+    fun backgroundDwellSec(): Int {
+        resetSessionCountersIfNeeded()
+        return sessionBackgroundSec
+    }
+
+    private fun resetSessionCountersIfNeeded() {
+        val sid = UniTrack.currentSessionId()
+        if (sid != countersOpenedForSession) {
+            sessionBackgroundSec = 0
+            sessionForegroundSec = 0
+            countersOpenedForSession = sid
+        }
+    }
 
     fun install(app: Application) {
         app.registerActivityLifecycleCallbacks(this)
@@ -72,10 +88,11 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         if (started == 0 && !inForeground) {
             val isResume = backgroundedAtMs > 0L   // false on very first launch
             inForeground = true
-            // Freeze the bg dwell BEFORE clearing backgroundedAtMs so
-            // subsequent screen_exited events can stamp background_sec.
+            // Add the bg dwell we just completed to the session's cumulative
+            // total BEFORE clearing backgroundedAtMs.
+            resetSessionCountersIfNeeded()
             if (backgroundedAtMs > 0L) {
-                lastBackgroundDwellSec = ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
+                sessionBackgroundSec += ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
                 backgroundedAtMs = 0L
             }
             lastForegroundedAtMs = System.currentTimeMillis()
@@ -100,24 +117,28 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         started = (started - 1).coerceAtLeast(0)
         if (started == 0 && inForeground) {
             inForeground = false
+            // Roll the fg window we just closed into the session's cumulative
+            // total BEFORE stamping / firing anything downstream.
+            resetSessionCountersIfNeeded()
+            if (lastForegroundedAtMs > 0L) {
+                sessionForegroundSec += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+                lastForegroundedAtMs = 0L
+            }
             // Fire screen_exited for the top Activity BEFORE app_background so
             // the exit event is ordered before the lifecycle transition
             // downstream. Product spec: "app bị pop / exit" counts as
             // screen_exited.
             val current = UniTrack.previousScreenName()
             if (!current.isNullOrEmpty()) {
-                // foreground_sec = giây ở foreground kể từ lần bg→fg gần nhất
-                // (hoặc cold-start) tới lúc exit này.
-                val fgSec: Int = if (lastForegroundedAtMs > 0L) {
-                    ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
-                } else 0
                 UniTrack.track("screen_exited", mapOf(
                     "screen"         to current,
                     "screen_name"    to current,
-                    // String để parity Iglu schema (is_debug/is_rooted/... đã
-                    // string); enricher expect string form.
-                    "foreground_sec" to fgSec.toString(),
-                    "background_sec" to lastBackgroundDwellSec.toString(),
+                    // Cumulative per-session. background_sec = tổng giây app
+                    // đã ở bg trong session hiện tại (chưa tính lần bg đang
+                    // chuẩn bị bắt đầu). foreground_sec = tổng giây app đã ở
+                    // fg trong session. String parity Iglu schema.
+                    "foreground_sec" to sessionForegroundSec.toString(),
+                    "background_sec" to sessionBackgroundSec.toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))
