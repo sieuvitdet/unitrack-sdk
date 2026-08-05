@@ -511,7 +511,12 @@ class SnowplowProvider(
                            skipGlobalContexts: Boolean = false) {
         val t = tracker ?: return
         val sv = ScreenView(screenName)
-        sv.entities.addAll(buildEntities("screen_view", screenName, null, null, skipGlobalContexts))
+        // Prefer the app-configured raw name (screen_viewed / …) so
+        // core_action.action_name matches what trackSelfDescribing stamps —
+        // otherwise this native ScreenView path fires with action_name="screen_view".
+        val rawScreenName = eventName("screen_view", "screen_view")
+        sv.entities.addAll(buildEntities("screen_view", screenName, null, null, skipGlobalContexts,
+                                         actionName = rawScreenName))
         t.track(sv)
         val name = eventName("screen_view", "event_screen_view")
         val schema = schemaFor(name) ?: return

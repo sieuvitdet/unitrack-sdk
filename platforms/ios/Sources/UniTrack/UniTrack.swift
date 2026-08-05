@@ -778,26 +778,21 @@ public final class UniTrack {
             ]
             dispatchToProviders(shared.screenEndEventName, endPayload)
         }
-        // screen_view (legacy back-compat) — kept so older portal consumers
-        // and the Snowplow native ScreenView call (above via setScreen) stay
-        // mutually consistent.
-        let viewPayload: [String: Any] = [
+        // screen start — dispatched with the app-configured raw name
+        // (screen_viewed by default in FPT Life config) so consumers
+        // pivoting on event_action / core_action.action_name see the
+        // business name, not the schema kind "screen_view". Fire once
+        // regardless of screen_lifecycle so the entry event never drops.
+        var startPayload: [String: Any] = [
             "screen":      name,
             "screen_name": name,
         ]
-        dispatchToProviders("screen_view", viewPayload)
-        if shared.screenLifecycleEnabled {
-            var startPayload: [String: Any] = [
-                "screen":      name,
-                "screen_name": name,
-            ]
-            if let prev = previous, !prev.isEmpty {
-                startPayload["from"]                 = prev
-                startPayload["from_screen"]          = prev
-                startPayload["previous_screen_name"] = prev
-            }
-            dispatchToProviders(shared.screenStartEventName, startPayload)
+        if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+            startPayload["from"]                 = prev
+            startPayload["from_screen"]          = prev
+            startPayload["previous_screen_name"] = prev
         }
+        dispatchToProviders(shared.screenStartEventName, startPayload)
     }
 
     public static func flush() {

@@ -686,10 +686,15 @@ public final class SnowplowProvider: AnalyticsProvider {
                                    skipGlobalContexts: Bool = false) {
         guard let tracker = tracker else { return }
         let sv = ScreenView(name: screenName)
+        // Prefer the app-configured raw name (screen_viewed / …) so
+        // core_action.action_name matches what trackSelfDescribing stamps —
+        // otherwise this native ScreenView path fires with action_name="screen_view".
+        let rawScreenName = resolveEventName(kind: "screen_view", defaultName: "screen_view")
         _ = sv.entities(buildEntities(forEventName: "screen_view",
                                       screen: screenName, elementKey: nil,
                                       extra: nil,
-                                      skipGlobalContexts: skipGlobalContexts))
+                                      skipGlobalContexts: skipGlobalContexts,
+                                      actionName: rawScreenName))
         tracker.track(sv)
         let name = resolveEventName(kind: "screen_view", defaultName: "event_screen_view")
         guard let schema = schemaFor(eventName: name) else { return }

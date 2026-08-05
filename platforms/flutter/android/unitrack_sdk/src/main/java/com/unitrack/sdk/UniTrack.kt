@@ -815,27 +815,21 @@ object UniTrack {
                 dispatchToProviders(screenEndEventName, endPayload)
             }
         }
-        // screen_view (legacy back-compat) — kept so older portal consumers
-        // and the Snowplow native ScreenView setScreen call stay mutually
-        // consistent in case the app wires non-default providers.
-        val viewPayload: Map<String, Any?> = mapOf(
+        // screen start — dispatched with the app-configured raw name so
+        // consumers pivoting on event_action / core_action.action_name see
+        // the business name (screen_viewed) not the schema kind
+        // (screen_view). Fire once regardless of screen_lifecycle.
+        val startPayload = mutableMapOf<String, Any?>(
             "screen"      to name,
             "screen_name" to name,
         )
-        dispatchToProviders("screen_view", viewPayload)
-        if (screenLifecycleEnabled) {
-            val startPayload = mutableMapOf<String, Any?>(
-                "screen"      to name,
-                "screen_name" to name,
-            )
-            val prev = previous
-            if (prev != null && prev.isNotEmpty()) {
-                startPayload["from"]                 = prev
-                startPayload["from_screen"]          = prev
-                startPayload["previous_screen_name"] = prev
-            }
-            dispatchToProviders(screenStartEventName, startPayload)
+        val prev = previous
+        if (screenLifecycleEnabled && prev != null && prev.isNotEmpty()) {
+            startPayload["from"]                 = prev
+            startPayload["from_screen"]          = prev
+            startPayload["previous_screen_name"] = prev
         }
+        dispatchToProviders(screenStartEventName, startPayload)
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------

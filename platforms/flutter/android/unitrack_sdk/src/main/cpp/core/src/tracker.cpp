@@ -210,20 +210,18 @@ void Tracker::set_screen(const std::string& screen_name) {
               ",\"dwell_ms\":" + std::to_string(dwell_ms) +
               ",\"is_exit_screen\":false}");
     }
-    track("screen_view",
-          "{\"screen\":\"" + screen_name +
-          "\",\"screen_name\":\"" + screen_name + "\"}");
-    if (config_.screen_lifecycle) {
-        std::string start_payload = "{\"screen\":\"" + screen_name +
-                                    "\",\"screen_name\":\"" + screen_name + "\"";
-        if (!previous.empty()) {
-            start_payload += ",\"from\":\"" + previous + "\"";
-            start_payload += ",\"from_screen\":\"" + previous + "\"";
-            start_payload += ",\"previous_screen_name\":\"" + previous + "\"";
-        }
-        start_payload += "}";
-        track(config_.screen_start_event, start_payload);
+    // screen start — raw name from config so consumers pivoting on
+    // event_action / core_action.action_name see business name
+    // (screen_viewed) not schema kind (screen_view).
+    std::string start_payload = "{\"screen\":\"" + screen_name +
+                                "\",\"screen_name\":\"" + screen_name + "\"";
+    if (config_.screen_lifecycle && !previous.empty()) {
+        start_payload += ",\"from\":\"" + previous + "\"";
+        start_payload += ",\"from_screen\":\"" + previous + "\"";
+        start_payload += ",\"previous_screen_name\":\"" + previous + "\"";
     }
+    start_payload += "}";
+    track(config_.screen_start_event, start_payload);
 }
 
 void Tracker::identify(const std::string& user_id, const std::string& traits_json) {
