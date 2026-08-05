@@ -42,11 +42,21 @@ enum AppLifecycleObserver {
                        object: nil, queue: .main) { _ in
             // Freeze the dwell BEFORE clearing backgroundedAt so subsequent
             // screen_exited events can stamp background_sec.
+            let isResume = (backgroundedAt != nil)   // false on the very first launch
             if let bgAt = backgroundedAt {
                 lastBackgroundDwellSec = Int(Date().timeIntervalSince(bgAt))
             }
             lastForegroundedAt = Date()
             UniTrack.track("app_foreground", properties: [:])
+            // Re-fire screen_viewed for the top VC on resume. UIKit doesn't
+            // re-call viewDidAppear when the app comes back to foreground —
+            // the swizzler stays silent — but product spec says "Màn hình trở
+            // thành foreground" counts as a screen_viewed. Guarded by isResume
+            // so cold start (which already fired via viewDidAppear) doesn't
+            // double-fire.
+            if isResume, let current = UniTrack.previousScreenName(), !current.isEmpty {
+                UniTrack.setScreen(current)
+            }
             // Resolve the session — if background dwell exceeded the timeout,
             // the core rotates internally + we fire session_ended for the
             // closed session before session_started for the new one.
@@ -59,6 +69,19 @@ enum AppLifecycleObserver {
         }
         nc.addObserver(forName: UIApplication.didEnterBackgroundNotification,
                        object: nil, queue: .main) { _ in
+            // Fire screen_exited for the top VC BEFORE app_background so the
+            // exit event carries the correct dwell + is ordered before the
+            // lifecycle transition downstream. Product spec: "app bị pop /
+            // exit" counts as screen_exited.
+            if let current = UniTrack.previousScreenName(), !current.isEmpty {
+                let endPayload: [String: Any] = [
+                    "screen":         current,
+                    "screen_name":    current,
+                    "is_exit_screen": "true",
+                    "reason":         "app_backgrounded",
+                ]
+                UniTrack.track("screen_exited", properties: endPayload)
+            }
             UniTrack.track("app_background", properties: [:])
             // Snapshot the session state so a later session_ended carries the
             // right duration + counters (the SDK doesn't track screen_count

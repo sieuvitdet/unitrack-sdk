@@ -66,6 +66,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
 
     override fun onActivityStarted(a: Activity) {
         if (started == 0 && !inForeground) {
+            val isResume = backgroundedAtMs > 0L   // false on very first launch
             inForeground = true
             // Freeze the bg dwell BEFORE clearing backgroundedAtMs so
             // subsequent screen_exited events can stamp background_sec.
@@ -74,6 +75,17 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                 backgroundedAtMs = 0L
             }
             NativeBridge.logForeground()
+            // Re-fire screen_viewed for the top Activity on resume. Android
+            // doesn't automatically re-call onResume when the process comes
+            // back to foreground for THIS purpose (well it does re-call
+            // onResume, but auto-capture only wires setScreen from onCreate);
+            // product spec (FLI) says "Màn hình trở thành foreground" counts
+            // as screen_viewed. Guarded by isResume so cold start (which
+            // already fired via the Activity swizzler) doesn't double-fire.
+            if (isResume) {
+                val current = UniTrack.previousScreenName()
+                if (!current.isNullOrEmpty()) UniTrack.setScreen(current)
+            }
             UniTrack.dispatchForegroundCallback()
         }
         started++
@@ -83,6 +95,19 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
         started = (started - 1).coerceAtLeast(0)
         if (started == 0 && inForeground) {
             inForeground = false
+            // Fire screen_exited for the top Activity BEFORE app_background so
+            // the exit event is ordered before the lifecycle transition
+            // downstream. Product spec: "app bị pop / exit" counts as
+            // screen_exited.
+            val current = UniTrack.previousScreenName()
+            if (!current.isNullOrEmpty()) {
+                UniTrack.track("screen_exited", mapOf(
+                    "screen"         to current,
+                    "screen_name"    to current,
+                    "is_exit_screen" to "true",
+                    "reason"         to "app_backgrounded",
+                ))
+            }
             backgroundedAtMs = System.currentTimeMillis()
             NativeBridge.logBackground()
             UniTrack.dispatchBackgroundCallback()
