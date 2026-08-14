@@ -784,8 +784,24 @@ object UniTrack {
     }
 
     @JvmStatic
-    fun setScreen(name: String) {
-        forEachProvider { it.setScreen(name) }
+    fun setScreen(name: String) = setScreen(name, reentry = false)
+
+    /**
+     * Vào lại đúng screen vừa rời — dùng cho resume sau background.
+     *
+     * onActivityStopped đã fire screen_exited cho screen này, nên khi app trở
+     * lại foreground đây là boundary thật và phải fan-out screen_viewed.
+     * Nhưng lastScreen vẫn giữ chính tên đó nên setScreen() thường sẽ bị dup
+     * guard (isSameScreen) nuốt mất.
+     *
+     * Hàm này bypass guard đúng một lần và stamp previous = name: screen vào
+     * lại từ chính nó. Provider nhận giá trị này thay vì tự suy — nếu để
+     * Snowplow tự suy, previousName sẽ là màn đứng trước lúc background
+     * (state nội bộ của nó không thấy exit), lệch với UniTrack.
+     */
+    internal fun reenterScreen(name: String) = setScreen(name, reentry = true)
+
+    private fun setScreen(name: String, reentry: Boolean) {
         // Snapshot previous screen + transition timestamp on the binding side
         // so the boundary fan-out below can build matching screen_exited /
         // screen_viewed payloads for providers. The C++ core does its own
@@ -795,15 +811,30 @@ object UniTrack {
         val now = System.currentTimeMillis()
         var previous: String?
         var dwellMs = 0L
+        var isSameScreen = false
+        var cameFrom: String? = null
         synchronized(screenLock) {
             previous = lastScreen
-            if (previous == name) previous = null   // dedupe like the core
+            // reentry (resume sau background): screen_exited đã fire lúc vào
+            // bg nên đây là boundary thật dù tên trùng — bypass guard.
+            isSameScreen = (previous == name) && !reentry
+            // Tên screen thật sự vừa rời, lấy TRƯỚC khi guard reset previous
+            // về null, để stamp xuống provider. Ở reentry nó chính là `name`.
+            cameFrom = previous
+            if (isSameScreen) previous = null
             val prev = previous
             if (prev != null && prev.isNotEmpty() && lastScreenAtMs > 0L) {
                 dwellMs = now - lastScreenAtMs
             }
             lastScreen     = name
             lastScreenAtMs = now
+        }
+        // Gate provider setScreen bằng chính isSameScreen, và stamp previous
+        // từ state của UniTrack — provider KHÔNG tự suy, nếu không hai nguồn
+        // sự thật sẽ lệch (vd Snowplow builtin ScreenView ở resume ra
+        // previousName = màn trước background).
+        if (!isSameScreen) {
+            forEachProvider { it.setScreen(name, cameFrom) }
         }
         if (initialized) NativeBridge.setScreen(name)
 
@@ -812,7 +843,9 @@ object UniTrack {
         // from / from_screen / previous_screen_name / is_exit_screen) so
         // schema-aligned consumers see one canonical payload regardless of
         // which path delivered the event.
-        if (screenLifecycleEnabled) {
+        // !reentry: onActivityStopped đã fire screen_exited cho screen này
+        // rồi, fire lại ở đây là dup.
+        if (screenLifecycleEnabled && !reentry) {
             val prev = previous
             if (prev != null && prev.isNotEmpty()) {
                 // Per-screen counters — Snowplow builtin screen_summary/1-0-0
@@ -850,7 +883,12 @@ object UniTrack {
             startPayload["from_screen"]          = prev
             startPayload["previous_screen_name"] = prev
         }
-        dispatchToProviders(screenStartEventName, startPayload)
+        // Dup guard (xem isSameScreen ở trên): swizzler re-fire onResume sau
+        // khi pop dialog → cùng name, không có screen boundary → không
+        // fan-out entry event nữa.
+        if (!isSameScreen) {
+            dispatchToProviders(screenStartEventName, startPayload)
+        }
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------

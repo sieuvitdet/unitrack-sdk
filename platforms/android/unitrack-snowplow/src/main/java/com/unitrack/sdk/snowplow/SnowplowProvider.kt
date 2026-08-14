@@ -187,7 +187,13 @@ class SnowplowProvider(
         else          -> raw
     }
 
+    override fun setScreen(name: String, previous: String?) = setScreen(name)
+
     override fun setScreen(name: String) {
+        // ponytail: chưa có hybrid path bên Android nên `previous` chưa dùng
+        // tới — override ở trên chỉ để parity signature với iOS. Khi bật
+        // hybrid (fire builtin ScreenView), stamp previousName từ `previous`
+        // thay vì để Snowplow tự suy, xem SnowplowProvider.swift.
         // No-op — firing Snowplow's builtin ScreenView(name) here emits a
         // second event under com.snowplowanalytics.mobile/screen_view —
         // duplicating every screen transition alongside UniTrack's own

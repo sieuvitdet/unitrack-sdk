@@ -113,7 +113,12 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             // already fired via the Activity swizzler) doesn't double-fire.
             if (isResume) {
                 val current = UniTrack.previousScreenName()
-                if (!current.isNullOrEmpty()) UniTrack.setScreen(current)
+                // reenterScreen (không phải setScreen): onActivityStopped đã
+                // fire screen_exited cho chính screen này → boundary thật,
+                // nhưng lastScreen vẫn giữ tên đó nên dup guard sẽ nuốt.
+                // reenterScreen bypass guard đúng một lần và stamp
+                // previous = current để provider không tự suy sai.
+                if (!current.isNullOrEmpty()) UniTrack.reenterScreen(current)
             }
             UniTrack.dispatchForegroundCallback()
         }

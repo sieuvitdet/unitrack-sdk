@@ -113,6 +113,21 @@ public final class UniTrack {
         return shared.lastScreen
     }
 
+    /// Vào lại đúng screen vừa rời — dùng cho resume sau background.
+    ///
+    /// didEnterBackground đã fire screen_exited cho screen này, nên khi app
+    /// trở lại foreground đây là một boundary thật và phải fan-out
+    /// screen_viewed. Nhưng lastScreen vẫn đang giữ chính tên đó, nên
+    /// setScreen() thường sẽ bị dup guard (isSameScreen) nuốt mất.
+    ///
+    /// Hàm này bypass guard đúng một lần và stamp `previous = name`: screen
+    /// vào lại từ chính nó. Provider nhận giá trị này thay vì tự suy — nếu
+    /// để Snowplow tự suy, previousName sẽ là màn đứng trước lúc background
+    /// (state nội bộ của nó không thấy exit), lệch với UniTrack.
+    internal static func reenterScreen(_ name: String) {
+        setScreen(name, layer: nil, reentry: true)
+    }
+
     // Cached user_id từ identify() — customTrack(includeUser:true) đọc lại
     // stamp vào payload. SDK chỉ store value app đưa (app đã hash PII rồi).
     private let identityLock = NSLock()
@@ -715,14 +730,13 @@ public final class UniTrack {
     /// same screen name within the dedup window. Public API stays the
     /// untagged overload above — apps that call `setScreen("Home")`
     /// directly behave exactly as before.
-    static func setScreen(_ name: String, layer: UniTrackLayer?) {
+    static func setScreen(_ name: String, layer: UniTrackLayer?, reentry: Bool = false) {
         // Trace so a "screen_viewed/screen_exited not firing" bug is one log
         // line away from a diagnosis. The core dedupes by screen-name equality
         // (same name twice in a row = no boundary events), so the next line
         // confirms the boundary path was even reached on the C++ side.
         UniTrack.log("[UniTrack] setScreen → name=%@ layer=%@ (calls core ut_set_screen_for_layer which fires screen_start/screen_view/screen_end)",
                      name, layer.map { String(describing: $0) } ?? "none")
-        forEachProvider { $0.setScreen(name) }
         // Snapshot previous screen + transition timestamp on the binding side
         // so the boundary fan-out below can build matching screen_exited /
         // screen_viewed payloads for providers. The C++ core does its own
@@ -734,7 +748,19 @@ public final class UniTrack {
         var dwellMs: Int = 0
         shared.lastScreenLock.lock()
         previous = shared.lastScreen
-        if previous == name { previous = nil } // dedupe like the core does
+        // ponytail: 1-line dup guard. Cùng screen 2 lần liên tiếp (vd viewDidAppear
+        // fire lại sau khi pop popup, hoặc AppLifecycle bg→fg re-fire) → không có
+        // screen boundary thật → skip toàn bộ fan-out: provider setScreen (builtin
+        // ScreenView ở hybrid), screen_exited, và screen_viewed. Trước đây chỉ
+        // reset `previous = nil` để bỏ screen_exited, nhưng screen_viewed vẫn dup.
+        // reentry (resume sau background): screen_exited đã fire lúc vào bg
+        // nên đây là boundary thật dù tên trùng — bypass guard.
+        let isSameScreen = (previous == name) && !reentry
+        // Tên screen thật sự vừa rời, lấy TRƯỚC khi guard reset previous về
+        // nil, để stamp xuống provider. Ở reentry nó chính là `name` — provider
+        // cần biết điều đó thay vì tự suy ra màn đứng trước lúc background.
+        let cameFrom = previous
+        if isSameScreen { previous = nil }
         if let prev = previous, !prev.isEmpty,
            let lastAt = shared.lastScreenAt {
             dwellMs = Int(now.timeIntervalSince(lastAt) * 1000.0)
@@ -742,6 +768,19 @@ public final class UniTrack {
         shared.lastScreen   = name
         shared.lastScreenAt = now
         shared.lastScreenLock.unlock()
+
+        // ponytail: gate provider setScreen bằng CHÍNH isSameScreen ở trên.
+        // Trước đây call này chạy trước khi guard được tính → dưới hybrid
+        // (SnowplowProvider.setScreen fire builtin ScreenView) cùng screen 2
+        // lần liên tiếp vẫn bắn dup, đúng cái mà guard entry fan-out bên dưới
+        // đã chặn cho custom vendor. Provider setScreen khác đều no-op nên
+        // gate ở đây không đổi hành vi path non-hybrid.
+        if !isSameScreen {
+            // Stamp previous từ state của UniTrack — provider KHÔNG tự suy,
+            // nếu không hai nguồn sự thật sẽ lệch (vd Snowplow builtin
+            // ScreenView ở resume ra previousName = màn trước background).
+            forEachProvider { $0.setScreen(name, previous: cameFrom) }
+        }
 
         guard let ctx = shared.context else { return }
         if let layer = layer {
@@ -760,7 +799,9 @@ public final class UniTrack {
         // from / from_screen / previous_screen_name / is_exit_screen) so
         // Snowplow's schema-aligned consumers see one canonical payload
         // regardless of which path delivered the event.
-        if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+        // !reentry: didEnterBackground đã fire screen_exited cho screen này
+        // rồi, fire lại ở đây là dup.
+        if shared.screenLifecycleEnabled, !reentry, let prev = previous, !prev.isEmpty {
             // Per-screen counters — Snowplow builtin screen_summary/1-0-0
             // semantic. foreground_sec = tổng giây user active trên screen
             // vừa close (dwell trừ đi các window bg giữa chừng).
@@ -796,7 +837,13 @@ public final class UniTrack {
             startPayload["from_screen"]          = prev
             startPayload["previous_screen_name"] = prev
         }
-        dispatchToProviders(shared.screenStartEventName, startPayload)
+        // Dup guard (see isSameScreen above): swizzler re-fires viewDidAppear
+        // sau khi pop popup / bg→fg → cùng name, không có screen boundary
+        // → không fan-out entry event nữa. FLI đang thấy screen_viewed dup ×2
+        // là do đúng path này.
+        if !isSameScreen {
+            dispatchToProviders(shared.screenStartEventName, startPayload)
+        }
     }
 
     public static func flush() {

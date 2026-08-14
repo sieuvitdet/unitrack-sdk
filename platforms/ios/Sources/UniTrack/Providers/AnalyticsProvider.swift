@@ -45,9 +45,25 @@ public protocol AnalyticsProvider: AnyObject {
 
     /// The current screen changed.
     func setScreen(_ name: String)
+
+    /// The current screen changed, with the screen it came from.
+    ///
+    /// UniTrack owns the screen state machine (`lastScreen` + the isSameScreen
+    /// dup guard), so it is the single source of truth for what the previous
+    /// screen was. A provider that derives its own previous-screen state will
+    /// drift from UniTrack's whenever UniTrack suppresses a transition — vd
+    /// bg→fg resume, where Snowplow's builtin ScreenView stamps
+    /// `previousName == name` because its internal state never saw the exit.
+    ///
+    /// Default impl drops `previous` and calls `setScreen(name)` so existing
+    /// providers keep compiling; providers that can carry it should override.
+    func setScreen(_ name: String, previous: String?)
 }
 
 public extension AnalyticsProvider {
+    /// Default: ignore `previous`. Providers that can stamp it override this.
+    func setScreen(_ name: String, previous: String?) { setScreen(name) }
+
     /// Ack-aware delivery. Default impl calls `track` and returns `.success` —
     /// existing providers (Snowplow, Firebase) keep working unchanged because
     /// their own SDKs handle retry internally.

@@ -81,6 +81,18 @@ public final class SnowplowProvider: AnalyticsProvider {
     private let appId: String
     private let namespace: String
     private let options: SnowplowOptions
+    /// Hybrid ScreenView mode. Khi true:
+    ///   • setScreen(name) fire Snowplow builtin ScreenView(name:) →
+    ///     event vendor `com.snowplowanalytics.mobile/screen_view/1-0-0`
+    ///     (kèm entity `screen` + `client_session` Snowplow tự attach).
+    ///   • track("screen_viewed", …) bị skip trong SnowplowProvider (đã
+    ///     bắn ở setScreen ngay trước đó — nếu không skip sẽ dup 1 event
+    ///     custom vendor).
+    ///   • screen_exited + screen_load_completed vẫn chạy path SelfDescribing
+    ///     custom vendor (giữ event_action + reason + foreground_sec …).
+    /// Default false → behavior cũ (setScreen no-op, screen_viewed đi qua
+    /// SelfDescribing custom vendor như hiện tại).
+    private let hybridScreenView: Bool
 
     // Convention vendor + version. Schema URI for any event/entity not given
     // an explicit URI in entities[] is built as
@@ -119,7 +131,8 @@ public final class SnowplowProvider: AnalyticsProvider {
                 defaultVersion: String = "1-0-0",
                 eventNames: [String: String] = [:],
                 entities: [String: String] = [:],
-                dropEvents: [String] = []) {
+                dropEvents: [String] = [],
+                hybridScreenView: Bool = false) {
         self.endpoint = endpoint
         self.appId = appId
         self.namespace = namespace
@@ -130,6 +143,7 @@ public final class SnowplowProvider: AnalyticsProvider {
         self.eventNames = eventNames
         self.entities = entities
         self.dropEvents = Set(dropEvents)
+        self.hybridScreenView = hybridScreenView
     }
 
     public func initializeProvider() {
@@ -204,7 +218,7 @@ public final class SnowplowProvider: AnalyticsProvider {
         tracker = Snowplow.createTracker(namespace: namespace,
                                          network: network,
                                          configurations: [trackerConfig, plugin])
-        NSLog("[UniTrackSnowplow] tracker ready (\(endpoint), appId=\(appId), vendor=\(igluVendor ?? "—"), version=\(defaultVersion), entities=\(entities.keys.sorted().joined(separator: ",")))")
+        NSLog("[UniTrackSnowplow] tracker ready (\(endpoint), appId=\(appId), vendor=\(igluVendor ?? "—"), version=\(defaultVersion), entities=\(entities.keys.sorted().joined(separator: ",")), hybridScreenView=\(hybridScreenView))")
     }
 
     /// Pull the short event name out of an iglu URI tail. Returns "" if the
@@ -266,6 +280,14 @@ public final class SnowplowProvider: AnalyticsProvider {
         // without a published iglu schema (app_foreground, app_background, …)
         // don't turn into bad rows at the enricher.
         if dropEvents.contains(name) { return }
+        // Hybrid mode: setScreen(name) đã fire builtin ScreenView cho
+        // screen_viewed rồi. Nếu chạy tiếp path SelfDescribing custom vendor
+        // dưới đây → dup (1 builtin + 1 custom). Skip.
+        // screen_exited + screen_load_completed vẫn đi qua path này (giữ custom
+        // vendor với event_action + reason + foreground_sec fields).
+        if hybridScreenView, name == "screen_viewed" || name == "screen_view" {
+            return
+        }
         // Auto-capture / screen-lifecycle events get routed to the right kind
         // so they all share 1 schema (vd: screen_viewed + screen_exited +
         // screen_load_completed → kind=screen_view → 1 iglu schema). When the
@@ -336,13 +358,43 @@ public final class SnowplowProvider: AnalyticsProvider {
         }
     }
 
-    public func setScreen(_ name: String) {
-        // No-op — firing Snowplow's builtin ScreenView(name:) here emits a
-        // second event under vendor `com.snowplowanalytics.mobile/screen_view`
-        // alongside UniTrack's own FPT-vendor `f_screen_view` (dispatched via
-        // track("screen_viewed", ...)). The data team queries the FPT vendor
-        // only; the builtin duplicate just adds noise. Keep the method so
-        // AnalyticsProvider protocol still compiles.
+    public func setScreen(_ name: String) { setScreen(name, previous: nil) }
+
+    /// `previous` do UniTrack stamp (single source of truth). Khi nil thì để
+    /// Snowplow tự suy như cũ — chỉ xảy ra nếu có caller gọi overload cũ.
+    public func setScreen(_ name: String, previous: String?) {
+        // Hybrid mode: fire Snowplow builtin ScreenView →
+        //   iglu:com.snowplowanalytics.mobile/screen_view/1-0-0
+        // Snowplow SDK tự attach entity `screen` (id, name, previousName, …)
+        // + `client_session` — data team query builtin path, không cần custom
+        // vendor cho screen_viewed nữa. screen_exited + screen_load_completed
+        // vẫn giữ custom vendor (path track() dưới).
+        //
+        // Global entities (user_context, core_action, application_context)
+        // vẫn attach — data team pivot theo action_name / user_id như cũ.
+        if hybridScreenView, let tracker = tracker {
+            let sv = ScreenView(name: name)
+            // Stamp previousName từ UniTrack thay vì để Snowplow tự suy.
+            // Snowplow giữ state screen riêng, không thấy screen_exited mà
+            // UniTrack fire lúc app vào background → ở resume nó sẽ ghi
+            // previousName = màn đứng trước lúc background, trong khi UniTrack
+            // biết screen vào lại từ chính nó. Hai nguồn sự thật, một sai.
+            if let previous = previous, !previous.isEmpty {
+                _ = sv.previousName(previous)
+            }
+            let rawScreenName = resolveEventName(kind: "screen_view", defaultName: "screen_viewed")
+            _ = sv.entities(buildEntities(forEventName: "screen_view",
+                                          screen: name, elementKey: nil,
+                                          extra: nil,
+                                          skipGlobalContexts: false,
+                                          actionName: rawScreenName))
+            tracker.track(sv)
+            UniTrack.log("[UniTrackSnowplow] hybrid setScreen → builtin ScreenView(name=%@) fired (com.snowplowanalytics.mobile/screen_view/1-0-0).", name)
+            return
+        }
+        // Legacy path: no-op. Fire builtin ScreenView khi hybridScreenView=false
+        // sẽ dup với screen_viewed đi qua track() → custom vendor. Giữ no-op
+        // để AnalyticsProvider protocol compile.
         UniTrack.log("[UniTrackSnowplow] setScreen no-op — builtin ScreenView(\"%@\") SUPPRESSED. Convention event fires via track() path.", name)
     }
 

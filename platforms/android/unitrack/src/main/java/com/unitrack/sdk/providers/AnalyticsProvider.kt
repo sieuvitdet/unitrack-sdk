@@ -51,6 +51,21 @@ interface AnalyticsProvider {
     fun setScreen(name: String)
 
     /**
+     * The current screen changed, with the screen it came from.
+     *
+     * UniTrack owns the screen state machine (lastScreen + the isSameScreen
+     * dup guard), so it is the single source of truth for what the previous
+     * screen was. A provider deriving its own previous-screen state drifts
+     * from UniTrack's whenever UniTrack suppresses a transition — vd bg→fg
+     * resume, where Snowplow's builtin ScreenView would stamp
+     * previousName == name because its internal state never saw the exit.
+     *
+     * Default impl drops [previous] and calls [setScreen] so existing
+     * providers keep compiling; providers that can carry it should override.
+     */
+    fun setScreen(name: String, previous: String?) = setScreen(name)
+
+    /**
      * Ack-aware delivery. Default impl calls [track] and returns SUCCESS —
      * existing providers (Snowplow, Firebase) keep working unchanged because
      * their own SDKs handle retry internally.
