@@ -47,7 +47,7 @@ static int64_t read_int_field(const std::string& blob, const std::string& key) {
     return sign * out;
 }
 
-void SessionManager::load_from(const std::string& path) {
+void SessionManager::load_from(const std::string& path, bool headless) {
     std::lock_guard<std::mutex> lock(mu_);
     persist_path_ = path;
     std::ifstream f(path);
@@ -84,7 +84,7 @@ void SessionManager::load_from(const std::string& path) {
     // Resume the persisted session iff it was active within the timeout
     // window. Otherwise treat the gap as a fresh launch and bump the index.
     if (now - saved_last_act <= timeout_ms_) {
-        if (was_clean) {
+        if (was_clean || headless) {
             // Normal resume: process kết thúc bình thường (background) trong
             // timeout window. Tiếp tục session cũ, không rotate.
             session_id_       = saved_id;
@@ -117,7 +117,14 @@ void SessionManager::load_from(const std::string& path) {
     }
     // Reset clean_shutdown=false ngay khi mở app: nếu lần này app bị kill
     // trước khi đến didEnterBackground, lần cold start kế tiếp sẽ detect.
-    clean_shutdown_ = false;
+    //
+    // KHÔNG reset ở headless launch: process này không có UI nên sẽ không bao
+    // giờ chạy qua onActivityStopped để set lại =1. Ghi đè cờ ở đây sẽ làm
+    // lần user mở app thật sau đó bị chẩn đoán nhầm là killed_recovered, và
+    // rotate ra session rác. Khôi phục đúng giá trị đã persist — ctor khởi
+    // tạo clean_shutdown_=false nên phải gán lại tường minh, save_locked()
+    // bên dưới ghi thẳng field này xuống file.
+    clean_shutdown_ = headless ? was_clean : false;
     save_locked();
 }
 

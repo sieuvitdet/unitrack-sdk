@@ -51,7 +51,11 @@ public:
     // file exists and the last activity is within the timeout, the existing
     // session is resumed; otherwise a new one is opened and `index` increments.
     // Safe to call once at Tracker init — no-op for a never-launched app.
-    void load_from(const std::string& path);
+    // `headless` = process khởi động không do user mở app (FCM wake, job).
+    // Khi true, session đã persist được giữ nguyên và KHÔNG rotate, kể cả
+    // clean_shutdown=0 — vì "app chết mà không qua background" là trạng thái
+    // bình thường của một process headless, không phải dấu hiệu bị kill.
+    void load_from(const std::string& path, bool headless = false);
 
     // Returns the current session id, starting a new one if the timeout
     // elapsed. Does NOT report rotation — use resolve() when you need to emit

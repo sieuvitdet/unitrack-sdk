@@ -32,6 +32,15 @@ public final class UniTrack {
         /// inactivity/background window after which a session is closed.
         public var journeyCapture: Bool         = true
         public var sessionTimeoutMs: Int        = 1_800_000  // 30 min
+        /// Process khởi động KHÔNG do user mở app. Session là "phiên sử dụng
+        /// của user" nên một process không UI không được tạo session mới.
+        ///
+        /// Trên iOS mặc định luôn false: notification không đánh thức process,
+        /// nên mọi lần SDK chạy đều là user thật sự mở app. Field tồn tại để
+        /// parity với Android (nơi FCM đánh thức process và cờ này được bật
+        /// tự động) và để host iOS ép giá trị nếu sau này có background mode
+        /// tương tự (BGTaskScheduler, silent push xử lý nền).
+        public var headlessLaunch: Bool         = false
 
         /// Event names emitted on screen transition. Core fires three events
         /// per transition: screenEndEvent for the previous screen (with
@@ -87,6 +96,7 @@ public final class UniTrack {
     private var sessionHadErrorSnapshot: Bool = false
     private var sessionHadCrashSnapshot: Bool = false
     private var sessionTimeoutMsValue: Int = 1_800_000
+    private var headlessLaunchValue: Bool = false
 
     // App-supplied closure fired on every successful batch flush. Stored on
     // the singleton because the C callback bridge needs a stable pointer; we
@@ -287,6 +297,19 @@ public final class UniTrack {
     public static func sessionTimeoutMs() -> Int {
         shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
         return shared.sessionTimeoutMsValue
+    }
+
+    /// True khi process khởi động KHÔNG do user mở app. Host đọc cờ này để bỏ
+    /// qua các event mang nghĩa "user bắt đầu phiên":
+    ///
+    ///     if !UniTrack.isHeadlessLaunch() { FSDKTracking.sessionStarted() }
+    ///
+    /// Trên iOS luôn false trừ khi host tự set `config.headlessLaunch` —
+    /// notification không đánh thức process nên không có launch nào là
+    /// headless. Giữ API để code tích hợp giống hệt Android.
+    public static func isHeadlessLaunch() -> Bool {
+        shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }
+        return shared.headlessLaunchValue
     }
 
     /// Lightweight per-session counters the app can opt into so session_ended
@@ -1077,6 +1100,7 @@ public final class UniTrack {
         sessionStatLock.lock()
         sessionStartedAtSnapshot = Date()
         sessionTimeoutMsValue = config.sessionTimeoutMs
+        headlessLaunchValue   = config.headlessLaunch
         sessionStatLock.unlock()
 
         // Attach device/app metadata to every event (model, OS, app version,
@@ -1199,6 +1223,7 @@ public final class UniTrack {
         parts.append("\"sampling_rate\":\(c.samplingRate)")
         parts.append("\"auto_capture\":\(c.autoCapture)")
         parts.append("\"journey_capture\":\(c.journeyCapture)")
+        parts.append("\"headless_launch\":\(c.headlessLaunch)")
         parts.append("\"session_timeout_ms\":\(c.sessionTimeoutMs)")
         if let s = c.screenStartEvent, !s.isEmpty {
             parts.append("\"screen_start_event\":\"\(s)\"")

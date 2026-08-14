@@ -50,7 +50,7 @@ Tracker::Tracker(Config cfg, ut_platform platform)
     // Restore session state from disk so session_id + session_index survive
     // across launches (Snowplow client_session parity). Must come AFTER the
     // session timeout is set above and BEFORE the first build_event call.
-    session_.load_from(dir + "/session.json");
+    session_.load_from(dir + "/session.json", config_.headless_launch);
 
     // Pick up any crash captured on the previous launch. A crash recovered at
     // startup is, by definition, the crash that ended the *previous* session —
@@ -388,6 +388,11 @@ void Tracker::log_background() {
     session_.mark_clean_shutdown();
 }
 void Tracker::log_app_start(long cold_start_ms) {
+    // Headless launch (FCM wake, background job): không có user mở app nên
+    // không có "app start" để báo, và mở session boundary ở đây sẽ đẻ ra
+    // session rác đúng như load_from() vừa tránh. Bỏ qua hoàn toàn — event
+    // do process headless bắn vẫn stamp session_id đang persist.
+    if (config_.headless_launch) return;
     // Open the process's first session boundary (session_start) on launch.
     emit_session_boundary(SessionEndReason::timeout);
     std::ostringstream o;

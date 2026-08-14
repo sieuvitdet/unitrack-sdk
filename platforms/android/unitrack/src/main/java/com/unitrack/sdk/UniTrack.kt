@@ -25,6 +25,24 @@ object UniTrack {
     @Volatile
     private var initialized = false
 
+    @Volatile
+    private var headlessLaunch = false
+
+    /**
+     * True khi process này khởi động KHÔNG do user mở app (FCM đánh thức để
+     * xử lý push, WorkManager job, boot receiver). Core đã tự bỏ qua việc
+     * rotate session ở trường hợp này; host đọc cờ để bỏ qua luôn các event
+     * mang nghĩa "user bắt đầu phiên":
+     *
+     *     FSDKTracking.bootstrap(app) {
+     *         if (!UniTrack.isHeadlessLaunch()) FSDKTracking.sessionStarted()
+     *     }
+     *
+     * Luôn false trước initialize().
+     */
+    @JvmStatic
+    fun isHeadlessLaunch(): Boolean = headlessLaunch
+
     // Registered third-party providers (Snowplow, Firebase, …). Every event is
     // forwarded to each one. Empty by default — core has zero such dependencies.
     // Internal so RemoteValueProvider lookup can iterate the list.
@@ -973,6 +991,35 @@ object UniTrack {
     @JvmStatic
     fun setEnabled(enabled: Boolean) { if (initialized) NativeBridge.setEnabled(enabled) }
 
+    /**
+     * Đoán xem process này có phải do user mở app không.
+     *
+     * initialize() chạy từ Application.onCreate(), tức TRƯỚC mọi Activity —
+     * nhưng khi user chạm icon/noti, framework đã dựng sẵn ActivityThread's
+     * activity record trước khi Application.onCreate() trả về. Khi process bị
+     * FCM/JobService đánh thức thì không có record nào.
+     *
+     * Đọc qua reflection vì không có public API tương đương ở thời điểm này
+     * (ActivityLifecycleCallbacks đăng ký sau initialize nên đã muộn). Bất kỳ
+     * lỗi nào → trả về false = coi như user launch, tức giữ nguyên hành vi cũ.
+     * Đoán sai theo hướng này chỉ mất đi phần tối ưu, không hỏng dữ liệu.
+     */
+    private fun detectHeadlessLaunch(): Boolean {
+        return try {
+            val atClass = Class.forName("android.app.ActivityThread")
+            val thread = atClass.getMethod("currentActivityThread").invoke(null)
+                ?: return false
+            @Suppress("UNCHECKED_CAST")
+            val activities = atClass.getDeclaredField("mActivities")
+                .apply { isAccessible = true }
+                .get(thread) as? Map<Any, Any>
+                ?: return false
+            activities.isEmpty()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     private fun buildConfigJson(ctx: Context, c: UniTrackConfig): String {
         val obj = JSONObject()
         c.endpoint?.let { obj.put("endpoint", it) }
@@ -982,6 +1029,8 @@ object UniTrack {
         obj.put("auto_capture",      c.autoCapture)
         obj.put("journey_capture",   c.journeyCapture)
         obj.put("session_timeout_ms", c.sessionTimeoutMs)
+        headlessLaunch = c.headlessLaunch ?: detectHeadlessLaunch()
+        obj.put("headless_launch",   headlessLaunch)
         obj.put("screen_lifecycle",   c.screenLifecycle)
         obj.put("screen_start_event", c.screenStartEvent)
         obj.put("screen_end_event",   c.screenEndEvent)

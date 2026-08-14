@@ -24,6 +24,18 @@ struct Config {
     bool        journey_capture   = true;
     int         session_timeout_ms = 30 * 60 * 1000;  // 30 min
 
+    // Headless launch: process khởi động KHÔNG do user mở app (Android FCM
+    // đánh thức để xử lý push, WorkManager job, boot receiver…). Session là
+    // "phiên sử dụng của user", nên một process không có UI không được tạo
+    // session mới — nếu không, mỗi push camera lại đẻ một session sống 3
+    // giây, không screen, không user (đo được: session_index 1917 trên một
+    // máy prod). Khi cờ này bật, load_from() giữ nguyên session đã persist
+    // và không rotate; event vẫn stamp session_id cũ.
+    //
+    // iOS không set cờ này: noti không đánh thức process nên vấn đề không
+    // tồn tại. Giữ mặc định false để hành vi cũ không đổi.
+    bool        headless_launch   = false;
+
     // Screen lifecycle. When set_screen() switches screens, the Tracker emits a
     // screen_view (always, back-compat) plus — when screen_lifecycle is on — a
     // "screen_end" for the screen being left (carrying dwell_ms = time spent on
