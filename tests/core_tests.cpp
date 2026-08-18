@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <set>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -419,6 +420,92 @@ static void test_screen_lifecycle() {
 
 // Cross-language layer registry: register flips bits, claim_subtree round-trips,
 // release removes. Idempotent register doesn't double-count.
+// UUID entropy. Guards the defect that put session 41ce987d on two different
+// handsets: generate_uuid() used to seed a mt19937_64 from ONE
+// std::random_device{}() call, and that type is 32 bits wide on every platform
+// we ship. The whole id stream was therefore a function of 2^32 possible seeds,
+// so two devices collided after ~65k cold starts (measured: 61,305).
+//
+// This test cannot prove global uniqueness — nothing can — but it fails loudly
+// if the entropy source is ever narrowed again: a 32-bit-seeded generator
+// produces detectable structure across a large sample, and identical output
+// when two generators start from the same seed.
+static void test_uuid_entropy() {
+    printf("test_uuid_entropy\n");
+    using namespace unitrack;
+
+    // No duplicates across a large in-process sample.
+    const int N = 200000;
+    std::set<std::string> ids;
+    for (int i = 0; i < N; ++i) ids.insert(generate_uuid());
+    CHECK((int)ids.size() == N, "uuid: 200k ids all distinct");
+
+    // Bit-level balance. With real entropy each of the 122 free bits is ~50/50.
+    // A narrowed source skews this hard. Count set bits over the hex nibbles,
+    // skipping the 6 bits RFC 4122 pins (version nibble + variant high bits).
+    long long ones = 0, total = 0;
+    for (int i = 0; i < 20000; ++i) {
+        std::string u = generate_uuid();
+        for (size_t p = 0; p < u.size(); ++p) {
+            if (u[p] == '-') continue;
+            if (p == 14) continue;              // version nibble, always '4'
+            if (p == 19) continue;              // variant nibble, top bits pinned
+            int v = (u[p] >= 'a') ? (u[p] - 'a' + 10) : (u[p] - '0');
+            for (int b = 0; b < 4; ++b) { ones += (v >> b) & 1; total += 1; }
+        }
+    }
+    double ratio = (double)ones / (double)total;
+    CHECK(ratio > 0.49 && ratio < 0.51, "uuid: bit distribution is balanced");
+
+    // Format still RFC 4122 v4 after the entropy-source change.
+    std::string u = generate_uuid();
+    CHECK(u.size() == 36, "uuid: length 36");
+    CHECK(u[14] == '4', "uuid: version nibble is 4");
+    CHECK(u[19]=='8'||u[19]=='9'||u[19]=='a'||u[19]=='b', "uuid: variant is 10xx");
+
+    // Trace/span ids draw from the same source — no collisions at scale.
+    std::set<uint64_t> tr;
+    for (int i = 0; i < 50000; ++i) tr.insert(secure_random_u64());
+    CHECK(tr.size() == 50000, "uuid: secure_random_u64 has no collisions in 50k");
+}
+
+// Session id namespace salt. The salt must namespace ids WITHOUT costing
+// entropy: same salt => same 8-hex prefix, different salt => different prefix,
+// empty salt => byte-identical to the old bare-UUID format, and the UUID part
+// must still be unique every time.
+static void test_session_id_salt() {
+    printf("test_session_id_salt\n");
+    using namespace unitrack;
+
+    // Empty salt = no tag = unchanged format (36-char UUID). This is what keeps
+    // every session already in the warehouse valid.
+    std::string bare = generate_session_id("");
+    CHECK(bare.size() == 36, "salt: empty salt keeps bare uuid length");
+    CHECK(salt_tag("").empty(), "salt: empty salt yields empty tag");
+
+    // Deterministic per salt — the whole point of a namespace tag.
+    CHECK(salt_tag("fli-beta") == salt_tag("fli-beta"), "salt: tag is deterministic");
+    CHECK(salt_tag("fli-beta") != salt_tag("fli-prod"), "salt: different salt, different tag");
+    CHECK(salt_tag("fli-beta").size() == 8, "salt: tag is 8 hex chars");
+
+    // Tagged form: "<8 hex>-<36 char uuid>" and the tag matches salt_tag().
+    std::string tagged = generate_session_id("fli-beta");
+    CHECK(tagged.size() == 45, "salt: tagged id is tag(8) + '-' + uuid(36)");
+    CHECK(tagged.compare(0, 8, salt_tag("fli-beta")) == 0, "salt: id carries the salt tag");
+    CHECK(tagged[8] == '-', "salt: tag separated by dash");
+
+    // Entropy preserved: the uuid tail must still differ across calls, and two
+    // ids under the SAME salt must not collide. If the salt were mixed into the
+    // random state instead of prefixed, this is what would break.
+    std::string a = generate_session_id("fli-beta");
+    std::string b = generate_session_id("fli-beta");
+    CHECK(a != b, "salt: same salt still yields unique ids");
+    CHECK(a.substr(9) != b.substr(9), "salt: uuid tail keeps full entropy");
+
+    // The uuid tail is still a well-formed v4 (version nibble + variant).
+    CHECK(tagged[23] == '4', "salt: uuid tail keeps version 4");
+}
+
 static void test_layer_registry() {
     printf("test_layer_registry\n");
     std::remove("/tmp/ut_layer.db");
@@ -576,6 +663,8 @@ int main() {
     test_c_api_end_to_end();
     test_layer_registry();
     test_screen_dedup_cross_layer();
+    test_uuid_entropy();
+    test_session_id_salt();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;

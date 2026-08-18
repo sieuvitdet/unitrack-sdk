@@ -1,26 +1,23 @@
 #include "trace_context.h"
+#include "util.h"
 
 #include <cstdio>
 #include <cstdint>
-#include <random>
 
 namespace unitrack {
 
 namespace {
 
-// thread_local RNG: tránh contention giữa nhiều thread (mỗi HTTP call có thể
-// chạy trên worker khác nhau). Seed một lần bằng random_device — đủ tốt cho
-// id không bí mật (không phải nonce mật mã, chỉ cần unique trong thực tế).
-std::mt19937_64& rng() {
-    static thread_local std::mt19937_64 gen{std::random_device{}()};
-    return gen;
-}
-
 // Sinh 64-bit hex (16 ký tự), đảm bảo khác 0. W3C cấm span id all-zero.
+//
+// Lấy thẳng entropy từ OS (secure_random_u64) thay vì mt19937_64 seed bằng
+// random_device{}(). random_device::result_type rộng 32 bit trên mọi platform
+// SDK ship, nên seed 1 lần chỉ cho 2^32 stream — hai thiết bị trùng seed sẽ
+// sinh ra dãy trace/span id giống hệt nhau. Trace id trùng làm hai request của
+// hai máy khác nhau bị gộp thành một trace ở backend.
 uint64_t random_nonzero_u64() {
-    std::uniform_int_distribution<uint64_t> dist;
     uint64_t v = 0;
-    while (v == 0) v = dist(rng());
+    while (v == 0) v = secure_random_u64();
     return v;
 }
 
@@ -37,9 +34,8 @@ TraceIds new_trace() {
     // (xác suất gần 0 nhưng phải bảo vệ — invalid theo spec).
     uint64_t hi = 0, lo = 0;
     while (hi == 0 && lo == 0) {
-        std::uniform_int_distribution<uint64_t> dist;
-        hi = dist(rng());
-        lo = dist(rng());
+        hi = secure_random_u64();
+        lo = secure_random_u64();
     }
     char hi_hex[17], lo_hex[17];
     to_hex16(hi, hi_hex);
