@@ -94,8 +94,17 @@ public:
 
     void set_timeout_ms(int64_t ms);
 
+    // Namespace salt for generated session ids (config `session_id_salt`).
+    // Must be called BEFORE load_from() — the ctor has already minted an id by
+    // then, so this re-tags it in place. Empty salt = untagged ids (default,
+    // byte-identical to the pre-salt format). Changing the salt does NOT
+    // invalidate a resumed session: a persisted id is replayed exactly as
+    // stored, so ids stay stable across a config change mid-session.
+    void set_salt(const std::string& salt);
+
 private:
     std::mutex     mu_;
+    std::string    salt_;
     std::string    session_id_;
     int64_t        started_at_ms_    = 0;
     int64_t        last_activity_ms_ = 0;

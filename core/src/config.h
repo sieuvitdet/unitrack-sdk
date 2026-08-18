@@ -24,6 +24,19 @@ struct Config {
     bool        journey_capture   = true;
     int         session_timeout_ms = 30 * 60 * 1000;  // 30 min
 
+    // Optional namespace salt for session ids (config `session_id_salt`).
+    // When set, ids are emitted as "<8-hex tag>-<uuid>" where the tag derives
+    // from this salt — so two app flavours / tenants writing into one
+    // warehouse table can never collide, and an id is traceable to the config
+    // that minted it. The UUID keeps all 122 random bits regardless: the tag
+    // is a prefix, never mixed into the entropy.
+    //
+    // Empty (default) → bare UUIDv4, byte-identical to the pre-salt format.
+    // Do NOT derive this from device identity — a device-derived salt would
+    // make ids deterministic per device, which is a collision AND a
+    // fingerprint. Use a per-project constant.
+    std::string session_id_salt;
+
     // Headless launch: process khởi động KHÔNG do user mở app (Android FCM
     // đánh thức để xử lý push, WorkManager job, boot receiver…). Session là
     // "phiên sử dụng của user", nên một process không có UI không được tạo

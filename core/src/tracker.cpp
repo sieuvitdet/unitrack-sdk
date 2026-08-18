@@ -47,6 +47,12 @@ Tracker::Tracker(Config cfg, ut_platform platform)
     dir = (slash == std::string::npos) ? "." : dir.substr(0, slash);
     CrashHandler::install(dir);
 
+    // Namespace salt must be applied BEFORE load_from: the ctor already minted
+    // an untagged id, and load_from() either persists it or replays a stored
+    // one. A persisted id is replayed byte-for-byte, so changing the salt never
+    // rewrites an in-flight session — only newly minted ids pick up the tag.
+    session_.set_salt(config_.session_id_salt);
+
     // Restore session state from disk so session_id + session_index survive
     // across launches (Snowplow client_session parity). Must come AFTER the
     // session timeout is set above and BEFORE the first build_event call.
