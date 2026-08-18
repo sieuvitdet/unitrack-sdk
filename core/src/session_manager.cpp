@@ -116,6 +116,26 @@ void SessionManager::load_from(const std::string& path, bool headless) {
             session_index_   = saved_idx + 1;
             // session_id_ giữ UUID mới từ ctor.
         }
+    } else if (headless) {
+        // Gap exceeded the timeout, but this process was NOT started by the
+        // user (FCM push wake, WorkManager job, boot receiver). A session is a
+        // user's period of use, so a UI-less process must not open one — and
+        // must not close the persisted one either. Replay the stored session
+        // untouched and let the next real launch decide the boundary.
+        //
+        // Without this, every push rotated: one prod device reached
+        // session_index 1917, each phantom session holding ~3 events and no
+        // screens. The guard below in the <=timeout branch already covered
+        // short gaps; pushes normally arrive hours apart and so landed here.
+        session_id_       = saved_id;
+        started_at_ms_    = saved_started ? saved_started : now;
+        // Treat this wake as activity. Restoring the STALE last_activity here
+        // would leave the very next current_session_id() past the timeout, and
+        // that accessor lazily rotates — undoing this branch and re-creating
+        // the phantom session we just avoided.
+        last_activity_ms_ = now;
+        session_index_    = saved_idx;
+        prev_id_.clear();
     } else {
         // Gap exceeded timeout → roll forward. The newly generated session_id_
         // in the ctor stays; record the prior as previous + bump index.

@@ -473,6 +473,40 @@ static void test_uuid_entropy() {
 // entropy: same salt => same 8-hex prefix, different salt => different prefix,
 // empty salt => byte-identical to the old bare-UUID format, and the UUID part
 // must still be unique every time.
+// Headless launch (FCM push wake / job) must NOT open a session. A UI-less
+// process has no user period of use; rotating there produced ~3-event phantom
+// sessions and drove one prod device to session_index 1917.
+static void test_headless_no_rotate() {
+    printf("test_headless_no_rotate\n");
+    using namespace unitrack;
+    const std::string ORIG = "aaaaaaaa-1111-4111-8111-111111111111";
+    const char* path = "/tmp/ut_headless.json";
+    auto seed = [&]{
+        std::remove(path);
+        int64_t last = current_time_ms() - 2 * 3600 * 1000;   // 2h ago
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":100,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
+                ORIG.c_str(), (long long)last, (long long)last);
+        fclose(f);
+    };
+
+    seed();
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_id() == ORIG, "headless: session id kept");
+        CHECK(sm.current_session_index() == 100, "headless: index not bumped");
+    }
+    seed();
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() != ORIG, "user launch: session rotates");
+        CHECK(sm.current_session_index() == 101, "user launch: index bumped");
+    }
+    std::remove(path);
+}
+
 static void test_session_id_salt() {
     printf("test_session_id_salt\n");
     using namespace unitrack;
@@ -665,6 +699,7 @@ int main() {
     test_screen_dedup_cross_layer();
     test_uuid_entropy();
     test_session_id_salt();
+    test_headless_no_rotate();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;
