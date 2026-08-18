@@ -268,12 +268,16 @@ class SnowplowProvider(
      * Any other entity name registered in `entities` is registered but data-less;
      * pass it via `extraContexts` when calling the helper.
      */
+    /** @param sessionId session id captured when the event was CREATED. Pass it
+     *  whenever the caller already has one so core_action and the event payload
+     *  cannot disagree; null falls back to a live read. */
     private fun buildEntities(eventName: String,
                               screen: String?,
                               elementKey: String?,
                               extra: List<SelfDescribingJson>?,
                               skipGlobalContexts: Boolean,
-                              actionName: String? = null): List<SelfDescribingJson> {
+                              actionName: String? = null,
+                              sessionId: String? = null): List<SelfDescribingJson> {
         val out = mutableListOf<SelfDescribingJson>()
         if (!skipGlobalContexts) {
             val userSchema = entities["user_context"]?.let { normalizeEntityURI(it) }
@@ -300,7 +304,13 @@ class SnowplowProvider(
                 if (!elementKey.isNullOrEmpty()) data["element_key"] = elementKey
                 // Stamp session_id onto every event — single join key shared
                 // with Portal + custom HTTP providers.
-                val sid = com.unitrack.sdk.UniTrack.currentSessionId()
+                //
+                // ponytail: prefer the id the CALLER already captured when the
+                // event was created. UniTrack.currentSessionId() lazily rotates
+                // (session_manager.cpp:176 — past the 30' idle window it mints a
+                // fresh UUID as a side effect), so reading it again here could
+                // stamp a DIFFERENT session than the event payload carries.
+                val sid = sessionId ?: com.unitrack.sdk.UniTrack.currentSessionId()
                 if (sid.isNotEmpty()) data["session_id"] = sid
                 out.add(SelfDescribingJson(coreSchema, stringifyAll(data)))
             }
@@ -386,8 +396,15 @@ class SnowplowProvider(
         // `event_action` được stamp trong track() với raw name — dùng nó cho
         // core_action.action_name để phân biệt lifecycle event share cùng schema.
         val rawActionName = filtered["event_action"] as? String
+        // Reuse the session id already stamped into the payload by track() so
+        // core_action.session_id and the event body can never disagree. Both
+        // used to call currentSessionId() independently, and that accessor
+        // rotates on a 30' idle gap — two reads straddling the boundary
+        // produced two different ids for one event.
+        val stampedSessionId = filtered["session_id"] as? String
         val ctxs = buildEntities(eventName, screen, elementKey, extra, skipGlobalContexts,
-                                 actionName = rawActionName)
+                                 actionName = rawActionName,
+                                 sessionId = stampedSessionId)
         // Stringify at the boundary so ALL Iglu schemas that declare fields
         // as string stop rejecting events into bad-events, no matter what
         // type upstream (auto-capture, swizzlers, host helpers) passed in.
