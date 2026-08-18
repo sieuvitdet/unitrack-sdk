@@ -1,6 +1,6 @@
 # Screen tracking contract (Snowplow hybrid mode)
 
-Trạng thái: **iOS xong, Android CHƯA có** (xem phần "Việc còn lại").
+Trạng thái: **iOS xong, Android xong** (2026-08-19). Cả hai dùng chung contract.
 Cập nhật: 2026-08-19.
 
 ## Nguyên tắc
@@ -117,9 +117,11 @@ screen_summary: fg_sec có số
 
 ## Việc còn lại
 
-- **Android chưa có hybrid mode.** `SnowplowProvider.kt` không có
-  `hybridScreenView`, không có `GlobalContext`. Android hiện vẫn chạy custom
-  vendor hoàn toàn. Port sang Kotlin trước khi tắt custom cho Android.
+- **Android đã đồng bộ** (2026-08-19): `hybridScreenView`,
+  `makeScreenEndContext()`, `ACTION_SCREEN_VIEWED/EXITED`, skip custom trong
+  `track()`. Bật bằng `snowplow.hybrid_screen_view: true` trong
+  `tracking_config.json` + app phải đọc cờ đó (`FSDKTrackingConfig.kt`).
+  Khác biệt duy nhất còn lại: Android chưa test runtime.
 - **Phantom screen ~51%** (`dwell_ms ≤ 10ms`): container VC
   (`AppTabBarPager*`, `FSSHomeTabBar*`, `MainHome*`, `ContextParent*`) đạt
   95-100% phantom, screen nghiệp vụ thật 0-5%. Chưa xử lý. Cần đo lại sau khi

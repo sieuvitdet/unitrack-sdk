@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.snowplowanalytics.snowplow.Snowplow
 import com.snowplowanalytics.snowplow.configuration.EmitterConfiguration
+import com.snowplowanalytics.snowplow.configuration.GlobalContextsConfiguration
 import com.snowplowanalytics.snowplow.configuration.NetworkConfiguration
 import com.snowplowanalytics.snowplow.configuration.TrackerConfiguration
 import com.snowplowanalytics.snowplow.controller.TrackerController
@@ -15,10 +16,14 @@ import com.snowplowanalytics.snowplow.event.EcommerceTransactionItem
 import com.snowplowanalytics.snowplow.event.MessageNotification
 import com.snowplowanalytics.snowplow.event.MessageNotificationTrigger
 import com.snowplowanalytics.snowplow.event.ScreenView
+import com.snowplowanalytics.snowplow.globalcontexts.FunctionalFilter
+import com.snowplowanalytics.snowplow.globalcontexts.FunctionalGenerator
+import com.snowplowanalytics.snowplow.globalcontexts.GlobalContext
 import com.snowplowanalytics.snowplow.event.SelfDescribing
 import com.snowplowanalytics.snowplow.event.Timing
 import com.snowplowanalytics.snowplow.network.HttpMethod
 import com.snowplowanalytics.snowplow.payload.SelfDescribingJson
+import com.snowplowanalytics.snowplow.tracker.InspectableEvent
 import com.unitrack.sdk.providers.AnalyticsProvider
 import kotlin.time.Duration
 import kotlin.time.DurationUnit
@@ -80,6 +85,17 @@ class SnowplowProvider(
      *  (app_foreground / app_background / …) when the data team hasn't
      *  published matching iglu schemas, so those events don't become bad rows. */
     private var dropEvents: Set<String> = emptySet(),
+    /** Hybrid ScreenView mode (portal `snowplow.hybrid_screen_view`). When true:
+     *   • setScreen(name) fires Snowplow's BUILTIN ScreenView →
+     *     com.snowplowanalytics.mobile/screen_view/1-0-0
+     *   • Snowplow's ScreenSummary state machine then fires screen_end itself,
+     *     carrying screen_summary (foreground_sec/background_sec)
+     *   • the custom-vendor screen_viewed / screen_exited copies are skipped
+     *     in track() so each screen visit is counted once
+     *   • screen_load_completed STAYS custom — Snowplow has no equivalent and
+     *     only UniTrack can measure load_time_ms
+     *  Parity: SnowplowProvider.swift hybridScreenView. */
+    private val hybridScreenView: Boolean = false,
 ) : AnalyticsProvider {
 
     private var tracker: TrackerController? = null
@@ -117,7 +133,30 @@ class SnowplowProvider(
         val emitterConfig = EmitterConfiguration()
             .maxEventStoreAge(MAX_EVENT_STORE_AGE)
 
-        tracker = Snowplow.createTracker(app, namespace, network, trackerConfig, emitterConfig)
+        // screen_end is fired by Snowplow's own ScreenSummary state machine —
+        // the SDK never calls it, so it cannot attach core_action the way
+        // setScreen() does for ScreenView. A GlobalContext is Snowplow's
+        // supported hook for exactly this: match the event by schema, generate
+        // the entity. Without it screen_end reaches the warehouse with no
+        // session_id and no action_name, and the data team cannot join it.
+        //
+        // Only registered in hybrid mode: with hybrid off the builtin screen
+        // events are not part of the contract.
+        // Parity: SnowplowProvider.swift makeScreenEndContext().
+        tracker = if (hybridScreenView) {
+            // Resolve core_action's URI once, here, where the portal entities
+            // map is in scope. Null when the operator hasn't registered
+            // core_action — the generator then emits nothing rather than
+            // inventing a schema.
+            sharedCoreActionSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
+            val globalContexts = GlobalContextsConfiguration(
+                mutableMapOf("unitrackScreenEnd" to makeScreenEndContext())
+            )
+            Snowplow.createTracker(app, namespace, network,
+                                   trackerConfig, emitterConfig, globalContexts)
+        } else {
+            Snowplow.createTracker(app, namespace, network, trackerConfig, emitterConfig)
+        }
         com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
             "tracker ready ($endpoint, appId=$appId, vendor=${igluVendor ?: "—"}, version=$defaultVersion, entities=${entities.keys.sorted().joinToString(",")}, maxEventStoreAge=${MAX_EVENT_STORE_AGE})")
     }
@@ -155,6 +194,19 @@ class SnowplowProvider(
     override fun track(name: String, properties: Map<String, Any?>) {
         if (properties["_skip_snowplow"] == true) {
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow", "SKIP \"$name\" — _skip_snowplow=true")
+            return
+        }
+        // In hybrid mode the builtin Snowplow events are the contract:
+        //   screen_viewed -> com.snowplowanalytics.mobile/screen_view
+        //   screen_exited -> com.snowplowanalytics.mobile/screen_end
+        // Both already carry core_action (session_id + business action_name),
+        // and screen_end additionally carries screen_summary. Letting the
+        // custom-vendor copy through as well double-counts every screen visit.
+        //
+        // screen_load_completed stays on the custom path on purpose: Snowplow
+        // has no builtin equivalent and load_time_ms only UniTrack can measure.
+        if (hybridScreenView &&
+            (name == "screen_viewed" || name == "screen_view" || name == "screen_exited")) {
             return
         }
         if (name in dropEvents) {
@@ -207,7 +259,37 @@ class SnowplowProvider(
         else          -> raw
     }
 
-    override fun setScreen(name: String, previous: String?) = setScreen(name)
+    override fun setScreen(name: String, previous: String?) {
+        val t = tracker
+        if (hybridScreenView && t != null) {
+            // Fire Snowplow's BUILTIN ScreenView. Snowplow's ScreenSummary
+            // state machine then emits screen_end for the PREVIOUS screen just
+            // before this one, carrying screen_summary (foreground_sec).
+            val sv = ScreenView(name, java.util.UUID.randomUUID())
+            // Stamp previousName from UniTrack rather than letting Snowplow
+            // infer it: Snowplow keeps its own screen state and never sees the
+            // screen_exited UniTrack fires when the app backgrounds, so on
+            // resume it would record the screen from before backgrounding.
+            // Two sources of truth, one of them wrong.
+            if (!previous.isNullOrEmpty()) sv.previousName = previous
+            // core_action.action_name is the BUSINESS action the data team
+            // pivots on ("screen_viewed"), never the schema kind. Do NOT route
+            // it through eventName(): that reads eventNames[kind], a map whose
+            // job is resolving the SCHEMA name — FPT Life sets
+            // event_names.screen_view = "screen_view", which silently overrode
+            // the default and shipped action_name="screen_view" on iOS.
+            sv.entities.addAll(
+                buildEntities("screen_view", name, null, null, false,
+                              actionName = ACTION_SCREEN_VIEWED)
+            )
+            t.track(sv)
+            com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
+                "hybrid setScreen -> builtin ScreenView(name=$name) fired " +
+                "(com.snowplowanalytics.mobile/screen_view/1-0-0)")
+            return
+        }
+        setScreen(name)
+    }
 
     override fun setScreen(name: String) {
         // ponytail: chưa có hybrid path bên Android nên `previous` chưa dùng
@@ -683,6 +765,45 @@ class SnowplowProvider(
             "\n─── $tag ───  (convention event=\"$eventName\")\n${envelope.toString(2)}")
     }
 
+    /**
+     * core_action generator for Snowplow's auto-fired `screen_end`.
+     *
+     * Mirrors the entity buildEntities() attaches to the ScreenView we fire
+     * ourselves, so both halves of a screen visit carry the same join keys:
+     *   action_name — "screen_exited" (the data team's business name)
+     *   session_id  — read live; screen_end fires as the screen closes, so
+     *                 "now" IS the event time, unlike a queued replay
+     *   screen      — from UniTrack.previousScreenName(). NOT from
+     *                 event.entities: Snowplow attaches the `screen` entity
+     *                 AFTER global-context generators run, so reading it here
+     *                 comes back empty (verified on iOS session 7785b4db).
+     *
+     * Parity: SnowplowProvider.swift makeScreenEndContext().
+     */
+    private fun makeScreenEndContext(): GlobalContext = GlobalContext(
+        object : FunctionalGenerator() {
+            override fun apply(event: InspectableEvent): List<SelfDescribingJson> {
+                val schema = sharedCoreActionSchema ?: return emptyList()
+                val now = java.time.Instant.now().toString()
+                val data = mutableMapOf<String, Any?>(
+                    "action_name" to ACTION_SCREEN_EXITED,
+                    "timestamp"   to now,
+                    "start_time"  to now,
+                )
+                val sid = com.unitrack.sdk.UniTrack.currentSessionId()
+                if (sid.isNotEmpty()) data["session_id"] = sid
+                com.unitrack.sdk.UniTrack.previousScreenName()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { data["screen"] = it }
+                return listOf(SelfDescribingJson(schema, stringifyAll(data)))
+            }
+        },
+        object : FunctionalFilter() {
+            override fun apply(event: InspectableEvent): Boolean =
+                event.schema?.contains("/screen_end/jsonschema/") == true
+        }
+    )
+
     companion object {
         /** Max age an event may sit in the offline store before it is dropped
          *  instead of sent. Snowplow's own default is 30 days; 72h is the
@@ -690,5 +811,17 @@ class SnowplowProvider(
          *  than a stale replay. Applied via EmitterConfiguration in
          *  initialize(). Parity: SnowplowProvider.swift maxEventStoreAge. */
         private val MAX_EVENT_STORE_AGE: Duration = 72.toDuration(DurationUnit.HOURS)
+
+        /** Business action names the data team pivots on, per their event spec.
+         *  Deliberately constants, not portal-configurable: these name the USER
+         *  ACTION, while portal event_names[kind] names the SCHEMA. Conflating
+         *  the two is what shipped action_name="screen_view" to production.
+         *  Parity: SnowplowProvider.swift actionScreenViewed/actionScreenExited. */
+        const val ACTION_SCREEN_VIEWED = "screen_viewed"
+        const val ACTION_SCREEN_EXITED = "screen_exited"
+
+        /** core_action schema URI, captured at initialize() so the GlobalContext
+         *  generator can reach it without holding the provider. */
+        @Volatile private var sharedCoreActionSchema: String? = null
     }
 }
