@@ -111,10 +111,11 @@ public final class UniTrack {
     // Wire-event names for the screen boundary pair, sourced from
     // Config.screenStartEvent / screenEndEvent (typically set from portal
     // sdk_config.screen_start_event / screen_end_event). Default to the
-    // legacy "screen_view" so an app that never sets them keeps the old
-    // behaviour. Updated inside initialize().
-    private var screenStartEventName: String = "screen_view"
-    private var screenEndEventName:   String = "screen_view"
+    // business name (never the schema kind "screen_view", which is the iglu
+    // parent shared by screen_viewed/screen_exited/screen_load_completed and
+    // must never ship as an event_action). Updated inside initialize().
+    private var screenStartEventName: String = "screen_viewed"
+    private var screenEndEventName:   String = "screen_exited"
     private var screenLifecycleEnabled: Bool = true
 
     // App-supplied closure invoked once each time the app comes back to
@@ -403,15 +404,15 @@ public final class UniTrack {
     /// so post-refresh events land under the new names on the providers.
     ///
     /// Pass nil for any field to keep its current value. Empty string ""
-    /// resets to the default ("screen_view" / "screen_load_completed").
+    /// resets to the default ("screen_viewed" / "screen_exited" / "screen_load_completed").
     public static func applyHotConfig(screenStartEvent: String? = nil,
                                       screenEndEvent:   String? = nil,
                                       screenLoadEvent:  String? = nil) {
         if let v = screenStartEvent {
-            shared.screenStartEventName = v.isEmpty ? "screen_view" : v
+            shared.screenStartEventName = v.isEmpty ? "screen_viewed" : v
         }
         if let v = screenEndEvent {
-            shared.screenEndEventName   = v.isEmpty ? "screen_view" : v
+            shared.screenEndEventName   = v.isEmpty ? "screen_exited" : v
         }
         if let v = screenLoadEvent {
             UniTrack.screenLoadEventName = v.isEmpty ? "screen_load_completed" : v
@@ -984,8 +985,8 @@ public final class UniTrack {
         // screen_exited under whatever taxonomy the portal set, matching what
         // the core fires into the HTTP queue. journeyCapture=false disables
         // both arms (core skips lifecycle events; binding skips fan-out).
-        screenStartEventName = config.screenStartEvent ?? "screen_view"
-        screenEndEventName   = config.screenEndEvent   ?? "screen_view"
+        screenStartEventName = config.screenStartEvent ?? "screen_viewed"
+        screenEndEventName   = config.screenEndEvent   ?? "screen_exited"
         screenLifecycleEnabled = config.journeyCapture
 
         let cfgJson = UniTrack.buildConfigJson(config)
