@@ -77,6 +77,13 @@ public struct SnowplowOptions {
 
 public final class SnowplowProvider: AnalyticsProvider {
 
+    /// Max age an event may sit in the offline store before it is dropped
+    /// instead of sent. Snowplow's own default is 30 days; 72h is the window
+    /// the data team treats as a genuine offline session rather than a stale
+    /// replay. Applied via EmitterConfiguration in initializeProvider().
+    /// Parity: SnowplowProvider.kt MAX_EVENT_STORE_AGE.
+    static let maxEventStoreAge: TimeInterval = 72 * 60 * 60   // 72h
+
     private let endpoint: String
     private let appId: String
     private let namespace: String
@@ -215,9 +222,25 @@ public final class SnowplowProvider: AnalyticsProvider {
                 // No-op. See comment above.
             }
 
+        // Offline event store: drop anything older than 72h instead of the
+        // Snowplow default 30 days.
+        //
+        // Why: events live in the tracker's SQLite store until a flush
+        // succeeds, and removeOldEvents() only runs INSIDE flush() — an app
+        // that isn't opened simply keeps them. Production data showed a
+        // median device→collector lag of 8.8 days and a max of 25.4, all
+        // legal under the 30-day default, which lands weeks-old rows in the
+        // warehouse tagged with a fresh collector_tstamp. 72h keeps genuine
+        // offline/airplane-mode sessions while making stale replays
+        // impossible.
+        //
+        // maxEventStoreSize stays at the SDK default (1000 events).
+        let emitterConfig = EmitterConfiguration()
+            .maxEventStoreAge(Self.maxEventStoreAge)
+
         tracker = Snowplow.createTracker(namespace: namespace,
                                          network: network,
-                                         configurations: [trackerConfig, plugin])
+                                         configurations: [trackerConfig, emitterConfig, plugin])
         NSLog("[UniTrackSnowplow] tracker ready (\(endpoint), appId=\(appId), vendor=\(igluVendor ?? "—"), version=\(defaultVersion), entities=\(entities.keys.sorted().joined(separator: ",")), hybridScreenView=\(hybridScreenView))")
     }
 

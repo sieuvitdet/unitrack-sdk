@@ -3,6 +3,7 @@ package com.unitrack.sdk.snowplow
 import android.app.Application
 import android.util.Log
 import com.snowplowanalytics.snowplow.Snowplow
+import com.snowplowanalytics.snowplow.configuration.EmitterConfiguration
 import com.snowplowanalytics.snowplow.configuration.NetworkConfiguration
 import com.snowplowanalytics.snowplow.configuration.TrackerConfiguration
 import com.snowplowanalytics.snowplow.controller.TrackerController
@@ -19,6 +20,9 @@ import com.snowplowanalytics.snowplow.event.Timing
 import com.snowplowanalytics.snowplow.network.HttpMethod
 import com.snowplowanalytics.snowplow.payload.SelfDescribingJson
 import com.unitrack.sdk.providers.AnalyticsProvider
+import kotlin.time.Duration
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
 
 /**
  * SnowplowProvider — forwards UniTrack events to a Snowplow collector via the
@@ -97,9 +101,25 @@ class SnowplowProvider(
             .exceptionAutotracking(options.exceptionAutotracking)
             .installAutotracking(options.installAutotracking)
             .userAnonymisation(options.userAnonymisation)
-        tracker = Snowplow.createTracker(app, namespace, network, trackerConfig)
+        // Offline event store: drop anything older than 72h instead of the
+        // Snowplow default 30 days.
+        //
+        // Why: events live in the tracker's SQLite store until a flush
+        // succeeds, and the age sweep only runs INSIDE flush() — an app that
+        // isn't opened simply keeps them. Production data showed a median
+        // device→collector lag of 8.8 days and a max of 25.4, all legal under
+        // the 30-day default, which lands weeks-old rows in the warehouse
+        // tagged with a fresh collector_tstamp. 72h keeps genuine offline /
+        // airplane-mode sessions while making stale replays impossible.
+        //
+        // maxEventStoreSize stays at the SDK default (1000 events).
+        // Parity: SnowplowProvider.swift maxEventStoreAge.
+        val emitterConfig = EmitterConfiguration()
+            .maxEventStoreAge(MAX_EVENT_STORE_AGE)
+
+        tracker = Snowplow.createTracker(app, namespace, network, trackerConfig, emitterConfig)
         com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
-            "tracker ready ($endpoint, appId=$appId, vendor=${igluVendor ?: "—"}, version=$defaultVersion, entities=${entities.keys.sorted().joinToString(",")})")
+            "tracker ready ($endpoint, appId=$appId, vendor=${igluVendor ?: "—"}, version=$defaultVersion, entities=${entities.keys.sorted().joinToString(",")}, maxEventStoreAge=${MAX_EVENT_STORE_AGE})")
     }
 
     // ── Hot reloads from remote config ───────────────────────────────────
@@ -644,5 +664,14 @@ class SnowplowProvider(
         val tag = if (isScreen) "SCREEN-VIEW" else "Snowplow Tracking"
         com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
             "\n─── $tag ───  (convention event=\"$eventName\")\n${envelope.toString(2)}")
+    }
+
+    companion object {
+        /** Max age an event may sit in the offline store before it is dropped
+         *  instead of sent. Snowplow's own default is 30 days; 72h is the
+         *  window the data team treats as a genuine offline session rather
+         *  than a stale replay. Applied via EmitterConfiguration in
+         *  initialize(). Parity: SnowplowProvider.swift maxEventStoreAge. */
+        private val MAX_EVENT_STORE_AGE: Duration = 72.toDuration(DurationUnit.HOURS)
     }
 }
