@@ -1036,6 +1036,7 @@ object UniTrack {
         obj.put("auto_capture",      c.autoCapture)
         obj.put("journey_capture",   c.journeyCapture)
         obj.put("session_timeout_ms", c.sessionTimeoutMs)
+        if (c.sessionIdSalt.isNotEmpty()) obj.put("session_id_salt", c.sessionIdSalt)
         headlessLaunch = c.headlessLaunch ?: detectHeadlessLaunch()
         obj.put("headless_launch",   headlessLaunch)
         obj.put("screen_lifecycle",   c.screenLifecycle)

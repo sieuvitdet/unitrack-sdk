@@ -17,6 +17,20 @@ data class UniTrackConfig(
     val journeyCapture: Boolean = true,
     val sessionTimeoutMs: Int = 1_800_000,  // 30 min
     /**
+     * Namespace salt cho session id (portal `sdk_config.session_id_salt`).
+     * Có salt → id dạng `"<8-hex tag>-<uuid>"`; tag suy ra từ salt nên hai dự
+     * án dùng chung một bảng warehouse không bao giờ đụng nhau, và nhìn tag là
+     * biết id sinh từ config nào.
+     *
+     * UUID vẫn giữ nguyên 122 bit entropy — tag chỉ là PREFIX, không trộn vào
+     * random state. Rỗng (mặc định) → UUID trần, y hệt format cũ.
+     *
+     * ĐẶT HẰNG SỐ THEO DỰ ÁN. Tuyệt đối không lấy từ device_id/IMEI: salt suy
+     * ra từ danh tính máy sẽ làm id lặp lại trên cùng máy (vừa trùng, vừa
+     * thành fingerprint truy ngược được).
+     */
+    val sessionIdSalt: String = "",
+    /**
      * Process khởi động KHÔNG do user mở app — FCM đánh thức để xử lý push,
      * WorkManager job, boot receiver. Session là "phiên sử dụng của user" nên
      * process không UI không được tạo session mới; nếu không mỗi push camera

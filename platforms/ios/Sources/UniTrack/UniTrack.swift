@@ -32,6 +32,19 @@ public final class UniTrack {
         /// inactivity/background window after which a session is closed.
         public var journeyCapture: Bool         = true
         public var sessionTimeoutMs: Int        = 1_800_000  // 30 min
+        /// Namespace salt for session ids (portal `sdk_config.session_id_salt`).
+        /// With a salt, ids are `"<8-hex tag>-<uuid>"`; the tag derives from the
+        /// salt, so two projects writing into one warehouse table can never
+        /// collide and an id is traceable to the config that minted it.
+        ///
+        /// The UUID keeps all 122 bits of entropy — the tag is a PREFIX, never
+        /// mixed into the random state. Empty (default) → bare UUID, identical
+        /// to the previous format.
+        ///
+        /// Use a PER-PROJECT CONSTANT. Never derive it from device identity
+        /// (device_id/IDFV): a device-derived salt makes ids repeat on the same
+        /// device — both a collision and a reversible fingerprint.
+        public var sessionIdSalt: String        = ""
         /// Process khởi động KHÔNG do user mở app. Session là "phiên sử dụng
         /// của user" nên một process không UI không được tạo session mới.
         ///
@@ -1233,6 +1246,9 @@ public final class UniTrack {
         parts.append("\"journey_capture\":\(c.journeyCapture)")
         parts.append("\"headless_launch\":\(c.headlessLaunch)")
         parts.append("\"session_timeout_ms\":\(c.sessionTimeoutMs)")
+        if !c.sessionIdSalt.isEmpty {
+            parts.append("\"session_id_salt\":\"\(c.sessionIdSalt)\"")
+        }
         if let s = c.screenStartEvent, !s.isEmpty {
             parts.append("\"screen_start_event\":\"\(s)\"")
         }
