@@ -1,7 +1,18 @@
 # Screen tracking contract (Snowplow hybrid mode)
 
-Trạng thái: **iOS xong, Android xong** (2026-08-19). Cả hai dùng chung contract.
 Cập nhật: 2026-08-19.
+
+| Platform | Code | Verify runtime |
+|---|---|---|
+| iOS | ✅ xong | ✅ đã đo trên portal |
+| Android | ✅ xong (parity 1:1 với iOS) | ⏳ chưa test — cần tag JitPack mới |
+| Web | ❌ chưa có hybrid | — |
+
+Web hiện dùng custom vendor hoàn toàn: đã có `event_action` + `session_id`
+(`platforms/web/src/index.ts:151`, `providers/snowplow.ts:52`) và
+`screenStartEvent: 'screen_viewed'` (`index.ts:231`) — tức **tên event đã đúng
+spec**. Thiếu: builtin ScreenView + GlobalContext cho `screen_end`. Xem phần
+"Port sang platform mới" bên dưới trước khi làm.
 
 ## Nguyên tắc
 
@@ -115,15 +126,60 @@ screen_summary: fg_sec có số
 (không có dòng [!])
 ```
 
+## Kết quả đo thật (iOS, 2026-08-19)
+
+Session `f543d101` + `a9570210`, iPhone 15 Pro, app 2.17.0:
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `action_name` | `screen_viewed` / `screen_exited` / `screen_load_completed` — đúng spec |
+| `session_id` + `screen` trong `core_action` | CÓ 100% |
+| Builtin `screen_view` : `screen_end` | 20:20 và 40:39 (lệch 1 = màn cuối chưa thoát, đúng) |
+| Custom `screen_exited` trùng lặp | 0 (trước fix: 76 bản sao) |
+| Portal tách session | hết — `portal_sid` khớp `core_action.session_id` 100% |
+| Rotate sau 30' idle | đúng — gap 48 phút giữa 2 session → id mới |
+| App treo background | không sinh event rác (đúng, vì `lifecycleAutotracking: false`) |
+
+## Port sang platform mới (vd Web)
+
+Làm theo đúng thứ tự này, mỗi bước đều có bẫy đã dính ở phần trên:
+
+1. **Cờ `hybridScreenView`** đọc từ config `snowplow.hybrid_screen_view`.
+   App phải truyền cờ xuống provider — Android từng thiếu bước này
+   (`FSDKTrackingConfig.kt`), cờ có trong JSON mà provider không nhận.
+2. **`setScreen()` fire builtin ScreenView**, stamp `previousName` từ state
+   của UniTrack, KHÔNG để Snowplow tự suy (nó không thấy `screen_exited`
+   lúc app background → resume sẽ ghi sai màn trước).
+3. **`action_name` = hằng số**, không đi qua `eventNames[kind]`. Xem bẫy #1.
+4. **GlobalContext cho `screen_end`** — xem bẫy #2 và #3.
+5. **`track()` skip** custom `screen_viewed`/`screen_exited` khi hybrid bật.
+   GIỮ `screen_load_completed`.
+6. **Config**: `screenEngagementAutotracking: true` (bắt buộc),
+   `lifecycleAutotracking: false`.
+7. **Verify bằng `check_session.sh`**, không tin build-pass là xong — 3 trong
+   4 cái bẫy ở trên chỉ lộ ra khi đo dữ liệu thật.
+
+Lưu ý cho Web: `screen_end` là khái niệm mobile. Snowplow JS tracker có
+`enableActivityTracking` / page ping thay vì `screen_summary` — kiểm tra API
+thật của tracker web trước khi bê nguyên thiết kế mobile sang.
+
 ## Việc còn lại
 
-- **Android đã đồng bộ** (2026-08-19): `hybridScreenView`,
-  `makeScreenEndContext()`, `ACTION_SCREEN_VIEWED/EXITED`, skip custom trong
-  `track()`. Bật bằng `snowplow.hybrid_screen_view: true` trong
-  `tracking_config.json` + app phải đọc cờ đó (`FSDKTrackingConfig.kt`).
-  Khác biệt duy nhất còn lại: Android chưa test runtime.
-- **Phantom screen ~51%** (`dwell_ms ≤ 10ms`): container VC
-  (`AppTabBarPager*`, `FSSHomeTabBar*`, `MainHome*`, `ContextParent*`) đạt
-  95-100% phantom, screen nghiệp vụ thật 0-5%. Chưa xử lý. Cần đo lại sau khi
-  chuyển hẳn sang builtin — Snowplow quản screen state riêng nên tỉ lệ có thể
-  khác.
+- **Android chưa test runtime.** Code xong + compile sạch, nhưng app đang pin
+  JitPack `0.3.57-headless1` → cần tag mới thì JitPack mới build artifact.
+- **Phantom screen ~44%** (`screen_summary.foreground_sec = 0`): container VC
+  lồng nhau khi chuyển tab, user không hề nhìn thấy — đo được 4 màn hình trong
+  16ms trên một lần chuyển tab.
+
+  Đã kiểm chứng: **chuyển sang builtin KHÔNG khử được phantom** (51% → 44%,
+  không phải do fix mà do khác cách đo). Lý do: Snowplow tạo screen state dựa
+  trên `setScreen()` mà swizzler gọi — swizzler vẫn bắn cho container VC thì
+  Snowplow vẫn tạo state.
+
+  **Không làm blocklist theo tên VC** — hardcode kiến trúc của một app, không
+  thuộc về SDK dùng chung (quyết định của product owner, 2026-08-19).
+
+  Hai hướng còn mở:
+  - Đội Data lọc `foreground_sec > 0` ở tầng query — 0 công sức
+  - SDK thêm `min_screen_dwell_ms` configurable, mặc định 0 = tắt — mỗi dự án
+    tự chỉnh, không hardcode gì
