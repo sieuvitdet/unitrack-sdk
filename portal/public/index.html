@@ -3955,6 +3955,14 @@ function renderSessionOutline(pid, sid, session, allSessions){
 
   listEl.innerHTML = headHtml + tableHeadHtml + rowsHtml;
 
+  // Click row → show full JSON (as-shipped to Snowplow / portal).
+  listEl.querySelectorAll('.ide-flat-row').forEach(row => {
+    row.onclick = () => {
+      try { showFlatEventJson(JSON.parse(row.dataset.evt)); }
+      catch(_) { toast('Không parse được event JSON', 'err'); }
+    };
+  });
+
   const backBtn = document.getElementById('ideBackList');
   if(backBtn) backBtn.onclick = ()=> renderSessionListInOutline(pid, sid, allSessions);
 
@@ -4021,6 +4029,40 @@ function _renderFlatEventRow(e) {
     <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(screen)}">${esc(screen)}</div>
     <div style="text-align:right">${status}</div>
   </div>`;
+}
+
+// Full-JSON modal cho 1 event flat row. Hiển thị nguyên payload như đang
+// bắn lên Snowplow (server đã strip _fields nội bộ, còn lại là data thật
+// khách consume). Copy-to-clipboard cho khớp việc verify wire format.
+function showFlatEventJson(evt) {
+  closeAllUtilDialogs();
+  const dlg = document.createElement('dialog');
+  dlg.className = 'ut-util-dlg';
+  dlg.style.cssText = 'width:720px;max-width:94vw;max-height:82vh;padding:0;z-index:100;'
+    + 'display:flex;flex-direction:column;overflow:hidden';
+  const name = evt.event_name || evt.name || '(unknown)';
+  const ts = evt.ts || evt.timestamp || 0;
+  const pretty = JSON.stringify(evt, null, 2);
+  dlg.innerHTML = `
+    <div class="dlg-h" style="flex:0 0 auto">
+      <span>🧾 <span class="mono">${esc(name)}</span> <span class="muted" style="font-weight:400;font-size:12px">${ts?fmtTime(ts):''}</span></span>
+      <span style="display:flex;gap:8px">
+        <button class="btn ghost sm" id="fjCopy">📋 Copy JSON</button>
+        <button class="btn ghost sm" id="fjClose">✕ Đóng</button>
+      </span>
+    </div>
+    <pre class="mono" style="flex:1 1 auto;overflow:auto;margin:0;padding:14px 18px;font-size:12px;line-height:1.5;background:var(--bg);color:var(--text);white-space:pre-wrap;word-break:break-word">${esc(pretty)}</pre>`;
+  document.body.appendChild(dlg);
+  try { dlg.showModal(); } catch(_) { dlg.setAttribute('open', ''); }
+  const kill = () => { try { dlg.close(); } catch(_) {} dlg.remove(); };
+  dlg.querySelector('#fjClose').onclick = kill;
+  dlg.onclick = (e) => { if (e.target === dlg) kill(); };
+  dlg.querySelector('#fjCopy').onclick = () => {
+    navigator.clipboard.writeText(pretty).then(
+      () => toast('Đã copy JSON'),
+      () => toast('Không copy được', 'err')
+    );
+  };
 }
 
 // ── Auto-refresh polling (live-tail) ─────────────────────────────────────
