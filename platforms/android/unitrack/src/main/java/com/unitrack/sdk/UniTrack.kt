@@ -644,8 +644,53 @@ object UniTrack {
     /** UUID of the active session. Empty before initialize(). Persists across
      *  app restarts within the 30-min inactivity timeout. */
     @JvmStatic
-    fun currentSessionId(): String =
-        if (initialized) NativeBridge.currentSessionId() else ""
+    fun currentSessionId(): String {
+        if (!initialized) return ""
+        val sid = NativeBridge.currentSessionId()
+        notifySessionRotationIfNeeded(sid)
+        return sid
+    }
+
+    // Session rotation observer. See onSessionRotate.
+    private val sessionRotateLock = Any()
+    @Volatile private var sessionRotateHandler: ((String) -> Unit)? = null
+    @Volatile private var lastObservedSessionId: String? = null
+
+    /**
+     * Called once per session rotation, with the new session id.
+     *
+     * currentSessionId() ROTATES: past the inactivity window it mints a new
+     * session as a side effect, and whoever calls it first after a long gap
+     * triggers that — often an auto-captured screen event, not the app's own
+     * session bookkeeping. An app that only opens sessions from a lifecycle
+     * hook silently misses those. FPT Life hit exactly that on iOS: session
+     * index 15 carried 56 events but never emitted session_started.
+     *
+     * Fires on whichever thread triggered the rotation. Do NOT call back into
+     * currentSessionId() from the handler — the id is handed in instead.
+     * Parity: UniTrack.swift onSessionRotate.
+     */
+    @JvmStatic
+    fun onSessionRotate(handler: (String) -> Unit) {
+        synchronized(sessionRotateLock) {
+            sessionRotateHandler = handler
+            // Seed the baseline so registering does not fire for the session
+            // already open — only genuine rotations after this point count.
+            if (lastObservedSessionId == null && initialized) {
+                lastObservedSessionId = NativeBridge.currentSessionId()
+            }
+        }
+    }
+
+    private fun notifySessionRotationIfNeeded(sid: String) {
+        if (sid.isEmpty()) return
+        val handler = synchronized(sessionRotateLock) {
+            val prev = lastObservedSessionId
+            lastObservedSessionId = sid
+            if (prev != null && prev != sid) sessionRotateHandler else null
+        }
+        handler?.invoke(sid)
+    }
 
     /** Lifetime session counter. 1 on first install, +1 per rotation
      *  (timeout or manual). Persists across app restarts. Returns 0 before

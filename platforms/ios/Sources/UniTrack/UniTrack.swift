@@ -182,13 +182,58 @@ public final class UniTrack {
     fileprivate var foregroundThrottleSec: TimeInterval = 5 * 60
     fileprivate var lastForegroundCallback: Date?
 
+    // Session rotation observer. See UniTrack.onSessionRotate.
+    fileprivate let sessionRotateLock = NSLock()
+    fileprivate var sessionRotateHandler: ((String) -> Void)?
+    fileprivate var lastObservedSessionId: String?
+
     // MARK: - Session helpers (used by AppLifecycleObserver + app code)
 
     /// Current session id (UUID v4). Empty before initialize().
+    ///
+    /// This accessor ROTATES: past the inactivity window it mints a new session
+    /// as a side effect. Whoever calls it first after a long gap triggers that
+    /// rotation — often an auto-captured screen event, not the app's own
+    /// session bookkeeping. Register `onSessionRotate` if you need to know.
     public static func currentSessionId() -> String {
         guard let ctx = shared.context else { return "" }
         guard let cstr = ut_current_session_id(ctx) else { return "" }
-        return String(cString: cstr)
+        let sid = String(cString: cstr)
+        shared.notifySessionRotationIfNeeded(sid)
+        return sid
+    }
+
+    /// Called once per session rotation, with the new session id.
+    ///
+    /// Rotation happens lazily inside currentSessionId(), so an app that only
+    /// opens sessions from a lifecycle hook silently misses any session first
+    /// touched by something else. FPT Life hit exactly that: session index 15
+    /// carried 56 events but never emitted session_started, because a screen
+    /// event rotated the session before applicationWillEnterForeground ran.
+    ///
+    /// The callback fires on whichever thread triggered the rotation and must
+    /// not call back into currentSessionId() — the id is handed in instead.
+    public static func onSessionRotate(_ handler: @escaping (String) -> Void) {
+        shared.sessionRotateLock.lock()
+        shared.sessionRotateHandler = handler
+        // Seed the baseline so registering does not fire for the session that
+        // is already open — only genuine rotations after this point count.
+        if shared.lastObservedSessionId == nil, let ctx = shared.context,
+           let cstr = ut_current_session_id(ctx) {
+            shared.lastObservedSessionId = String(cString: cstr)
+        }
+        shared.sessionRotateLock.unlock()
+    }
+
+    /// Fire the rotation handler when the id changed since we last looked.
+    fileprivate func notifySessionRotationIfNeeded(_ sid: String) {
+        guard !sid.isEmpty else { return }
+        sessionRotateLock.lock()
+        let changed = lastObservedSessionId != nil && lastObservedSessionId != sid
+        lastObservedSessionId = sid
+        let handler = changed ? sessionRotateHandler : nil
+        sessionRotateLock.unlock()
+        handler?(sid)
     }
 
     /// Lifetime session counter. Persists across launches — 1 on first install,
