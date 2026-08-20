@@ -207,14 +207,32 @@ Session `922e5be6` + `722f6915`, Xiaomi 23106RN0DA / Android 15, app 2.16.1
 | `screen_summary.foreground_sec` | có số |
 | `core_action.screen` đúng màn | ❌ 18/57 — bẫy #5, đã fix, **chưa đo lại** |
 
+## Kết quả đo lại sau fix (iOS, 2026-08-20 15:26, SDK 0.3.62)
+
+Session `5ddfd1f9` + 3 session cùng đợt, iPhone 15 Pro, app 2.17.0:
+
+| Kiểm tra | Trước fix | Sau fix |
+|---|---|---|
+| `action_name` đúng spec | ✅ | ✅ |
+| `session_id` + `screen` trong `core_action` | CÓ 100% | CÓ 100% |
+| Builtin `screen_view` : `screen_end` | — | 30:30 |
+| **Bẫy #5** — màn hình thật (`fg > 0`) | 1/53 đúng | **32/34 đúng (94%)** |
+| **Bẫy #5** — phantom (`fg = 0`) | — | 11/27 đúng |
+| **Bẫy #6** — rotate sớm | 7 lần | vẫn còn 3 lần ⚠️ |
+
+Bẫy #5 coi như **xong cho màn hình thật**. 16/18 row còn sai đều là phantom
+container (`foreground_sec = 0`) — 4 màn fire trong ~10ms, `exitingScreen` bị
+ghi đè trước khi Snowplow kịp drain. Cùng gốc với vấn đề phantom sẵn có, đội
+Data lọc `foreground_sec > 0` là hết.
+
 ## Việc còn lại
 
-- **Đo lại bẫy #5 trên cả 2 platform.** Fix `exitingScreen` đã build pass
-  (Android `compileReleaseKotlin`, iOS `xcodebuild -scheme UniTrackSnowplow
-  -destination generic/platform=iOS` → BUILD SUCCEEDED) nhưng **chưa có data
-  runtime**. Verify: `core_action.screen` phải khớp entity `screen.name` của
-  Snowplow trên mọi row `screen_end` (query ở bẫy #5). Cần tag SPM + JitPack
-  mới rồi app pin lên.
+- **Bẫy #6 (rotate sớm) CHƯA hết.** Sau khi pin `0.3.62` (đã verify checkout
+  `8eeec4e` có `_logBackgroundToCore`), vẫn đo được 3 lần rotate với gap
+  2.3s / 0.8s / 1.3s. Fix `ut_log_background()` đúng hướng nhưng chưa đủ —
+  còn đường nào khác set `clean_shutdown = false`, hoặc `load_from()` chạy
+  nhiều lần trong một launch. Verify bằng `check_session.sh` section 7.
+- **Phantom screen ~44%** — xem mục dưới, không đổi.
 - **Phantom screen ~44%** (`screen_summary.foreground_sec = 0`): container VC
   lồng nhau khi chuyển tab, user không hề nhìn thấy — đo được 4 màn hình trong
   16ms trên một lần chuyển tab.
