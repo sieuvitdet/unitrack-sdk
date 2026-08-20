@@ -171,8 +171,37 @@ mà gap ≤ 10s thì **resume** session cũ, quá 10s mới `killed_recovered`. 
 Replay đúng chuỗi đo được trên máy thật (gap 2250 / 843 / 1286 ms):
 **4 session → 1**. Test `test_session_kill_grace()` trong `tests/core_tests.cpp`.
 
-**Chưa verify runtime trên máy thật** — mới chỉ pass test. Đo lại bằng
-`check_session.sh` section 7 sau vòng test tới.
+**(c) `last_activity_ms` không bao giờ xuống đĩa — đây mới là gốc thật.**
+Đo lại 2026-08-20 22:00 với bản có `KILL_GRACE_MS`: vẫn **9 session trong 17
+giây**, `session_index` 15→23, gap nhỏ nhất **0.18s**. Kéo `session.json` khỏi
+iPhone 15 Pro (`Documents/session.json`, không phải `Library/…`):
+
+```json
+{"session_index":26,"started_at_ms":1787241093989,
+ "last_activity_ms":1787241093989,"clean_shutdown":1}
+```
+
+`started_at_ms == last_activity_ms` — đồng hồ **chưa bao giờ nhúc nhích trên
+đĩa**. `stamp_for_event()` có `last_activity_ms_ = now` nhưng chỉ
+`save_locked()` cho event ĐẦU TIÊN của session; mọi event sau chỉ đổi RAM.
+Nên `load_from()` lần sau đo gap từ **thời điểm sai** — trải dài cả session
+trước — và `KILL_GRACE_MS` 10s không bao giờ khớp.
+
+Cũng bác bỏ luôn giả thuyết scene-lifecycle: `clean_shutdown:1` chứng minh
+`_logBackgroundToCore()` CÓ chạy, `didEnterBackgroundNotification` vẫn fire
+bình thường trên app scene-based.
+
+→ Fix (0.3.64): persist theo throttle ~10s (`ACTIVITY_SAVE_INTERVAL_MS`) ở cả
+`stamp_for_event()` lẫn `resolve()` — `resolve()` có thể là thứ cuối cùng chạy
+trước force-quit mà không có event nào theo sau.
+
+Test `test_session_activity_persisted`: fail trên code cũ (126/7), pass sau fix
+(127/6). 6 fail còn lại là pre-existing.
+
+**Bài học:** 0.3.63 kết luận `KILL_GRACE_MS` là root cause dựa trên test replay
+và đã ghi rõ "chưa verify runtime". Dữ liệu thật cho thấy nó đúng nhưng **không
+đủ** — fix nằm ở tầng persist chứ không phải tầng quyết định. Đừng đóng bẫy khi
+mới có test xanh.
 
 **Phát hiện kèm:** FPT Life dùng scene-based lifecycle
 (`UIApplicationSceneManifest`), nên `applicationDidEnterBackground` không bao
@@ -267,9 +296,10 @@ Data lọc `foreground_sec > 0` là hết.
 
 ## Việc còn lại
 
-- **Bẫy #6 (rotate sớm)** — root cause tìm ra, fix `KILL_GRACE_MS` đã vào
-  `0.3.63`, **chưa verify runtime**. Xem bẫy #6. Đo lại bằng
-  `check_session.sh` section 7, kỳ vọng 0 dòng `[!] ROTATE SOM`.
+- **Bẫy #6 (rotate sớm)** — gốc thật là `last_activity_ms` không persist, fix
+  vào `0.3.64`. **Chưa verify runtime** (0.3.63 cũng từng xanh test rồi fail
+  trên máy thật — xem bẫy #6c). Đo lại bằng `check_session.sh` section 7, kỳ
+  vọng 0 dòng `[!] ROTATE SOM`.
 - **Phantom screen ~44%** — xem mục dưới, không đổi.
 - **Phantom screen ~44%** (`screen_summary.foreground_sec = 0`): container VC
   lồng nhau khi chuyển tab, user không hề nhìn thấy — đo được 4 màn hình trong
