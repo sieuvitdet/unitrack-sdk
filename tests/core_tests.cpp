@@ -507,6 +507,70 @@ static void test_headless_no_rotate() {
     std::remove(path);
 }
 
+// An unclean relaunch inside KILL_GRACE_MS must RESUME, not rotate.
+// Regression for the 2026-08-20 device measurement: three force-quits
+// 2250/843/1286 ms apart produced three sessions (index 11→12→13) because
+// load_from() treated any clean_shutdown=0 launch as a kill regardless of how
+// long the gap was. Force-quit-and-reopen is one period of use — and iOS can
+// kill a suspended app before the state write lands, so a missing flag is not
+// proof of a kill either.
+static void test_session_kill_grace() {
+    printf("test_session_kill_grace\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_kill_grace.json";
+    const std::string ORIG = "aaaaaaaa-0000-0000-0000-000000000001";
+
+    // Seed a state file `gap_ms` old with the given clean_shutdown flag.
+    auto seed = [&](int64_t gap_ms, int clean) {
+        std::remove(path);
+        int64_t last = current_time_ms() - gap_ms;
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":5,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"\",\"clean_shutdown\":%d}",
+                ORIG.c_str(), (long long)(last - 60000), (long long)last, clean);
+        fclose(f);
+    };
+
+    // Unclean but the user came right back → same session.
+    seed(1000, 0);
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() == ORIG,  "kill grace: 1s unclean resumes");
+        CHECK(sm.current_session_index() == 5,  "kill grace: 1s unclean keeps index");
+    }
+
+    // Still inside the window.
+    seed(9000, 0);
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() == ORIG,  "kill grace: 9s unclean resumes");
+    }
+
+    // Past the window → a genuine kill still rotates.
+    seed(20000, 0);
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() != ORIG,  "kill grace: 20s unclean rotates");
+        CHECK(sm.current_session_index() == 6,  "kill grace: 20s unclean bumps index");
+    }
+
+    // A clean background resumes regardless of gap (below the timeout).
+    seed(20000, 1);
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() == ORIG,  "kill grace: clean bg resumes at 20s");
+    }
+
+    // The 30-minute inactivity timeout still wins over the grace window.
+    seed(31 * 60 * 1000, 0);
+    {   SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() != ORIG,  "kill grace: timeout still rotates");
+    }
+    std::remove(path);
+}
+
 static void test_session_id_salt() {
     printf("test_session_id_salt\n");
     using namespace unitrack;
@@ -695,6 +759,7 @@ int main() {
     test_session_boundary();
     test_screen_lifecycle();
     test_c_api_end_to_end();
+    test_session_kill_grace();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();

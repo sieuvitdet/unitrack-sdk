@@ -102,6 +102,14 @@ public:
     // stored, so ids stay stable across a config change mid-session.
     void set_salt(const std::string& salt);
 
+    // Grace window for an unclean relaunch. Below this, a launch with
+    // clean_shutdown=0 RESUMES the stored session instead of reporting a kill:
+    // force-quit-then-reopen inside a few seconds is one period of use, and
+    // iOS may also kill a suspended app before the state write lands, so a
+    // missing flag alone is not proof of a kill. Deliberately small — a
+    // genuine kill the user returns from later still rotates.
+    static constexpr int64_t KILL_GRACE_MS = 10 * 1000;  // 10s
+
 private:
     std::mutex     mu_;
     std::string    salt_;

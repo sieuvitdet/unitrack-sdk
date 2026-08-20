@@ -103,10 +103,34 @@ void SessionManager::load_from(const std::string& path, bool headless) {
             last_activity_ms_ = saved_last_act;
             session_index_    = saved_idx;
             prev_id_.clear();
+        } else if (now - saved_last_act <= KILL_GRACE_MS) {
+            // Killed, but the user came straight back (≤ KILL_GRACE_MS).
+            //
+            // A session is "a user's period of use". Force-quitting from the
+            // switcher and reopening a second later does not end that period —
+            // it is the same sitting. The old code ignored the gap entirely and
+            // rotated on ANY unclean launch, so a device measured on 2026-08-20
+            // produced three sessions in four seconds (gaps 2250/843/1286 ms,
+            // session_index 11→12→13) purely from repeated force-quits.
+            //
+            // Treating that as a kill is also unfalsifiable in the other
+            // direction: iOS can suspend and kill a backgrounded app before the
+            // state write lands (the SDK holds no UIApplication background task
+            // assertion), so clean_shutdown=0 does not reliably mean "killed".
+            // A short gap is the honest signal that the user never left.
+            //
+            // Beyond the grace window, an unclean launch still rotates —
+            // that case is a genuine kill worth reporting.
+            session_id_       = saved_id;
+            started_at_ms_    = saved_started ? saved_started : now;
+            last_activity_ms_ = saved_last_act;
+            session_index_    = saved_idx;
+            prev_id_.clear();
         } else {
-            // Killed: clean_shutdown=false + gap dưới timeout = app bị kill
-            // (swipe khỏi switcher / Force Stop / OS reclaim). Rotate ngay
-            // + surface boundary để Tracker fire session_ended kèm reason
+            // Killed: clean_shutdown=false + gap trên KILL_GRACE_MS nhưng dưới
+            // timeout = app bị kill (swipe khỏi switcher / Force Stop / OS
+            // reclaim) và user quay lại sau một lúc. Rotate ngay + surface
+            // boundary để Tracker fire session_ended kèm reason
             // killed_recovered. Không đợi 30 phút timeout.
             prev_id_         = saved_id;
             prev_started_ms_ = saved_started;
