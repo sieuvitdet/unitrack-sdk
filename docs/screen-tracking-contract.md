@@ -66,7 +66,7 @@ vẫn có (`ScreenSummaryState.updateForScreenEnd()` tự cộng), chỉ mất k
 tách riêng thời gian background giữa chừng. Nếu user background > 30 phút thì
 session rotate rồi nên không quan tâm; dưới 30 phút thì sai lệch nhỏ, chấp nhận.
 
-## Năm cái bẫy đã dính (đừng lặp lại)
+## Sáu cái bẫy đã dính (đừng lặp lại)
 
 ### 1. `action_name` bị portal config đè
 `resolveEventName(kind:defaultName:)` đọc `eventNames[kind]` — map đó để
@@ -137,6 +137,46 @@ lúc đó `lastScreen` CHÍNH LÀ màn đang rời nên fallback đúng).
 
 Không đọc `event.entities` (bẫy #3 vẫn đúng) và không dùng
 `com.snowplowanalytics.core.screenviews.*` — internal API, không stable.
+
+### 6. Force-quit rồi mở lại sau 1 giây vẫn đẻ session mới
+
+Hai lỗi độc lập, phải sửa cả hai:
+
+**(a) iOS không bao giờ báo core là đã background sạch.** Android gọi
+`ut_log_background()` trong lifecycle observer, iOS thì không — nên
+`clean_shutdown` không bao giờ được persist, mọi lần mở app đều trông như
+bị kill. Fix ở `AppLifecycleObserver.swift`: **thay** `track("app_background")`
+bằng `UniTrack._logBackgroundToCore()` (core tự bắn event bên trong
+`log_background()`, gọi cả hai là double-fire — Android không gọi `track`).
+
+Verify bằng cách kéo `session.json` khỏi máy thật:
+```bash
+xcrun devicectl device info files --device <UDID> \
+  --domain-type appDataContainer --domain-identifier <bundle-id> \
+  --source Library/Application\ Support/unitrack/session.json --destination /tmp/
+```
+→ đọc được `"clean_shutdown":1`. Xong bước (a).
+
+**(b) `killed_recovered` không nhìn độ dài gap.** Đây mới là gốc. `load_from()`
+chỉ hỏi "`clean_shutdown` có false không" rồi rotate ngay, gap 1 giây hay 29
+phút xử lý y hệt. Mà `clean_shutdown = false` **không phải bằng chứng bị kill**:
+iOS có thể kill app đang suspend trước khi state write kịp xuống đĩa (SDK không
+giữ `beginBackgroundTask` assertion). User force-quit rồi mở lại ngay → session
+mới, dù cùng một phiên sử dụng.
+
+→ Fix: `KILL_GRACE_MS = 10s` trong `session_manager.cpp`. Relaunch không sạch
+mà gap ≤ 10s thì **resume** session cũ, quá 10s mới `killed_recovered`. Timeout
+30 phút vẫn rotate như cũ.
+
+Replay đúng chuỗi đo được trên máy thật (gap 2250 / 843 / 1286 ms):
+**4 session → 1**. Test `test_session_kill_grace()` trong `tests/core_tests.cpp`.
+
+**Chưa verify runtime trên máy thật** — mới chỉ pass test. Đo lại bằng
+`check_session.sh` section 7 sau vòng test tới.
+
+**Phát hiện kèm:** FPT Life dùng scene-based lifecycle
+(`UIApplicationSceneManifest`), nên `applicationDidEnterBackground` không bao
+giờ fire → không có `session_ended`. Việc của app, không phải SDK.
 
 ## Cách verify
 
@@ -227,11 +267,9 @@ Data lọc `foreground_sec > 0` là hết.
 
 ## Việc còn lại
 
-- **Bẫy #6 (rotate sớm) CHƯA hết.** Sau khi pin `0.3.62` (đã verify checkout
-  `8eeec4e` có `_logBackgroundToCore`), vẫn đo được 3 lần rotate với gap
-  2.3s / 0.8s / 1.3s. Fix `ut_log_background()` đúng hướng nhưng chưa đủ —
-  còn đường nào khác set `clean_shutdown = false`, hoặc `load_from()` chạy
-  nhiều lần trong một launch. Verify bằng `check_session.sh` section 7.
+- **Bẫy #6 (rotate sớm)** — root cause tìm ra, fix `KILL_GRACE_MS` đã vào
+  `0.3.63`, **chưa verify runtime**. Xem bẫy #6. Đo lại bằng
+  `check_session.sh` section 7, kỳ vọng 0 dòng `[!] ROTATE SOM`.
 - **Phantom screen ~44%** — xem mục dưới, không đổi.
 - **Phantom screen ~44%** (`screen_summary.foreground_sec = 0`): container VC
   lồng nhau khi chuyển tab, user không hề nhìn thấy — đo được 4 màn hình trong
