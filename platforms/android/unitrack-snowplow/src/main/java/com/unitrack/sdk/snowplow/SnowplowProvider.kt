@@ -60,6 +60,18 @@ data class SnowplowOptions(
     val applicationContext: Boolean = true,
     val sessionContext: Boolean = true,
     val screenContext: Boolean = true,
+    /** Snowplow's own Activity-swizzling ScreenView autotracking.
+     *
+     *  DEFAULT false — Snowplow's own default is TRUE, which double-counts
+     *  every screen: once from UniTrack.setScreen() (business name, carrying
+     *  user_context + application_context + core_action) and once from
+     *  Snowplow's swizzler with the fully-qualified class name and none of
+     *  those entities. Measured on session 529dc30d: 3 orphan screen_view
+     *  rows named vn.fpt.fsh.fptlife...StartingActivityDefault, with no
+     *  core_action, so they carried no session_id the data team could join.
+     *
+     *  Parity: SnowplowOptions.screenViewAutotracking on iOS. */
+    val screenViewAutotracking: Boolean = false,
     val lifecycleAutotracking: Boolean = true,
     val screenEngagementAutotracking: Boolean = true,
     val exceptionAutotracking: Boolean = true,
@@ -112,6 +124,7 @@ class SnowplowProvider(
             .applicationContext(options.applicationContext)
             .sessionContext(options.sessionContext)
             .screenContext(options.screenContext)
+            .screenViewAutotracking(options.screenViewAutotracking)
             .lifecycleAutotracking(options.lifecycleAutotracking)
             .screenEngagementAutotracking(options.screenEngagementAutotracking)
             .exceptionAutotracking(options.exceptionAutotracking)
