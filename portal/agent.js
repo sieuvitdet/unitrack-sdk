@@ -60,6 +60,24 @@ function isMediaUrl(u) {
   return typeof u === 'string' && MEDIA_URL_RE.test(u);
 }
 
+// Business action name for one event's parsed properties, or null.
+// Custom-vendor events stamp `event_action` directly. Snowplow builtin events
+// (com.snowplowanalytics.mobile/screen_view + screen_end) cannot — their schema
+// is a closed set — so the SDK puts it in the core_action entity.
+function actionNameOf(props) {
+  if (!props) return null;
+  if (props.event_action) return props.event_action;
+  const ctxs = props._contexts;
+  if (!Array.isArray(ctxs)) return null;
+  for (const c of ctxs) {
+    if (c && typeof c.schema === 'string' && c.schema.includes('core_action')
+        && c.data && c.data.action_name) {
+      return c.data.action_name;
+    }
+  }
+  return null;
+}
+
 // ── Phase 1: reconstruction ──────────────────────────────────────────────────
 
 // Build the ordered journey + summary for one session's events (asc by ts).
@@ -116,6 +134,15 @@ function buildSessionRow(events) {
     const step = {
       screen,
       event_name: e.event_name,
+      // Business action the data team pivots on (screen_viewed / screen_exited
+      // / screen_load_completed / camera_stream_started …), as opposed to
+      // event_name which is the SCHEMA kind and collapses three different
+      // screen actions into "screen_view". Custom-vendor events carry it as a
+      // plain property; the Snowplow BUILTIN screen_view/screen_end have an
+      // empty-ish payload by design and keep it in the core_action entity
+      // instead — hence the _contexts fallback. See
+      // docs/screen-tracking-contract.md.
+      event_action: actionNameOf(props),
       element_key: e.element_key || null,
       ts: e.timestamp,
     };

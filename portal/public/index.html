@@ -3593,7 +3593,7 @@ function buildSessionTree(journey){
           seg.actions.push({ event_name:'network_request', element_key:null, ts:st.ts, networks:[net], standaloneNet:true });
         }
       } else {
-        const action = { event_name:st.event_name, element_key:st.element_key, ts:st.ts, networks:[], props:st.props||null };
+        const action = { event_name:st.event_name, event_action:st.event_action||null, element_key:st.element_key, ts:st.ts, networks:[], props:st.props||null };
         if(isTapName(st.event_name)) lastTap = st;
         // Attribute an error/crash to the button tapped just before it (same screen).
         if(isError && lastTap && (st.ts - lastTap.ts) <= NET_WINDOW_MS) action.triggeredBy = lastTap.element_key || '(button)';
@@ -3946,7 +3946,7 @@ function renderSessionOutline(pid, sid, session, allSessions){
 
   // Sticky column header — giúp scan cột khi list dài.
   const tableHeadHtml = `
-    <div class="mono" style="display:grid;grid-template-columns:120px 140px 1fr 180px 80px;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:78px;z-index:4;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
+    <div class="mono" style="display:grid;grid-template-columns:120px 190px 1fr 180px 80px;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:78px;z-index:4;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
       <div>Time</div><div>Event</div><div>Detail</div><div>Screen</div><div style="text-align:right">Status</div>
     </div>`;
 
@@ -4022,9 +4022,9 @@ function _renderFlatEventRow(e) {
     detail = interesting || '<span class="muted">—</span>';
   }
 
-  return `<div class="ide-flat-row" data-evt='${esc(JSON.stringify(e))}' style="display:grid;grid-template-columns:120px 140px 1fr 180px 80px;gap:12px;padding:6px 18px;border-bottom:1px solid var(--line);cursor:pointer;font-family:ui-monospace,monospace;font-size:11.5px;align-items:center" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
+  return `<div class="ide-flat-row" data-evt='${esc(JSON.stringify(e))}' style="display:grid;grid-template-columns:120px 190px 1fr 180px 80px;gap:12px;padding:6px 18px;border-bottom:1px solid var(--line);cursor:pointer;font-family:ui-monospace,monospace;font-size:11.5px;align-items:center" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
     <div class="muted">${time}</div>
-    <div style="color:${accent};font-weight:600">${esc(name)}</div>
+    <div style="color:${accent};font-weight:600" title="${esc(name)}">${esc(e.event_action || name)}</div>
     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(JSON.stringify(props))}">${detail}</div>
     <div class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(screen)}">${esc(screen)}</div>
     <div style="text-align:right">${status}</div>
@@ -4836,6 +4836,10 @@ function showActionDetail(a){
   // operator can grok "when/where" before the deeper details.
   const ctxRows = [];
   if (a.ts) ctxRows.push(['Thời điểm', new Date(a.ts).toLocaleString('vi-VN', { hour12: false }) + ` (${a.ts})`]);
+  // event_action = tên nghiệp vụ đội Data pivot theo. event_name chỉ là schema
+  // kind, gộp screen_viewed/screen_exited/screen_load_completed thành
+  // "screen_view" nên không phân biệt được. Xem docs/screen-tracking-contract.md.
+  if (a.event_action) ctxRows.push(['Event action', a.event_action]);
   const screen = (a.props && (a.props.screen || a.props.screen_name)) || null;
   if (screen) ctxRows.push(['Màn hình', screen]);
   if (a.element_key) ctxRows.push(['Element key', a.element_key]);
@@ -4978,7 +4982,10 @@ function showActionDetail(a){
 
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
   dlg.innerHTML = `
-    <div class="dlg-h" style="color:${titleColor}">${isErr?'⚠ ':''}${esc(a.event_name)}${a.element_key?` · ${esc(a.element_key)}`:''}
+    <div class="dlg-h" style="color:${titleColor}">${isErr?'⚠ ':''}${esc(a.event_name)}${
+      a.event_action && a.event_action !== a.event_name
+        ? ` <span style="color:var(--accent2);font-weight:600">→ ${esc(a.event_action)}</span>` : ''
+    }${a.element_key?` · ${esc(a.element_key)}`:''}
       <button class="act-close" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">×</button></div>
     <div class="dlg-b">${body}<div id="actProvBlock" style="margin-top:14px"></div></div>`;
   try { dlg.showModal(); } catch(_){ dlg.setAttribute('open',''); }
