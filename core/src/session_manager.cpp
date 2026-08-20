@@ -255,13 +255,24 @@ SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
     }
+    // Persist the advancing clock, not just the in-memory copy. Without this
+    // the file kept last_activity_ms frozen at session start: every later
+    // event moved it in RAM only, so a relaunch read a stale value and
+    // measured the gap from the WRONG instant. On a device on 2026-08-20 that
+    // made KILL_GRACE_MS useless — the real gap was 0.2s but the computed one
+    // spanned the whole session, so every relaunch still rotated.
+    // Throttled to ~10s (same budget as mark_activity) so a chatty call site
+    // doesn't hammer the disk; worst case we forget <=10s, far under the
+    // 30-min timeout and the 10s grace.
+    bool stale = (now - last_activity_ms_) > ACTIVITY_SAVE_INTERVAL_MS;
     last_activity_ms_ = now;
     // Capture the first event id of this session the first time we see one.
     // Subsequent events in the same session echo this back as first_event_id.
     if (first_event_id_.empty() && !event_id.empty()) {
         first_event_id_ = event_id;
-        save_locked();  // remember across launches
+        stale = true;
     }
+    if (stale) save_locked();  // remember across launches
     SessionStamp s;
     s.id                  = session_id_;
     s.index               = session_index_;
@@ -276,7 +287,12 @@ SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(on_rotate);
     }
+    // Foreground resolve is a real activity beat and may be the LAST thing that
+    // happens before a force-quit (no event need follow it), so persist on the
+    // same throttle rather than leaving the file behind.
+    bool stale = (now - last_activity_ms_) > ACTIVITY_SAVE_INTERVAL_MS;
     last_activity_ms_ = now;
+    if (stale) save_locked();
 
     SessionResolution r;
     r.id            = session_id_;
@@ -308,9 +324,14 @@ void SessionManager::mark_activity() {
     // chatty SDK call site doesn't hammer the disk. Worst-case a crash forgets
     // the most recent ≤10s of activity — well below the 30-min timeout, so
     // resume-on-launch logic still works as expected.
-    bool need_save = (now - last_activity_ms_) > 10 * 1000;
+    bool need_save = (now - last_activity_ms_) > ACTIVITY_SAVE_INTERVAL_MS;
     last_activity_ms_ = now;
     if (need_save) save_locked();
+}
+
+void SessionManager::rewind_activity_for_test(int64_t ms) {
+    std::lock_guard<std::mutex> lock(mu_);
+    last_activity_ms_ -= ms;
 }
 
 void SessionManager::set_timeout_ms(int64_t ms) {

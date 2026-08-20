@@ -514,6 +514,70 @@ static void test_headless_no_rotate() {
 // long the gap was. Force-quit-and-reopen is one period of use — and iOS can
 // kill a suspended app before the state write lands, so a missing flag is not
 // proof of a kill either.
+// Regression: last_activity_ms must actually reach DISK as the session runs.
+// It used to advance only in memory (stamp_for_event saved once, for the first
+// event), so a relaunch read a value frozen at session start and measured the
+// kill gap from the wrong instant — defeating KILL_GRACE_MS entirely. Measured
+// on a real device 2026-08-20: 9 sessions in 17s despite gaps of 0.2s.
+static void test_session_activity_persisted() {
+    printf("test_session_activity_persisted\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_activity_persist.json";
+    std::remove(path);
+
+    auto read_last_activity = [&]() -> long long {
+        FILE* f = fopen(path, "r");
+        if (!f) return -1;
+        char buf[1024] = {0};
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        (void)n;
+        const char* k = strstr(buf, "\"last_activity_ms\":");
+        if (!k) return -1;
+        return atoll(k + strlen("\"last_activity_ms\":"));
+    };
+
+    std::string sid;
+    long long started_at = 0;
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        sm.stamp_for_event("e1");
+        sid = sm.current_session_id();
+        started_at = read_last_activity();
+        CHECK(started_at > 0, "activity persist: file written on first event");
+
+        // Simulate a session that has been running a while, then one more
+        // event. Before the fix this event never touched the file.
+        sm.rewind_activity_for_test(30 * 1000);
+        sm.stamp_for_event("e2");
+    }
+
+    long long after = read_last_activity();
+    CHECK(after > started_at,
+          "activity persist: later events advance last_activity_ms on disk");
+
+    // And the whole point: a force-quit right after that event must resume,
+    // because the measured gap is now tiny rather than session-long.
+    {
+        // A live session persists clean_shutdown:0 already — that is exactly
+        // the state a force-quit leaves behind (mark_clean_shutdown never ran).
+        FILE* f = fopen(path, "r");
+        char buf[1024] = {0};
+        size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        (void)rd;
+        CHECK(strstr(buf, "\"clean_shutdown\":0") != nullptr,
+              "activity persist: a running session is on-disk unclean");
+
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() == sid,
+              "activity persist: unclean relaunch right after activity resumes");
+    }
+    std::remove(path);
+}
+
 static void test_session_kill_grace() {
     printf("test_session_kill_grace\n");
     using namespace unitrack;
@@ -760,6 +824,7 @@ int main() {
     test_screen_lifecycle();
     test_c_api_end_to_end();
     test_session_kill_grace();
+    test_session_activity_persisted();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();

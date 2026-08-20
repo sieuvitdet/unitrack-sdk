@@ -81,6 +81,11 @@ public:
     // Mark activity — extends the current session.
     void mark_activity();
 
+    // Test-only: pretend `ms` of activity time has already elapsed, so a test
+    // can cross the save throttle without sleeping. Not part of the SDK
+    // surface — no binding calls this.
+    void rewind_activity_for_test(int64_t ms);
+
     // Force start a new session (e.g. on app foreground after long bg, or
     // identify reset). The next resolve() reports the rotation with `reason`.
     void rotate(SessionEndReason reason = SessionEndReason::manual_reset);
@@ -109,6 +114,11 @@ public:
     // missing flag alone is not proof of a kill. Deliberately small — a
     // genuine kill the user returns from later still rotates.
     static constexpr int64_t KILL_GRACE_MS = 10 * 1000;  // 10s
+
+    // How often stamp_for_event()/resolve()/mark_activity() flush the advancing
+    // last_activity_ms_ to disk. Bounds the error that load_from() sees on the
+    // next launch, so it must stay well under KILL_GRACE_MS.
+    static constexpr int64_t ACTIVITY_SAVE_INTERVAL_MS = 10 * 1000;  // 10s
 
 private:
     std::mutex     mu_;
