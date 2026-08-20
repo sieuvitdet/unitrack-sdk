@@ -352,6 +352,17 @@ public final class UniTrack {
         handler()
     }
 
+    /// Internal hook called by AppLifecycleObserver from didEnterBackground.
+    /// Forwards to the core so it fires app_background AND persists
+    /// clean_shutdown=1; the next cold start then resumes the session instead
+    /// of diagnosing a kill. Public so the observer can reach it from another
+    /// file in the same module — apps don't need to call this.
+    /// Parity: Android NativeBridge.logBackground().
+    public static func _logBackgroundToCore() {
+        guard let ctx = shared.context else { return }
+        ut_log_background(ctx)
+    }
+
     /// When the active session started (monotonic clock-based). Nil before init.
     public static func sessionStartedAt() -> Date? {
         shared.sessionStatLock.lock(); defer { shared.sessionStatLock.unlock() }

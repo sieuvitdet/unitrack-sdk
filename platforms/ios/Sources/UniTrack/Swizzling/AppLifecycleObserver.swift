@@ -128,7 +128,16 @@ enum AppLifecycleObserver {
                 ]
                 UniTrack.track("screen_exited", properties: endPayload)
             }
-            UniTrack.track("app_background", properties: [:])
+            // ut_log_background() — NOT UniTrack.track("app_background").
+            // The core fires app_background itself inside log_background()
+            // and then calls session_.mark_clean_shutdown(), which persists
+            // clean_shutdown=1. Tracking the event by hand skipped that flag,
+            // so every cold start read clean_shutdown=false, diagnosed a kill
+            // and rotated (session_manager.cpp:106 killed_recovered) — sessions
+            // split 0.1s apart with a 30' timeout. Parity: Android
+            // AppLifecycleObserver.kt calls NativeBridge.logBackground() here
+            // and likewise does not track app_background itself.
+            UniTrack._logBackgroundToCore()
             // Snapshot the session state so a later session_ended carries the
             // right duration + counters (the SDK doesn't track screen_count
             // itself yet — apps may pass their own via UniTrack.setSessionStat).
