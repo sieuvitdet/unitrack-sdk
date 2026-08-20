@@ -295,6 +295,14 @@ class SnowplowProvider(
                 buildEntities("screen_view", name, null, null, false,
                               actionName = ACTION_SCREEN_VIEWED)
             )
+            // Snowplow fires screen_end for the OUTGOING screen as a
+            // side-effect of this track() call, and makeScreenEndContext()
+            // runs inside it. Hand that generator the outgoing name here:
+            // UniTrack.previousScreenName() has ALREADY been advanced to
+            // `name` by setScreen() before this fan-out runs, so reading it
+            // in the generator stamped core_action.screen with the screen
+            // being ENTERED (measured: 39/57 rows wrong on session 922e5be6).
+            exitingScreen = previous
             t.track(sv)
             com.unitrack.sdk.UniTrack.log("UniTrackSnowplow",
                 "hybrid setScreen -> builtin ScreenView(name=$name) fired " +
@@ -305,11 +313,9 @@ class SnowplowProvider(
     }
 
     override fun setScreen(name: String) {
-        // ponytail: chưa có hybrid path bên Android nên `previous` chưa dùng
-        // tới — override ở trên chỉ để parity signature với iOS. Khi bật
-        // hybrid (fire builtin ScreenView), stamp previousName từ `previous`
-        // thay vì để Snowplow tự suy, xem SnowplowProvider.swift.
-        // No-op — firing Snowplow's builtin ScreenView(name) here emits a
+        // Legacy (hybrid OFF) path. Hybrid ON never lands here — the
+        // setScreen(name, previous) override above fires the builtin
+        // ScreenView and returns. No-op — firing Snowplow's builtin ScreenView(name) here emits a
         // second event under com.snowplowanalytics.mobile/screen_view —
         // duplicating every screen transition alongside UniTrack's own
         // vn.fpt.ftel.snowplow/screen_view (dispatched via
@@ -805,7 +811,11 @@ class SnowplowProvider(
                 )
                 val sid = com.unitrack.sdk.UniTrack.currentSessionId()
                 if (sid.isNotEmpty()) data["session_id"] = sid
-                com.unitrack.sdk.UniTrack.previousScreenName()
+                // Set by setScreen() immediately before the ScreenView that
+                // triggers this screen_end. Falls back to previousScreenName()
+                // only for a screen_end with no preceding setScreen (app
+                // backgrounding), where lastScreen IS the outgoing screen.
+                (exitingScreen ?: com.unitrack.sdk.UniTrack.previousScreenName())
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { data["screen"] = it }
                 return listOf(SelfDescribingJson(schema, stringifyAll(data)))
@@ -836,5 +846,9 @@ class SnowplowProvider(
         /** core_action schema URI, captured at initialize() so the GlobalContext
          *  generator can reach it without holding the provider. */
         @Volatile private var sharedCoreActionSchema: String? = null
+
+        /** Screen the app is leaving, handed to the screen_end generator by
+         *  setScreen(). Parity: SnowplowProvider.swift exitingScreen. */
+        @Volatile private var exitingScreen: String? = null
     }
 }

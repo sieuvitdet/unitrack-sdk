@@ -1,11 +1,11 @@
 # Screen tracking contract (Snowplow hybrid mode)
 
-Cập nhật: 2026-08-19.
+Cập nhật: 2026-08-20.
 
 | Platform | Code | Verify runtime |
 |---|---|---|
 | iOS | ✅ xong | ✅ đã đo trên portal |
-| Android | ✅ xong (parity 1:1 với iOS) | ⏳ chưa test — cần tag JitPack mới |
+| Android | ✅ xong (parity 1:1 với iOS) | ✅ đã đo 2026-08-20 (JitPack 0.3.60, app 2.16.1, Xiaomi 23106RN0DA) |
 | Web | ❌ chưa có hybrid | — |
 
 Web hiện dùng custom vendor hoàn toàn: đã có `event_action` + `session_id`
@@ -66,7 +66,7 @@ vẫn có (`ScreenSummaryState.updateForScreenEnd()` tự cộng), chỉ mất k
 tách riêng thời gian background giữa chừng. Nếu user background > 30 phút thì
 session rotate rồi nên không quan tâm; dưới 30 phút thì sai lệch nhỏ, chấp nhận.
 
-## Bốn cái bẫy đã dính (đừng lặp lại)
+## Năm cái bẫy đã dính (đừng lặp lại)
 
 ### 1. `action_name` bị portal config đè
 `resolveEventName(kind:defaultName:)` đọc `eventNames[kind]` — map đó để
@@ -107,6 +107,36 @@ UniTrack. Kết quả: 1 phiên thật bị tách 2 session_id (`7785b4db` → s
 
 **Snowplow `client_session.sessionId` ≠ UniTrack `session_id`.** Hai khái niệm
 độc lập. Luôn join theo `core_action.session_id`.
+
+### 5. `core_action.screen` trên `screen_end` là màn VÀO, không phải màn RỜI
+
+Bẫy #3 chốt "lấy từ `UniTrack.previousScreenName()`" — đúng hướng nhưng
+**sai thời điểm**. `setScreen()` đã gán `lastScreen = name` (màn mới) TRƯỚC khi
+fan-out xuống provider (`UniTrack.swift:857` → `:867`, `UniTrack.kt:899` →
+`:907`). Provider fire builtin `ScreenView`, Snowplow fire `screen_end` ngay
+trong `track()` đó, generator đọc `previousScreenName()` → nhận **màn vừa vào**.
+
+Đo thật (2026-08-20, so `core_action.screen` với entity `screen` của Snowplow —
+entity này Snowplow tự gắn nên là nguồn đúng):
+
+| Session | Platform | MATCH | MISMATCH |
+|---|---|---|---|
+| `482b48d9` + `f543d101` + `1154bc0d` | iOS | 1 | **52** |
+| `922e5be6` + `722f6915` | Android | 18 | **39** |
+
+Ví dụ rõ nhất (iOS `482b48d9`, dòng đầu): Snowplow nói màn kết thúc là
+`ISCFlashScreenSyncDataViewController` với `foreground_sec = 227.21` (đúng —
+splash user ngồi 3 phút), `core_action.screen` ghi `CameraHomeViewController`
+(màn vừa mở). Đội Data join theo `core_action` → **mọi `screen_exited` gán sai
+màn**, và `foreground_sec` bị quy cho màn không liên quan.
+
+→ Fix: `setScreen()` stash màn đang rời vào `exitingScreen` NGAY TRƯỚC
+`tracker.track(sv)`; generator đọc biến đó, chỉ fallback về
+`previousScreenName()` khi không có setScreen đi trước (app background —
+lúc đó `lastScreen` CHÍNH LÀ màn đang rời nên fallback đúng).
+
+Không đọc `event.entities` (bẫy #3 vẫn đúng) và không dùng
+`com.snowplowanalytics.core.screenviews.*` — internal API, không stable.
 
 ## Cách verify
 
@@ -163,10 +193,28 @@ Lưu ý cho Web: `screen_end` là khái niệm mobile. Snowplow JS tracker có
 `enableActivityTracking` / page ping thay vì `screen_summary` — kiểm tra API
 thật của tracker web trước khi bê nguyên thiết kế mobile sang.
 
+## Kết quả đo thật (Android, 2026-08-20)
+
+Session `922e5be6` + `722f6915`, Xiaomi 23106RN0DA / Android 15, app 2.16.1
+(staging `vn.fpt.fptlife.staging`), JitPack `0.3.60`:
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `action_name` | `screen_viewed` / `screen_exited` / `screen_load_completed` — đúng spec |
+| `session_id` trong `core_action` | CÓ 100% (129/129) |
+| Custom `screen_end` trùng lặp | 0 — hybrid skip chạy đúng |
+| Portal tách session | hết — `portal_sid` khớp `core_action.session_id` 100% |
+| `screen_summary.foreground_sec` | có số |
+| `core_action.screen` đúng màn | ❌ 18/57 — bẫy #5, đã fix, **chưa đo lại** |
+
 ## Việc còn lại
 
-- **Android chưa test runtime.** Code xong + compile sạch, nhưng app đang pin
-  JitPack `0.3.57-headless1` → cần tag mới thì JitPack mới build artifact.
+- **Đo lại bẫy #5 trên cả 2 platform.** Fix `exitingScreen` đã build pass
+  (Android `compileReleaseKotlin`, iOS `xcodebuild -scheme UniTrackSnowplow
+  -destination generic/platform=iOS` → BUILD SUCCEEDED) nhưng **chưa có data
+  runtime**. Verify: `core_action.screen` phải khớp entity `screen.name` của
+  Snowplow trên mọi row `screen_end` (query ở bẫy #5). Cần tag SPM + JitPack
+  mới rồi app pin lên.
 - **Phantom screen ~44%** (`screen_summary.foreground_sec = 0`): container VC
   lồng nhau khi chuyển tab, user không hề nhìn thấy — đo được 4 màn hình trong
   16ms trên một lần chuyển tab.

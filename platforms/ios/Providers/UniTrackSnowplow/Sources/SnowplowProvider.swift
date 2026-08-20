@@ -302,7 +302,14 @@ public final class SnowplowProvider: AnalyticsProvider {
                 // missing on all 76 builtin screen_end rows). Ask UniTrack
                 // instead: screen_end fires for the screen being left, which is
                 // exactly the last setScreen() UniTrack recorded.
-                if let name = UniTrack.previousScreenName(), !name.isEmpty {
+                // Set by setScreen() immediately before the ScreenView that
+                // triggers this screen_end. Falls back to previousScreenName()
+                // only for a screen_end with no preceding setScreen (app
+                // backgrounding), where lastScreen IS the outgoing screen.
+                Self.exitingScreenLock.lock()
+                let exiting = Self.exitingScreen
+                Self.exitingScreenLock.unlock()
+                if let name = exiting ?? UniTrack.previousScreenName(), !name.isEmpty {
                     data["screen"] = name
                 }
 
@@ -325,6 +332,12 @@ public final class SnowplowProvider: AnalyticsProvider {
     /// core_action schema URI, captured at init so the static GlobalContext
     /// generator can reach it without retaining the provider.
     private static var sharedCoreActionSchema: String?
+
+    /// Screen the app is leaving, handed to the screen_end generator by
+    /// setScreen(). Static + locked for the same reason as the schema above:
+    /// the GlobalContext generator must not retain the provider.
+    private static var exitingScreen: String?
+    private static let exitingScreenLock = NSLock()
 
     /// Pull the short event name out of an iglu URI tail. Returns "" if the
     /// URI doesn't match the standard 4-part shape.
@@ -510,6 +523,16 @@ public final class SnowplowProvider: AnalyticsProvider {
                                           extra: nil,
                                           skipGlobalContexts: false,
                                           actionName: Self.actionScreenViewed))
+            // Snowplow fires screen_end for the OUTGOING screen as a
+            // side-effect of this track() call, and makeScreenEndContext()
+            // runs inside it. Hand that generator the outgoing name here:
+            // UniTrack.previousScreenName() has ALREADY been advanced to
+            // `name` by setScreen() before this fan-out runs, so reading it
+            // in the generator stamped core_action.screen with the screen
+            // being ENTERED (measured: 52/53 rows wrong on iOS 482b48d9).
+            Self.exitingScreenLock.lock()
+            Self.exitingScreen = previous
+            Self.exitingScreenLock.unlock()
             tracker.track(sv)
             UniTrack.log("[UniTrackSnowplow] hybrid setScreen → builtin ScreenView(name=%@) fired (com.snowplowanalytics.mobile/screen_view/1-0-0).", name)
             return
