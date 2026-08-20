@@ -21,8 +21,10 @@ data class UniTrackConfig(
     // Both event names are renameable so a team can map them onto its own
     // taxonomy (e.g. "page_enter" / "page_leave") via remote config.
     val screenLifecycle: Boolean = true,
-    val screenStartEvent: String = "screen_start",
-    val screenEndEvent: String = "screen_end",
+    // Business names, matching UniTrack.screenStartEventName. "screen_start"/
+    // "screen_end" were schema-shaped placeholders no data spec uses.
+    val screenStartEvent: String = "screen_viewed",
+    val screenEndEvent: String = "screen_exited",
     /** Event name fired by ActivityTracker's fragment lifecycle hook with
      *  load_ms (the onFragmentCreated → onFragmentResumed window). Mirrors
      *  the iOS swizzler's `screen_load_completed`. Renameable via portal

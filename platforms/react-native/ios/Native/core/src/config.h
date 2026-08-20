@@ -31,8 +31,11 @@ struct Config {
     // configurable so a team can map them onto their own taxonomy without an
     // app rebuild (e.g. "page_enter" / "page_leave").
     bool        screen_lifecycle   = true;
-    std::string screen_start_event = "screen_start";
-    std::string screen_end_event   = "screen_end";
+    // Defaults are BUSINESS names, matching the binding layer. "screen_start"/
+    // "screen_end" were schema-shaped placeholders that no data spec uses; a
+    // host that omits these keys used to ship event names nobody consumes.
+    std::string screen_start_event = "screen_viewed";
+    std::string screen_end_event   = "screen_exited";
 
     // Exponential backoff for failed flushes. After a failed send, an event is
     // not retried until now + min(retry_base_ms * 2^(retry_count-1), retry_max_ms),
