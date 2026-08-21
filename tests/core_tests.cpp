@@ -476,37 +476,6 @@ static void test_uuid_entropy() {
 // Headless launch (FCM push wake / job) must NOT open a session. A UI-less
 // process has no user period of use; rotating there produced ~3-event phantom
 // sessions and drove one prod device to session_index 1917.
-static void test_headless_no_rotate() {
-    printf("test_headless_no_rotate\n");
-    using namespace unitrack;
-    const std::string ORIG = "aaaaaaaa-1111-4111-8111-111111111111";
-    const char* path = "/tmp/ut_headless.json";
-    auto seed = [&]{
-        std::remove(path);
-        int64_t last = current_time_ms() - 2 * 3600 * 1000;   // 2h ago
-        FILE* f = fopen(path, "w");
-        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":100,"
-                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
-                   "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
-                ORIG.c_str(), (long long)last, (long long)last);
-        fclose(f);
-    };
-
-    seed();
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/true);
-        CHECK(sm.current_session_id() == ORIG, "headless: session id kept");
-        CHECK(sm.current_session_index() == 100, "headless: index not bumped");
-    }
-    seed();
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() != ORIG, "user launch: session rotates");
-        CHECK(sm.current_session_index() == 101, "user launch: index bumped");
-    }
-    std::remove(path);
-}
-
 // An unclean relaunch inside KILL_GRACE_MS must RESUME, not rotate.
 // Regression for the 2026-08-20 device measurement: three force-quits
 // 2250/843/1286 ms apart produced three sessions (index 11→12→13) because
@@ -587,71 +556,35 @@ static void test_session_activity_persisted() {
     std::remove(path);
 }
 
-// Noti is not user activity. A headless process (FCM wake) must replay the
-// persisted session without advancing last_activity_ms — otherwise every push
-// resets the 30-min timeout and the session never expires. Measured on a
-// Xiaomi 2026-08-21: 60 notifications kept one session alive for 9.5 hours
-// while the real usage was 15 minutes, and the user's next real launch did not
-// rotate because a push had just reset the clock.
-static void test_headless_does_not_extend_session() {
-    printf("test_headless_does_not_extend_session\n");
+// Product-owner decision 2026-08-21: a notification DOES open a session.
+// The previous headless exemption (60 pushes -> 1 session) is gone; each push
+// past the timeout now rotates like any other launch, carrying its own
+// session_started + user_context. This test pins the new contract so the
+// exemption cannot creep back in silently.
+static void test_headless_rotates_like_any_launch() {
+    printf("test_headless_rotates_like_any_launch\n");
     using namespace unitrack;
-    const char* path = "/tmp/ut_test_headless_activity.json";
+    const char* path = "/tmp/ut_test_headless_rotates.json";
     const std::string ORIG = "cccccccc-0000-0000-0000-000000000003";
 
-    // Session last touched 25 min ago — inside the 30-min window.
-    auto seed = [&]() {
-        std::remove(path);
-        int64_t last = current_time_ms() - 25 * 60 * 1000;
-        FILE* f = fopen(path, "w");
-        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
-                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
-                   "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
-                ORIG.c_str(), (long long)(last - 60000), (long long)last);
-        fclose(f);
-    };
+    // Session last touched 45 min ago — past the 30-min timeout.
+    std::remove(path);
+    int64_t last = current_time_ms() - 45 * 60 * 1000;
+    FILE* f = fopen(path, "w");
+    fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
+               "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+               "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
+            ORIG.c_str(), (long long)(last - 60000), (long long)last);
+    fclose(f);
 
-    auto disk_last_activity = [&]() -> long long {
-        FILE* f = fopen(path, "r");
-        if (!f) return -1;
-        char buf[1024] = {0};
-        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-        fclose(f); (void)n;
-        const char* k = strstr(buf, "\"last_activity_ms\":");
-        return k ? atoll(k + strlen("\"last_activity_ms\":")) : -1;
-    };
-
-    seed();
-    long long before = disk_last_activity();
-
-    // A push wakes the process and fires its events.
-    {
-        SessionManager sm;
-        sm.load_from(path, /*headless=*/true);
-        CHECK(sm.current_session_id() == ORIG, "headless: replays persisted session");
-        sm.stamp_for_event("noti-1");
-        sm.stamp_for_event("noti-2");
-        CHECK(sm.current_session_index() == 7, "headless: does not bump index");
-        // THE point: the wake must leave the activity clock where the user's
-        // last real interaction put it. The old code assigned `now` here, so
-        // every push silently renewed the 30-min timeout.
-        CHECK(sm.last_activity_for_test() == before,
-              "headless: notification must not advance last_activity_ms");
-    }
-
-    CHECK(disk_last_activity() == before,
-          "headless: notification must not persist a new last_activity_ms");
-
-    // The user opens the app 6 min later. Real gap since real use is now
-    // 31 min > timeout, so this MUST rotate. Before the fix the push had
-    // reset the clock and this stayed on the old session.
-    {
-        SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        sm.rewind_activity_for_test(6 * 60 * 1000);
-        CHECK(sm.current_session_id() != ORIG,
-              "headless: user launch past the real timeout still rotates");
-    }
+    SessionManager sm;
+    sm.load_from(path, /*headless=*/true);
+    CHECK(sm.current_session_id() != ORIG,
+          "headless launch past timeout mints a new session");
+    CHECK(sm.current_session_index() == 8,
+          "headless launch past timeout bumps the index");
+    CHECK(sm.previous_session_id() == ORIG,
+          "headless rotate chains previous_session_id for the data team");
     std::remove(path);
 }
 
@@ -902,12 +835,11 @@ int main() {
     test_c_api_end_to_end();
     test_session_kill_grace();
     test_session_activity_persisted();
-    test_headless_does_not_extend_session();
+    test_headless_rotates_like_any_launch();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();
     test_session_id_salt();
-    test_headless_no_rotate();
 
     printf("\nResult: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;

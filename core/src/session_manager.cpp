@@ -61,7 +61,6 @@ void SessionManager::set_salt(const std::string& salt) {
 void SessionManager::load_from(const std::string& path, bool headless) {
     std::lock_guard<std::mutex> lock(mu_);
     persist_path_     = path;
-    headless_process_ = headless;
     std::ifstream f(path);
     if (!f.good()) {
         // No prior state — keep the fresh UUID from the ctor + index=1, and
@@ -141,31 +140,18 @@ void SessionManager::load_from(const std::string& path, bool headless) {
             session_index_   = saved_idx + 1;
             // session_id_ giữ UUID mới từ ctor.
         }
-    } else if (headless) {
-        // Gap exceeded the timeout, but this process was NOT started by the
-        // user (FCM push wake, WorkManager job, boot receiver). A session is a
-        // user's period of use, so a UI-less process must not open one — and
-        // must not close the persisted one either. Replay the stored session
-        // untouched and let the next real launch decide the boundary.
-        //
-        // Without this, every push rotated: one prod device reached
-        // session_index 1917, each phantom session holding ~3 events and no
-        // screens. The guard below in the <=timeout branch already covered
-        // short gaps; pushes normally arrive hours apart and so landed here.
-        session_id_       = saved_id;
-        started_at_ms_    = saved_started ? saved_started : now;
-        // KHÔNG coi lần wake này là activity — noti không phải user hoạt động.
-        // Giữ nguyên mốc cũ để lần user mở app thật sau đó vẫn thấy đúng
-        // khoảng nghỉ và rotate. Trước đây dòng này gán `now`, nên mỗi noti
-        // reset đồng hồ 30' và session không bao giờ hết hạn.
-        //
-        // An toàn vì headless_process_ chặn rotate lười ở current_session_id()
-        // / stamp_for_event() / resolve() suốt vòng đời process này — cái mốc
-        // stale không còn kích hoạt được rotate nữa.
-        last_activity_ms_ = saved_last_act;
-        session_index_    = saved_idx;
-        prev_id_.clear();
     } else {
+        // NOTE (2026-08-21, quyết định của product owner): headless launch
+        // KHÔNG còn được miễn rotate. Trước đây nhánh `else if (headless)` ở
+        // đây replay session cũ nguyên vẹn, nên 60 noti chỉ tạo 1 session.
+        // Đổi lại: mỗi cụm noti quá timeout giờ mở một session riêng, có
+        // session_started + user_context đầy đủ (identity restore từ
+        // SharedPreferences/UserDefaults nên process FCM vẫn biết user là ai).
+        //
+        // Đánh đổi đã biết và được chấp nhận: số session tăng mạnh, và các
+        // session chỉ-có-noti không có screen nào. Phân biệt bằng
+        // core_action.is_headless — đội Data lọc is_headless=false để đếm
+        // phiên sử dụng thật.
         // Gap exceeded timeout → roll forward. The newly generated session_id_
         // in the ctor stays; record the prior as previous + bump index.
         prev_id_         = saved_id;
@@ -236,8 +222,6 @@ void SessionManager::rotate(SessionEndReason reason) {
 
 std::string SessionManager::current_session_id() {
     std::lock_guard<std::mutex> lock(mu_);
-    // Headless: chỉ đọc, không rotate, không đẩy đồng hồ. Xem headless_process_.
-    if (headless_process_) return session_id_;
     int64_t now = current_time_ms();
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
@@ -258,16 +242,6 @@ std::string SessionManager::previous_session_id() {
 
 SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     std::lock_guard<std::mutex> lock(mu_);
-    // Headless: event do noti bắn vẫn được stamp session đang persist, nhưng
-    // KHÔNG rotate và KHÔNG đẩy last_activity_ms_. Xem headless_process_.
-    if (headless_process_) {
-        SessionStamp hs;
-        hs.id             = session_id_;
-        hs.index          = session_index_;
-        hs.previous_id    = prev_id_;
-        hs.first_event_id = first_event_id_;
-        return hs;
-    }
     int64_t now = current_time_ms();
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
@@ -301,15 +275,6 @@ SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
 SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
     std::lock_guard<std::mutex> lock(mu_);
     int64_t now = current_time_ms();
-    // Headless: không mở/đóng session boundary nào. Xem headless_process_.
-    if (headless_process_) {
-        SessionResolution hr;
-        hr.id            = session_id_;
-        hr.started_at_ms = started_at_ms_;
-        hr.index         = session_index_;
-        hr.rotated       = false;
-        return hr;
-    }
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(on_rotate);
     }
@@ -348,14 +313,8 @@ int64_t SessionManager::last_activity_for_test() {
     return last_activity_ms_;
 }
 
-void SessionManager::set_headless(bool v) {
-    std::lock_guard<std::mutex> lock(mu_);
-    headless_process_ = v;
-}
-
 void SessionManager::mark_activity() {
     std::lock_guard<std::mutex> lock(mu_);
-    if (headless_process_) return;   // noti không phải user hoạt động
     int64_t now = current_time_ms();
     // Throttle persistence: only re-save last_activity_ms every ~10s so a
     // chatty SDK call site doesn't hammer the disk. Worst-case a crash forgets

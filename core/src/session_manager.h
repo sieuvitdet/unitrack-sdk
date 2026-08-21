@@ -57,10 +57,6 @@ public:
     // bình thường của một process headless, không phải dấu hiệu bị kill.
     void load_from(const std::string& path, bool headless = false);
 
-    // Đánh dấu process này là headless. load_from() tự set, nhưng binding có
-    // thể gọi trực tiếp khi biết trước (vd iOS đọc applicationState).
-    void set_headless(bool v);
-
     // Returns the current session id, starting a new one if the timeout
     // elapsed. Does NOT report rotation — use resolve() when you need to emit
     // session boundaries. Kept for hot-path callers that only need the id.
@@ -133,13 +129,6 @@ private:
     std::string    session_id_;
     int64_t        started_at_ms_    = 0;
     int64_t        last_activity_ms_ = 0;
-    // True cho cả vòng đời của một process headless (FCM wake, job, boot
-    // receiver). Noti KHÔNG phải user hoạt động: một process không UI không
-    // được đẩy last_activity_ms_ và không được rotate. Nếu nó đẩy, mỗi noti
-    // reset lại đồng hồ timeout — đo 2026-08-21 trên Xiaomi: 60 noti giữ một
-    // session sống 9.5 giờ trong khi phiên dùng thật chỉ 15 phút, và lần user
-    // mở app sau đó không rotate vì đồng hồ vừa bị noti reset.
-    bool           headless_process_ = false;
     int64_t        timeout_ms_       = 30 * 60 * 1000;  // 30 min default
     // True khi app vào background bình thường + save xong. Ghi vào state
     // file. Cold start tiếp theo đọc lại: false = app bị kill (didEnter-
