@@ -162,6 +162,14 @@ class SnowplowProvider(
             // core_action — the generator then emits nothing rather than
             // inventing a schema.
             sharedCoreActionSchema = entities["core_action"]?.let { normalizeEntityURI(it) }
+            // screen_end cũng cần user_context: Snowplow tự bắn event này nên
+            // nó không đi qua trackSelfDescribingInternal, chỗ duy nhất gắn
+            // entity user. Đo 2026-08-21: screen_end 0/53 (Android) và 0/24
+            // (iOS) có user_context — đội Data join theo user mất sạch
+            // screen_end. Cache schema + bag ở đây để generator (static) đọc
+            // được.
+            sharedUserSchema  = entities["user_context"]?.let { normalizeEntityURI(it) }
+            sharedUserContext = userContext
             val globalContexts = GlobalContextsConfiguration(
                 mutableMapOf("unitrackScreenEnd" to makeScreenEndContext())
             )
@@ -831,7 +839,14 @@ class SnowplowProvider(
                 (exitingScreen ?: com.unitrack.sdk.UniTrack.previousScreenName())
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { data["screen"] = it }
-                return listOf(SelfDescribingJson(schema, stringifyAll(data)))
+                val out = mutableListOf<SelfDescribingJson>()
+                val uSchema = sharedUserSchema
+                val uBag    = sharedUserContext
+                if (uSchema != null && uBag != null && uBag.isNotEmpty()) {
+                    out.add(SelfDescribingJson(uSchema, stringifyAll(uBag)))
+                }
+                out.add(SelfDescribingJson(schema, stringifyAll(data)))
+                return out
             }
         },
         object : FunctionalFilter() {
@@ -859,6 +874,10 @@ class SnowplowProvider(
         /** core_action schema URI, captured at initialize() so the GlobalContext
          *  generator can reach it without holding the provider. */
         @Volatile private var sharedCoreActionSchema: String? = null
+        /** Xem makeScreenEndContext: generator là static nên cần bản tham
+         *  chiếu tới schema + bag user của instance đang chạy. */
+        @Volatile private var sharedUserSchema: String? = null
+        @Volatile private var sharedUserContext: MutableMap<String, Any?>? = null
 
         /** Screen the app is leaving, handed to the screen_end generator by
          *  setScreen(). Parity: SnowplowProvider.swift exitingScreen. */

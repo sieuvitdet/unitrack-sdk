@@ -262,6 +262,10 @@ public final class SnowplowProvider: AnalyticsProvider {
             // core_action — the generator then emits nothing rather than
             // inventing a schema.
             Self.sharedCoreActionSchema = entities["core_action"].flatMap { normalizeEntityURI($0) }
+            Self.sharedUserLock.lock()
+            Self.sharedUserSchema = entities["user_context"].flatMap { normalizeEntityURI($0) }
+            Self.sharedUserContext = userContext
+            Self.sharedUserLock.unlock()
             configurations.append(
                 GlobalContextsConfiguration().contextGenerators([
                     "unitrackScreenEnd": Self.makeScreenEndContext()
@@ -320,8 +324,24 @@ public final class SnowplowProvider: AnalyticsProvider {
                 // Schema URI comes from the same portal entities map the
                 // non-builtin path uses, so operators configure it in one place.
                 guard let schema = Self.sharedCoreActionSchema else { return [] }
-                return [SelfDescribingJson(schema: schema,
-                                           andData: Self.stringifyAll(data))]
+
+                // screen_end cũng cần user_context: Snowplow tự bắn event này
+                // nên nó không đi qua trackSelfDescribingInternal, chỗ duy
+                // nhất gắn entity user. Đo 2026-08-21: screen_end 0/24 (iOS)
+                // và 0/53 (Android) có user_context — đội Data join theo user
+                // mất sạch screen_end.
+                var out: [SelfDescribingJson] = []
+                Self.sharedUserLock.lock()
+                let uSchema = Self.sharedUserSchema
+                let uBag    = Self.sharedUserContext
+                Self.sharedUserLock.unlock()
+                if let uSchema = uSchema, !uBag.isEmpty {
+                    out.append(SelfDescribingJson(schema: uSchema,
+                                                  andData: Self.stringifyAll(uBag)))
+                }
+                out.append(SelfDescribingJson(schema: schema,
+                                              andData: Self.stringifyAll(data)))
+                return out
             },
             filter: { event in
                 (event.schema ?? "").contains("/screen_end/jsonschema/")
@@ -332,6 +352,13 @@ public final class SnowplowProvider: AnalyticsProvider {
     /// core_action schema URI, captured at init so the static GlobalContext
     /// generator can reach it without retaining the provider.
     private static var sharedCoreActionSchema: String?
+
+    /// user_context schema + bag cho generator screen_end. Khác Android
+    /// (MutableMap = tham chiếu sống), `userContext` bên iOS là struct value
+    /// type nên phải đồng bộ lại mỗi lần setUser, không thể giữ tham chiếu.
+    private static var sharedUserSchema: String?
+    private static var sharedUserContext: [String: Any] = [:]
+    private static let sharedUserLock = NSLock()
 
     /// Screen the app is leaving, handed to the screen_end generator by
     /// setScreen(). Static + locked for the same reason as the schema above:
@@ -378,6 +405,13 @@ public final class SnowplowProvider: AnalyticsProvider {
         tracker?.subject?.userId = userId
         if let userId = userId { userContext["user_id"] = userId }
         for (k, v) in traits { userContext[k] = v }
+        // Đồng bộ sang bản static cho generator screen_end — userContext là
+        // value type nên generator không tự thấy thay đổi. Logout gọi
+        // setUser(nil, [:]) nhưng KHÔNG xoá bag, giữ đúng hành vi cũ của
+        // đường track() thường.
+        Self.sharedUserLock.lock()
+        Self.sharedUserContext = userContext
+        Self.sharedUserLock.unlock()
     }
 
     /// Generic catch-all that the UniTrack core fans events out to. Routed
