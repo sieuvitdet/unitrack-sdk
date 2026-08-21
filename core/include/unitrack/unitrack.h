@@ -189,6 +189,16 @@ UT_EXPORT void ut_log_foreground(ut_context* ctx);
 UT_EXPORT void ut_log_background(ut_context* ctx);
 UT_EXPORT void ut_log_app_start(ut_context* ctx, long cold_start_ms);
 
+/* Đánh dấu mọi event từ giờ KHÔNG phải user hoạt động, cho tới khi tắt bằng
+ * ut_set_background_activity(ctx, 0). Event vẫn stamp session đang chạy; chỉ
+ * đồng hồ timeout không được gia hạn, nên khoảng nghỉ vẫn tính từ lần tương
+ * tác thật cuối cùng.
+ *
+ * Dùng cho noti tới lúc app nằm background: process vẫn sống nên SDK không
+ * tự phân biệt được (ut_is_headless_launch chỉ đúng cho process khởi động
+ * headless). Host bật cờ này trong FCM/push handler. */
+UT_EXPORT void ut_set_background_activity(ut_context* ctx, int on);
+
 /* ============================================================
  * Configuration
  * ============================================================ */

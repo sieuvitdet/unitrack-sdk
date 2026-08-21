@@ -204,6 +204,12 @@ Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogBackground(
     JNIEnv*, jobject, jlong p) { ut_log_background(ctx_of(p)); }
 
 JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetBackgroundActivity(
+    JNIEnv*, jobject, jlong p, jboolean on) {
+    ut_set_background_activity(ctx_of(p), on ? 1 : 0);
+}
+
+JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogAppStart(
     JNIEnv*, jobject, jlong p, jlong ms) { ut_log_app_start(ctx_of(p), (long)ms); }
 

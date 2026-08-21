@@ -138,6 +138,10 @@ void ut_log_app_start(ut_context* ctx, long cold_start_ms) {
     if (ctx && ctx->tracker) ctx->tracker->log_app_start(cold_start_ms);
 }
 
+void ut_set_background_activity(ut_context* ctx, int on) {
+    if (ctx && ctx->tracker) ctx->tracker->set_background_activity(on != 0);
+}
+
 void ut_set_log_level(ut_context* /*ctx*/, ut_log_level level) {
     Logger::instance().set_level(level);
 }

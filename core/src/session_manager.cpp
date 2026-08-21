@@ -193,7 +193,9 @@ std::string SessionManager::current_session_id() {
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
     }
-    last_activity_ms_ = now;
+    // Xem set_background_activity() — accessor này cũng gia hạn phiên, nên
+    // một mình stamp_for_event() không đủ.
+    if (!background_activity_) last_activity_ms_ = now;
     return session_id_;
 }
 
@@ -222,8 +224,15 @@ SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     // Throttled to ~10s (same budget as mark_activity) so a chatty call site
     // doesn't hammer the disk; worst case we forget <=10s, far under the
     // 30-min timeout and the 10s grace.
-    bool stale = (now - last_activity_ms_) > ACTIVITY_SAVE_INTERVAL_MS;
-    last_activity_ms_ = now;
+    // Noti (background_activity_) KHÔNG gia hạn phiên: rotate ở trên vẫn
+    // chạy bình thường, nhưng đồng hồ giữ nguyên mốc tương tác thật cuối
+    // cùng, để lần user mở app sau đó đo đúng khoảng nghỉ. Xem
+    // set_background_activity().
+    bool stale = false;
+    if (!background_activity_) {
+        stale = (now - last_activity_ms_) > ACTIVITY_SAVE_INTERVAL_MS;
+        last_activity_ms_ = now;
+    }
     // Capture the first event id of this session the first time we see one.
     // Subsequent events in the same session echo this back as first_event_id.
     if (first_event_id_.empty() && !event_id.empty()) {
@@ -280,8 +289,14 @@ int64_t SessionManager::last_activity_for_test() {
     return last_activity_ms_;
 }
 
+void SessionManager::set_background_activity(bool v) {
+    std::lock_guard<std::mutex> lock(mu_);
+    background_activity_ = v;
+}
+
 void SessionManager::mark_activity() {
     std::lock_guard<std::mutex> lock(mu_);
+    if (background_activity_) return;   // xem set_background_activity()
     int64_t now = current_time_ms();
     // Throttle persistence: only re-save last_activity_ms every ~10s so a
     // chatty SDK call site doesn't hammer the disk. Worst-case a crash forgets

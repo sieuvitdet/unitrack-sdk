@@ -43,6 +43,27 @@ object UniTrack {
     @JvmStatic
     fun isHeadlessLaunch(): Boolean = headlessLaunch
 
+    /**
+     * Đánh dấu mọi event từ giờ KHÔNG phải user hoạt động, cho tới khi gọi lại
+     * với `false`. Event vẫn stamp session đang chạy như thường; chỉ đồng hồ
+     * timeout không được gia hạn, nên khoảng nghỉ vẫn tính từ lần tương tác
+     * thật cuối cùng.
+     *
+     * Dùng trong FCM/push handler khi app đang background: process VẪN SỐNG
+     * nên [isHeadlessLaunch] trả false (nó chỉ đúng cho process khởi động
+     * headless) và SDK không tự phân biệt được — host phải nói.
+     *
+     * Không chặn rotate: noti tới sau khi đã quá timeout vẫn mở session mới.
+     *
+     * Đo 2026-08-21 trên Xiaomi: app background từ 14:30, noti cách nhau
+     * 8-33s, mỗi cái reset đồng hồ 30', nên mở app lúc 15:10 (sau 40') vẫn
+     * không rotate. Parity: iOS UniTrack.setBackgroundActivity.
+     */
+    @JvmStatic
+    fun setBackgroundActivity(on: Boolean) {
+        if (initialized) NativeBridge.setBackgroundActivity(on)
+    }
+
     // Registered third-party providers (Snowplow, Firebase, …). Every event is
     // forwarded to each one. Empty by default — core has zero such dependencies.
     // Internal so RemoteValueProvider lookup can iterate the list.

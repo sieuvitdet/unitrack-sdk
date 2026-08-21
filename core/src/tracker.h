@@ -33,6 +33,11 @@ public:
     void identify(const std::string& user_id, const std::string& traits_json);
     void reset();
 
+    // Xem SessionManager::set_background_activity. Host bật quanh đoạn xử lý
+    // noti khi app đang background: event vẫn stamp session, chỉ không gia
+    // hạn đồng hồ timeout.
+    void set_background_activity(bool v) { session_.set_background_activity(v); }
+
     // Cross-language layer registry. See unitrack.h §"Layer registry".
     // The caller layer for set_screen is taken from a thread_local set by
     // capi.cpp right before the call — keeps the C++ API ergonomic for

@@ -569,6 +569,68 @@ static void test_session_activity_persisted() {
 // The constant still exists but no longer gates load_from(); timeout_ms_ now
 // only decides the REASON stamped on the closing session, and still drives the
 // lazy rotate inside a running process (stamp_for_event / resolve).
+// Noti tới lúc app nằm background phải KHÔNG gia hạn phiên.
+//
+// Process vẫn sống nên event đi qua stamp_for_event(), không qua load_from(),
+// và isHeadlessLaunch() trả false — SDK không tự phân biệt được, host bật cờ.
+// Đo 2026-08-21 trên Xiaomi: app background từ 14:30, noti cách nhau 8-33s,
+// mỗi cái reset đồng hồ 30', nên mở app lúc 15:10 (sau 40') vẫn không rotate
+// (session 5af4f97b sống 38' với max gap 95.8s).
+static void test_background_activity_does_not_extend() {
+    printf("test_background_activity_does_not_extend\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_bg_activity.json";
+
+    // Với cờ BẬT: 6 noti trải 30 phút không được giữ session sống.
+    std::remove(path);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        const std::string sid0 = sm.current_session_id();
+        sm.set_background_activity(true);
+        // 7 x 5' = 35' > timeout. Sáu bước chỉ chạm đúng 30' — biên `>` chưa
+        // vượt — nên phải đi quá hẳn để khẳng định hết hạn, không phải đứng
+        // ngay mép. Không gọi current_session_id() trong vòng lặp: accessor đó
+        // cũng rotate, làm mốc hết hạn phụ thuộc số lần đọc.
+        for (int i = 0; i < 7; ++i) {
+            sm.rewind_activity_for_test(5 * 60 * 1000);
+            sm.stamp_for_event("noti");
+        }
+        sm.set_background_activity(false);
+        CHECK(sm.current_session_id() != sid0,
+              "bg activity: 35' of notifications still expires the session");
+    }
+
+    // Đối chứng — cùng chuỗi đó với cờ TẮT thì session sống (hành vi cũ),
+    // chứng minh test đang đo đúng cái cờ chứ không phải thứ khác.
+    std::remove(path);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        const std::string sid0 = sm.current_session_id();
+        for (int i = 0; i < 7; ++i) {
+            sm.rewind_activity_for_test(5 * 60 * 1000);
+            sm.stamp_for_event("tap");
+        }
+        CHECK(sm.current_session_id() == sid0,
+              "bg activity: real interaction still renews the session");
+    }
+
+    // Cờ KHÔNG được chặn rotate: quá timeout thì vẫn phải mở session mới.
+    std::remove(path);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        const std::string sid0 = sm.current_session_id();
+        sm.set_background_activity(true);
+        sm.rewind_activity_for_test(31 * 60 * 1000);
+        sm.stamp_for_event("noti");
+        CHECK(sm.current_session_id() != sid0,
+              "bg activity: a notification past the timeout still rotates");
+    }
+    std::remove(path);
+}
+
 static void test_every_launch_rotates() {
     printf("test_every_launch_rotates\n");
     using namespace unitrack;
@@ -824,6 +886,7 @@ int main() {
     test_screen_lifecycle();
     test_c_api_end_to_end();
     test_every_launch_rotates();
+    test_background_activity_does_not_extend();
     test_session_activity_persisted();
     test_headless_rotates_like_any_launch();
     test_layer_registry();

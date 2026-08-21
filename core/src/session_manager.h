@@ -81,6 +81,19 @@ public:
     // Mark activity — extends the current session.
     void mark_activity();
 
+    // Đánh dấu: từ giờ tới khi tắt, mọi event KHÔNG được coi là user hoạt
+    // động. Event vẫn stamp session đang chạy như thường, chỉ không đẩy
+    // last_activity_ms_ nên đồng hồ timeout tiếp tục chạy.
+    //
+    // Dùng cho noti tới lúc app nằm background: process VẪN SỐNG nên event đi
+    // qua stamp_for_event() chứ không qua load_from(), và
+    // isHeadlessLaunch() trả false — SDK tự nó không phân biệt được. Host phải
+    // nói. Đo 2026-08-21 trên Xiaomi: app background từ 14:30, noti bắn cách
+    // nhau 8-33s, mỗi cái reset đồng hồ 30 phút, nên mở lại app lúc 15:10
+    // (sau 40 phút) vẫn không rotate — session 5af4f97b sống 38 phút với max
+    // gap 95.8s.
+    void set_background_activity(bool v);
+
     // Test-only: pretend `ms` of activity time has already elapsed, so a test
     // can cross the save throttle without sleeping. Not part of the SDK
     // surface — no binding calls this.
@@ -129,6 +142,9 @@ private:
     std::string    session_id_;
     int64_t        started_at_ms_    = 0;
     int64_t        last_activity_ms_ = 0;
+    // Xem set_background_activity(). Chỉ chặn việc GIA HẠN đồng hồ; không
+    // chặn rotate — app background quá timeout vẫn phải mở session mới.
+    bool           background_activity_ = false;
     int64_t        timeout_ms_       = 30 * 60 * 1000;  // 30 min default
     // True khi app vào background bình thường + save xong. Ghi vào state
     // file. Cold start tiếp theo đọc lại: false = app bị kill (didEnter-
