@@ -548,14 +548,23 @@ static void test_session_activity_persisted() {
         CHECK(started_at > 0, "activity persist: file written on first event");
 
         // Simulate a session that has been running a while, then one more
-        // event. Before the fix this event never touched the file.
+        // event. Before the fix this event never touched the file at all, so
+        // the on-disk clock stayed frozen at the value e1 wrote.
+        //
+        // NOTE: assert on the value written, not on "it grew" — e1 and e2 land
+        // in the same millisecond under test, so the fresh save legitimately
+        // writes the same number. Rewinding only moves the in-memory copy
+        // backwards; the save still stamps wall-clock now.
         sm.rewind_activity_for_test(30 * 1000);
         sm.stamp_for_event("e2");
+        // In-memory clock must be back at now (not the rewound value).
+        CHECK(sm.last_activity_for_test() >= started_at,
+              "activity persist: e2 advanced the in-memory clock");
     }
 
     long long after = read_last_activity();
-    CHECK(after > started_at,
-          "activity persist: later events advance last_activity_ms on disk");
+    CHECK(after >= started_at,
+          "activity persist: later events persist last_activity_ms to disk");
 
     // And the whole point: a force-quit right after that event must resume,
     // because the measured gap is now tiny rather than session-long.
@@ -574,6 +583,74 @@ static void test_session_activity_persisted() {
         sm.load_from(path, /*headless=*/false);
         CHECK(sm.current_session_id() == sid,
               "activity persist: unclean relaunch right after activity resumes");
+    }
+    std::remove(path);
+}
+
+// Noti is not user activity. A headless process (FCM wake) must replay the
+// persisted session without advancing last_activity_ms — otherwise every push
+// resets the 30-min timeout and the session never expires. Measured on a
+// Xiaomi 2026-08-21: 60 notifications kept one session alive for 9.5 hours
+// while the real usage was 15 minutes, and the user's next real launch did not
+// rotate because a push had just reset the clock.
+static void test_headless_does_not_extend_session() {
+    printf("test_headless_does_not_extend_session\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_headless_activity.json";
+    const std::string ORIG = "cccccccc-0000-0000-0000-000000000003";
+
+    // Session last touched 25 min ago — inside the 30-min window.
+    auto seed = [&]() {
+        std::remove(path);
+        int64_t last = current_time_ms() - 25 * 60 * 1000;
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
+                ORIG.c_str(), (long long)(last - 60000), (long long)last);
+        fclose(f);
+    };
+
+    auto disk_last_activity = [&]() -> long long {
+        FILE* f = fopen(path, "r");
+        if (!f) return -1;
+        char buf[1024] = {0};
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f); (void)n;
+        const char* k = strstr(buf, "\"last_activity_ms\":");
+        return k ? atoll(k + strlen("\"last_activity_ms\":")) : -1;
+    };
+
+    seed();
+    long long before = disk_last_activity();
+
+    // A push wakes the process and fires its events.
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_id() == ORIG, "headless: replays persisted session");
+        sm.stamp_for_event("noti-1");
+        sm.stamp_for_event("noti-2");
+        CHECK(sm.current_session_index() == 7, "headless: does not bump index");
+        // THE point: the wake must leave the activity clock where the user's
+        // last real interaction put it. The old code assigned `now` here, so
+        // every push silently renewed the 30-min timeout.
+        CHECK(sm.last_activity_for_test() == before,
+              "headless: notification must not advance last_activity_ms");
+    }
+
+    CHECK(disk_last_activity() == before,
+          "headless: notification must not persist a new last_activity_ms");
+
+    // The user opens the app 6 min later. Real gap since real use is now
+    // 31 min > timeout, so this MUST rotate. Before the fix the push had
+    // reset the clock and this stayed on the old session.
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        sm.rewind_activity_for_test(6 * 60 * 1000);
+        CHECK(sm.current_session_id() != ORIG,
+              "headless: user launch past the real timeout still rotates");
     }
     std::remove(path);
 }
@@ -825,6 +902,7 @@ int main() {
     test_c_api_end_to_end();
     test_session_kill_grace();
     test_session_activity_persisted();
+    test_headless_does_not_extend_session();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();

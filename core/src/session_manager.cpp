@@ -60,7 +60,8 @@ void SessionManager::set_salt(const std::string& salt) {
 
 void SessionManager::load_from(const std::string& path, bool headless) {
     std::lock_guard<std::mutex> lock(mu_);
-    persist_path_ = path;
+    persist_path_     = path;
+    headless_process_ = headless;
     std::ifstream f(path);
     if (!f.good()) {
         // No prior state — keep the fresh UUID from the ctor + index=1, and
@@ -153,11 +154,15 @@ void SessionManager::load_from(const std::string& path, bool headless) {
         // short gaps; pushes normally arrive hours apart and so landed here.
         session_id_       = saved_id;
         started_at_ms_    = saved_started ? saved_started : now;
-        // Treat this wake as activity. Restoring the STALE last_activity here
-        // would leave the very next current_session_id() past the timeout, and
-        // that accessor lazily rotates — undoing this branch and re-creating
-        // the phantom session we just avoided.
-        last_activity_ms_ = now;
+        // KHÔNG coi lần wake này là activity — noti không phải user hoạt động.
+        // Giữ nguyên mốc cũ để lần user mở app thật sau đó vẫn thấy đúng
+        // khoảng nghỉ và rotate. Trước đây dòng này gán `now`, nên mỗi noti
+        // reset đồng hồ 30' và session không bao giờ hết hạn.
+        //
+        // An toàn vì headless_process_ chặn rotate lười ở current_session_id()
+        // / stamp_for_event() / resolve() suốt vòng đời process này — cái mốc
+        // stale không còn kích hoạt được rotate nữa.
+        last_activity_ms_ = saved_last_act;
         session_index_    = saved_idx;
         prev_id_.clear();
     } else {
@@ -231,6 +236,8 @@ void SessionManager::rotate(SessionEndReason reason) {
 
 std::string SessionManager::current_session_id() {
     std::lock_guard<std::mutex> lock(mu_);
+    // Headless: chỉ đọc, không rotate, không đẩy đồng hồ. Xem headless_process_.
+    if (headless_process_) return session_id_;
     int64_t now = current_time_ms();
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
@@ -251,6 +258,16 @@ std::string SessionManager::previous_session_id() {
 
 SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
     std::lock_guard<std::mutex> lock(mu_);
+    // Headless: event do noti bắn vẫn được stamp session đang persist, nhưng
+    // KHÔNG rotate và KHÔNG đẩy last_activity_ms_. Xem headless_process_.
+    if (headless_process_) {
+        SessionStamp hs;
+        hs.id             = session_id_;
+        hs.index          = session_index_;
+        hs.previous_id    = prev_id_;
+        hs.first_event_id = first_event_id_;
+        return hs;
+    }
     int64_t now = current_time_ms();
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(SessionEndReason::timeout);
@@ -284,6 +301,15 @@ SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {
 SessionResolution SessionManager::resolve(SessionEndReason on_rotate) {
     std::lock_guard<std::mutex> lock(mu_);
     int64_t now = current_time_ms();
+    // Headless: không mở/đóng session boundary nào. Xem headless_process_.
+    if (headless_process_) {
+        SessionResolution hr;
+        hr.id            = session_id_;
+        hr.started_at_ms = started_at_ms_;
+        hr.index         = session_index_;
+        hr.rotated       = false;
+        return hr;
+    }
     if (now - last_activity_ms_ > timeout_ms_) {
         rotate_locked(on_rotate);
     }
@@ -317,8 +343,19 @@ void SessionManager::mark_clean_shutdown() {
     save_locked();
 }
 
+int64_t SessionManager::last_activity_for_test() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return last_activity_ms_;
+}
+
+void SessionManager::set_headless(bool v) {
+    std::lock_guard<std::mutex> lock(mu_);
+    headless_process_ = v;
+}
+
 void SessionManager::mark_activity() {
     std::lock_guard<std::mutex> lock(mu_);
+    if (headless_process_) return;   // noti không phải user hoạt động
     int64_t now = current_time_ms();
     // Throttle persistence: only re-save last_activity_ms every ~10s so a
     // chatty SDK call site doesn't hammer the disk. Worst-case a crash forgets
