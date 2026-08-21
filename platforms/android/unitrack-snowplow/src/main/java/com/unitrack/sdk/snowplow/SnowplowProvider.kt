@@ -415,7 +415,7 @@ class SnowplowProvider(
                 // Đội Data lọc is_headless=false để đếm phiên sử dụng thật, và
                 // giữ lại khi cần phân tích noti. String để parity Iglu schema
                 // (is_debug/is_rooted/... đã string).
-                data["is_headless"] = if (UniTrack.isHeadlessLaunch()) "true" else "false"
+                data["is_headless"] = if (com.unitrack.sdk.UniTrack.isHeadlessLaunch()) "true" else "false"
                 // Stamp session_id onto every event — single join key shared
                 // with Portal + custom HTTP providers.
                 //
