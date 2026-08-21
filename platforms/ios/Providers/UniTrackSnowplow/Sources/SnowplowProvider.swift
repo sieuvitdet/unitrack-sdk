@@ -626,6 +626,17 @@ public final class SnowplowProvider: AnalyticsProvider {
                 ]
                 if let screen = screen, !screen.isEmpty       { data["screen"]      = screen }
                 if let key    = elementKey, !key.isEmpty      { data["element_key"] = key }
+                // Đánh dấu event sinh ra bởi process KHÔNG có UI (VoIP push
+                // của cuộc gọi đến, background fetch): user không hề mở app.
+                // Những event này vẫn stamp session_id của phiên dùng thật gần
+                // nhất — không mở session mới, không kéo dài session cũ (core:
+                // headless_process_). Trộn chung khi thống kê thì session
+                // trông như kéo dài hàng giờ.
+                //
+                // Đội Data lọc is_headless=false để đếm phiên sử dụng thật.
+                // String để parity Iglu schema. Parity: Android
+                // SnowplowProvider.kt.
+                data["is_headless"] = UniTrack.isHeadlessLaunch() ? "true" : "false"
                 // Stamp session_id onto every event — the single join key
                 // shared with Portal + custom HTTP providers.
                 //

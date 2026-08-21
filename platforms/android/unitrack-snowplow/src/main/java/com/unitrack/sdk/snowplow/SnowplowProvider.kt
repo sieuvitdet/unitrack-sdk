@@ -403,6 +403,19 @@ class SnowplowProvider(
                 )
                 if (!screen.isNullOrEmpty())     data["screen"]      = screen
                 if (!elementKey.isNullOrEmpty()) data["element_key"] = elementKey
+                // Đánh dấu event sinh ra bởi process KHÔNG có UI (FCM wake,
+                // job): noti tới lúc user không hề mở app. Những event này vẫn
+                // stamp session_id của phiên dùng thật gần nhất — chúng không
+                // mở session mới và không kéo dài session cũ (core:
+                // headless_process_). Nhưng nếu trộn chung khi thống kê thì
+                // session trông như kéo dài hàng giờ: đo 2026-08-21 trên
+                // Xiaomi, 60 noti bám vào một session mà phiên dùng thật chỉ
+                // 15 phút.
+                //
+                // Đội Data lọc is_headless=false để đếm phiên sử dụng thật, và
+                // giữ lại khi cần phân tích noti. String để parity Iglu schema
+                // (is_debug/is_rooted/... đã string).
+                data["is_headless"] = if (UniTrack.isHeadlessLaunch()) "true" else "false"
                 // Stamp session_id onto every event — single join key shared
                 // with Portal + custom HTTP providers.
                 //
