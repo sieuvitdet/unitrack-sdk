@@ -556,6 +556,10 @@ object UniTrack {
         // provider id (1s → 5min cap, max 10 retries, 7-day TTL).
         ensurePendingQueue(app)
 
+        // Ngoài autoCapture: crash phải bắt kể cả khi host tắt auto-capture —
+        // mất một screen_view thì tiếc, mất một crash thì mù.
+        if (config.trackCrashes) com.unitrack.sdk.lifecycle.JvmCrashHandler.install()
+
         if (config.autoCapture) {
             if (config.trackScreens) ActivityTracker.install(app)
             if (config.trackTaps)    ClickTracker.install(app)

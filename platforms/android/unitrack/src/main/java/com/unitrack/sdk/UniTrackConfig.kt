@@ -7,6 +7,10 @@ data class UniTrackConfig(
     val flushIntervalMs: Int = 5000,
     val samplingRate: Double = 1.0,
     val autoCapture: Boolean = true,
+    /** Bắt uncaught Java/Kotlin exception và báo như `crash` event. Core chỉ
+     *  cài signal handler native nên không thấy exception của JVM. Tắt khi
+     *  host đã có reporter riêng và không muốn hai nguồn. */
+    val trackCrashes: Boolean = true,
     val trackScreens: Boolean = true,
     val trackTaps: Boolean = true,
     val trackNetwork: Boolean = true,

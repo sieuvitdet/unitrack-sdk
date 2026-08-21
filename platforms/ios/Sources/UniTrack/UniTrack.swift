@@ -25,6 +25,10 @@ public final class UniTrack {
         public var trackTaps: Bool              = true
         public var trackNetwork: Bool           = true
         public var trackMemoryWarnings: Bool    = true
+        /// Bắt uncaught NSException và báo như `crash` event. Core chỉ cài
+        /// signal handler native, nên không có cái này thì NSException chỉ còn
+        /// lại `SIGABRT` trần — mất tên class, reason và stack.
+        public var trackCrashes: Bool           = true
         public var logLevel: LogLevel           = .warn
 
         /// Emit session_start / session_end boundary events so the portal can
@@ -361,6 +365,14 @@ public final class UniTrack {
     public static func _logBackgroundToCore() {
         guard let ctx = shared.context else { return }
         ut_log_background(ctx)
+    }
+
+    /// Internal — NSExceptionHandler bơm crash JSON vào core. Core flush đồng
+    /// bộ trong log_crash() nên event kịp xuống đĩa trước khi process chết.
+    /// Parity: Android NativeBridge.logCrash().
+    public static func _logCrashToCore(_ crashJson: String) {
+        guard let ctx = shared.context else { return }
+        ut_log_crash(ctx, crashJson)
     }
 
     /// When the active session started (monotonic clock-based). Nil before init.
@@ -1213,6 +1225,10 @@ public final class UniTrack {
 
         // Install the HTTP transport callback (uses URLSession).
         HTTPBridge.install(into: context!)
+
+        // Ngoài autoCapture: crash phải bắt kể cả khi host tắt auto-capture —
+        // mất một screen_view thì tiếc, mất một crash thì mù.
+        if config.trackCrashes { NSExceptionHandler.install() }
 
         if config.autoCapture {
             if config.trackScreens         { ViewControllerSwizzler.install() }
