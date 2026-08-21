@@ -476,13 +476,6 @@ static void test_uuid_entropy() {
 // Headless launch (FCM push wake / job) must NOT open a session. A UI-less
 // process has no user period of use; rotating there produced ~3-event phantom
 // sessions and drove one prod device to session_index 1917.
-// An unclean relaunch inside KILL_GRACE_MS must RESUME, not rotate.
-// Regression for the 2026-08-20 device measurement: three force-quits
-// 2250/843/1286 ms apart produced three sessions (index 11→12→13) because
-// load_from() treated any clean_shutdown=0 launch as a kill regardless of how
-// long the gap was. Force-quit-and-reopen is one period of use — and iOS can
-// kill a suspended app before the state write lands, so a missing flag is not
-// proof of a kill either.
 // Regression: last_activity_ms must actually reach DISK as the session runs.
 // It used to advance only in memory (stamp_for_event saved once, for the first
 // event), so a relaunch read a value frozen at session start and measured the
@@ -548,10 +541,16 @@ static void test_session_activity_persisted() {
         CHECK(strstr(buf, "\"clean_shutdown\":0") != nullptr,
               "activity persist: a running session is on-disk unclean");
 
+        // Under the 2026-08-21 rule every launch rotates, so the assertion
+        // here is about the CHAIN, not about resuming: the relaunch must hand
+        // the data team the session it just closed. The persisted clock still
+        // matters — it is what stamps prev_ended_ms and picks the reason.
         SessionManager sm;
         sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() == sid,
-              "activity persist: unclean relaunch right after activity resumes");
+        CHECK(sm.current_session_id() != sid,
+              "activity persist: relaunch mints a new session");
+        CHECK(sm.previous_session_id() == sid,
+              "activity persist: relaunch chains the closed session");
     }
     std::remove(path);
 }
@@ -561,6 +560,54 @@ static void test_session_activity_persisted() {
 // past the timeout now rotates like any other launch, carrying its own
 // session_started + user_context. This test pins the new contract so the
 // exemption cannot creep back in silently.
+// Product-owner decision 2026-08-21, restoring the old SDK rule: EVERY process
+// launch opens a new session. Reaching load_from() means a new process started
+// — the app was killed and reopened, or FCM woke it — and both mint a fresh
+// session regardless of gap length or clean_shutdown.
+//
+// This supersedes KILL_GRACE_MS (0.3.63), which resumed on a quick relaunch.
+// The constant still exists but no longer gates load_from(); timeout_ms_ now
+// only decides the REASON stamped on the closing session, and still drives the
+// lazy rotate inside a running process (stamp_for_event / resolve).
+static void test_every_launch_rotates() {
+    printf("test_every_launch_rotates\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_every_launch.json";
+    const std::string ORIG = "aaaaaaaa-0000-0000-0000-000000000001";
+
+    auto seed = [&](int64_t gap_ms, int clean) {
+        std::remove(path);
+        int64_t last = current_time_ms() - gap_ms;
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":5,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"\",\"clean_shutdown\":%d}",
+                ORIG.c_str(), (long long)(last - 60000), (long long)last, clean);
+        fclose(f);
+    };
+
+    // Every combination of gap x clean_shutdown rotates. 1s/unclean used to
+    // resume under KILL_GRACE_MS; a clean 20s background used to resume too.
+    struct Case { int64_t gap; int clean; const char* what; };
+    const Case cases[] = {
+        {1000,             0, "1s unclean"},
+        {9000,             0, "9s unclean"},
+        {20000,            0, "20s unclean"},
+        {20000,            1, "20s clean"},
+        {31 * 60 * 1000,   0, "31min unclean"},
+        {31 * 60 * 1000,   1, "31min clean"},
+    };
+    for (const auto& c : cases) {
+        seed(c.gap, c.clean);
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_id() != ORIG,   "every launch rotates: new id");
+        CHECK(sm.current_session_index() == 6,   "every launch rotates: index bumped");
+        CHECK(sm.previous_session_id() == ORIG,  "every launch rotates: prev chained");
+    }
+    std::remove(path);
+}
+
 static void test_headless_rotates_like_any_launch() {
     printf("test_headless_rotates_like_any_launch\n");
     using namespace unitrack;
@@ -585,63 +632,6 @@ static void test_headless_rotates_like_any_launch() {
           "headless launch past timeout bumps the index");
     CHECK(sm.previous_session_id() == ORIG,
           "headless rotate chains previous_session_id for the data team");
-    std::remove(path);
-}
-
-static void test_session_kill_grace() {
-    printf("test_session_kill_grace\n");
-    using namespace unitrack;
-    const char* path = "/tmp/ut_test_kill_grace.json";
-    const std::string ORIG = "aaaaaaaa-0000-0000-0000-000000000001";
-
-    // Seed a state file `gap_ms` old with the given clean_shutdown flag.
-    auto seed = [&](int64_t gap_ms, int clean) {
-        std::remove(path);
-        int64_t last = current_time_ms() - gap_ms;
-        FILE* f = fopen(path, "w");
-        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":5,"
-                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
-                   "\"previous_session_id\":\"\",\"clean_shutdown\":%d}",
-                ORIG.c_str(), (long long)(last - 60000), (long long)last, clean);
-        fclose(f);
-    };
-
-    // Unclean but the user came right back → same session.
-    seed(1000, 0);
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() == ORIG,  "kill grace: 1s unclean resumes");
-        CHECK(sm.current_session_index() == 5,  "kill grace: 1s unclean keeps index");
-    }
-
-    // Still inside the window.
-    seed(9000, 0);
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() == ORIG,  "kill grace: 9s unclean resumes");
-    }
-
-    // Past the window → a genuine kill still rotates.
-    seed(20000, 0);
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() != ORIG,  "kill grace: 20s unclean rotates");
-        CHECK(sm.current_session_index() == 6,  "kill grace: 20s unclean bumps index");
-    }
-
-    // A clean background resumes regardless of gap (below the timeout).
-    seed(20000, 1);
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() == ORIG,  "kill grace: clean bg resumes at 20s");
-    }
-
-    // The 30-minute inactivity timeout still wins over the grace window.
-    seed(31 * 60 * 1000, 0);
-    {   SessionManager sm;
-        sm.load_from(path, /*headless=*/false);
-        CHECK(sm.current_session_id() != ORIG,  "kill grace: timeout still rotates");
-    }
     std::remove(path);
 }
 
@@ -833,7 +823,7 @@ int main() {
     test_session_boundary();
     test_screen_lifecycle();
     test_c_api_end_to_end();
-    test_session_kill_grace();
+    test_every_launch_rotates();
     test_session_activity_persisted();
     test_headless_rotates_like_any_launch();
     test_layer_registry();

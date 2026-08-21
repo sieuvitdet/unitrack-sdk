@@ -84,6 +84,7 @@ void SessionManager::load_from(const std::string& path, bool headless) {
     int64_t saved_clean      = read_int_field(blob, "clean_shutdown");
     bool saved_clean_present = blob.find("\"clean_shutdown\":") != std::string::npos;
     bool was_clean = !saved_clean_present || saved_clean != 0;
+    (void)was_clean;  // chỉ còn dùng cho clean_shutdown_ ở cuối hàm
 
     if (saved_id.empty() || saved_idx <= 0) {
         // Corrupt or partial file — start fresh but keep index=1.
@@ -92,75 +93,41 @@ void SessionManager::load_from(const std::string& path, bool headless) {
     }
 
     int64_t now = current_time_ms();
-    // Resume the persisted session iff it was active within the timeout
-    // window. Otherwise treat the gap as a fresh launch and bump the index.
-    if (now - saved_last_act <= timeout_ms_) {
-        if (was_clean || headless) {
-            // Normal resume: process kết thúc bình thường (background) trong
-            // timeout window. Tiếp tục session cũ, không rotate.
-            session_id_       = saved_id;
-            started_at_ms_    = saved_started ? saved_started : now;
-            last_activity_ms_ = saved_last_act;
-            session_index_    = saved_idx;
-            prev_id_.clear();
-        } else if (now - saved_last_act <= KILL_GRACE_MS) {
-            // Killed, but the user came straight back (≤ KILL_GRACE_MS).
-            //
-            // A session is "a user's period of use". Force-quitting from the
-            // switcher and reopening a second later does not end that period —
-            // it is the same sitting. The old code ignored the gap entirely and
-            // rotated on ANY unclean launch, so a device measured on 2026-08-20
-            // produced three sessions in four seconds (gaps 2250/843/1286 ms,
-            // session_index 11→12→13) purely from repeated force-quits.
-            //
-            // Treating that as a kill is also unfalsifiable in the other
-            // direction: iOS can suspend and kill a backgrounded app before the
-            // state write lands (the SDK holds no UIApplication background task
-            // assertion), so clean_shutdown=0 does not reliably mean "killed".
-            // A short gap is the honest signal that the user never left.
-            //
-            // Beyond the grace window, an unclean launch still rotates —
-            // that case is a genuine kill worth reporting.
-            session_id_       = saved_id;
-            started_at_ms_    = saved_started ? saved_started : now;
-            last_activity_ms_ = saved_last_act;
-            session_index_    = saved_idx;
-            prev_id_.clear();
-        } else {
-            // Killed: clean_shutdown=false + gap trên KILL_GRACE_MS nhưng dưới
-            // timeout = app bị kill (swipe khỏi switcher / Force Stop / OS
-            // reclaim) và user quay lại sau một lúc. Rotate ngay + surface
-            // boundary để Tracker fire session_ended kèm reason
-            // killed_recovered. Không đợi 30 phút timeout.
-            prev_id_         = saved_id;
-            prev_started_ms_ = saved_started;
-            prev_ended_ms_   = saved_last_act;
-            prev_reason_     = SessionEndReason::killed_recovered;
-            pending_boundary_ = true;
-            session_index_   = saved_idx + 1;
-            // session_id_ giữ UUID mới từ ctor.
-        }
-    } else {
-        // NOTE (2026-08-21, quyết định của product owner): headless launch
-        // KHÔNG còn được miễn rotate. Trước đây nhánh `else if (headless)` ở
-        // đây replay session cũ nguyên vẹn, nên 60 noti chỉ tạo 1 session.
-        // Đổi lại: mỗi cụm noti quá timeout giờ mở một session riêng, có
-        // session_started + user_context đầy đủ (identity restore từ
-        // SharedPreferences/UserDefaults nên process FCM vẫn biết user là ai).
-        //
-        // Đánh đổi đã biết và được chấp nhận: số session tăng mạnh, và các
-        // session chỉ-có-noti không có screen nào. Phân biệt bằng
-        // core_action.is_headless — đội Data lọc is_headless=false để đếm
-        // phiên sử dụng thật.
-        // Gap exceeded timeout → roll forward. The newly generated session_id_
-        // in the ctor stays; record the prior as previous + bump index.
-        prev_id_         = saved_id;
-        prev_started_ms_ = saved_started;
-        prev_ended_ms_   = saved_last_act;
-        prev_reason_     = SessionEndReason::timeout;
-        pending_boundary_ = true;
-        session_index_   = saved_idx + 1;
-    }
+    // MỖI LẦN PROCESS KHỞI ĐỘNG LÀ MỘT SESSION MỚI.
+    //
+    // Quyết định của product owner 2026-08-21, khôi phục rule của SDK cũ:
+    // "cho phép rotate session mỗi khi app được kích hoạt". Việc đến đây
+    // nghĩa là một process mới vừa chạy load_from() — app bị kill rồi mở
+    // lại, hoặc FCM đánh thức. Cả hai đều mở session mới, không cần biết
+    // gap dài bao lâu hay app có thoát sạch không.
+    //
+    // App kill -> 60 noti -> 60 session, mỗi session có session_started và
+    // user_context đầy đủ (identity phục hồi từ SharedPreferences/
+    // UserDefaults nên process FCM vẫn biết user là ai). Đó chính là thứ
+    // SDK cũ thiếu: nó cũng rotate mỗi lần kích hoạt, nhưng không gửi kèm
+    // thông tin user.
+    //
+    // Không còn timeout_ms_ / KILL_GRACE_MS / clean_shutdown ở đây — chúng
+    // chỉ dùng cho rotate LƯỜI trong lúc process đang chạy (stamp_for_event,
+    // resolve), tức khi user để app idle quá 30 phút mà không kill.
+    //
+    // Đánh đổi đã biết và được chấp nhận: số session tăng mạnh, và các
+    // session chỉ-có-noti không có screen nào. Phân biệt bằng
+    // core_action.is_headless — đội Data lọc is_headless=false để đếm
+    // phiên sử dụng thật.
+    prev_id_          = saved_id;
+    prev_started_ms_  = saved_started;
+    prev_ended_ms_    = saved_last_act;
+    // Lý do đóng session cũ, cho session_ended: quá 30 phút thì là timeout,
+    // còn lại phân biệt theo clean_shutdown — thoát sạch (background rồi bị
+    // kill/mở lại) vs bị kill lúc đang chạy.
+    prev_reason_      = (now - saved_last_act > timeout_ms_)
+                            ? SessionEndReason::timeout
+                            : SessionEndReason::killed_recovered;
+    pending_boundary_ = true;
+    session_index_    = saved_idx + 1;
+    // session_id_ giữ UUID mới từ ctor.
+
     // Reset clean_shutdown=false ngay khi mở app: nếu lần này app bị kill
     // trước khi đến didEnterBackground, lần cold start kế tiếp sẽ detect.
     //
