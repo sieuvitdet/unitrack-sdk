@@ -258,6 +258,17 @@ public final class UniTrack {
         return String(cString: cstr)
     }
 
+    /// Lý do session trước đó đóng: `timeout` | `manual_reset` |
+    /// `killed_recovered` | `none`. Đọc trong handler `onSessionRotate` để
+    /// stamp đúng reason lên session_ended thay vì đoán ở tầng app —
+    /// `manual_reset` (logout) và `timeout` (nghỉ 30') trông giống hệt nhau
+    /// nếu chỉ nhìn từ chỗ gọi. Parity: Android UniTrack.lastEndReason().
+    public static func lastEndReason() -> String {
+        guard let ctx = shared.context else { return "none" }
+        guard let s = ut_last_end_reason(ctx) else { return "none" }
+        return String(cString: s)
+    }
+
     /// Force a session rotation right now. Bumps sessionIndex(), mints a new
     /// currentSessionId(), stamps the just-closed session as previousSessionId().
     ///

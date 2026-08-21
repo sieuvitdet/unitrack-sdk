@@ -69,6 +69,12 @@ public:
     int64_t     current_session_index();
     std::string previous_session_id();
 
+    // Lý do session TRƯỚC đó đóng ("timeout" / "manual_reset" /
+    // "killed_recovered" / "none"). Giữ riêng khỏi prev_reason_, thứ bị
+    // resolve() tiêu thụ ngay khi emit boundary — binding cần đọc được sau
+    // đó, trong handler onSessionRotate.
+    SessionEndReason last_end_reason();
+
     // Stamp for the current event: id, index, previous_id, first_event_id.
     // Pass the event_id of the event being built — if this is the first
     // event in the session it is recorded so subsequent events can quote it.
@@ -168,6 +174,9 @@ private:
     int64_t          prev_started_ms_ = 0;
     int64_t          prev_ended_ms_   = 0;
     SessionEndReason prev_reason_     = SessionEndReason::none;
+    // Xem last_end_reason(). Bản sao KHÔNG bị consume, chỉ ghi đè ở lần
+    // rotate kế tiếp.
+    SessionEndReason last_end_reason_ = SessionEndReason::none;
 
     // Rotate, recording the closed session into the pending-boundary fields.
     void rotate_locked(SessionEndReason reason);

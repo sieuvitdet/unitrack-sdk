@@ -142,6 +142,11 @@ void ut_set_background_activity(ut_context* ctx, int on) {
     if (ctx && ctx->tracker) ctx->tracker->set_background_activity(on != 0);
 }
 
+const char* ut_last_end_reason(ut_context* ctx) {
+    if (!ctx || !ctx->tracker) return "none";
+    return ctx->tracker->last_end_reason();
+}
+
 void ut_set_log_level(ut_context* /*ctx*/, ut_log_level level) {
     Logger::instance().set_level(level);
 }

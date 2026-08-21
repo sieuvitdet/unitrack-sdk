@@ -731,6 +731,17 @@ object UniTrack {
     fun previousSessionId(): String =
         if (initialized) NativeBridge.previousSessionId() else ""
 
+    /**
+     * Lý do session trước đó đóng: `timeout` | `manual_reset` |
+     * `killed_recovered` | `none`. Đọc trong handler [onSessionRotate] để
+     * stamp đúng reason lên session_ended, thay vì đoán ở tầng app —
+     * `manual_reset` (logout) và `timeout` (nghỉ 30') trông giống hệt nhau
+     * nếu chỉ nhìn từ chỗ gọi.
+     */
+    @JvmStatic
+    fun lastEndReason(): String =
+        if (initialized) NativeBridge.lastEndReason() else "none"
+
     /** Force a session rotation now. Bumps sessionIndex(), mints a new
      *  currentSessionId(), records the just-closed UUID as previousSessionId().
      *  Use on logout / switch-account / new-conversation boundaries when the

@@ -38,6 +38,10 @@ public:
     // hạn đồng hồ timeout.
     void set_background_activity(bool v) { session_.set_background_activity(v); }
 
+    // Lý do session trước đó đóng, dạng chuỗi. Xem
+    // SessionManager::last_end_reason.
+    const char* last_end_reason() { return session_end_reason_str(session_.last_end_reason()); }
+
     // Cross-language layer registry. See unitrack.h §"Layer registry".
     // The caller layer for set_screen is taken from a thread_local set by
     // capi.cpp right before the call — keeps the C++ API ergonomic for

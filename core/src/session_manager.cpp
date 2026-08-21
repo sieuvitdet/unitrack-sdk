@@ -124,6 +124,7 @@ void SessionManager::load_from(const std::string& path, bool headless) {
     prev_reason_      = (now - saved_last_act > timeout_ms_)
                             ? SessionEndReason::timeout
                             : SessionEndReason::killed_recovered;
+    last_end_reason_  = prev_reason_;
     pending_boundary_ = true;
     session_index_    = saved_idx + 1;
     // session_id_ giữ UUID mới từ ctor.
@@ -172,6 +173,7 @@ void SessionManager::rotate_locked(SessionEndReason reason) {
     }
     prev_ended_ms_    = now;
     prev_reason_      = reason;
+    last_end_reason_  = reason;   // bản không bị consume, xem last_end_reason()
     pending_boundary_ = true;
 
     session_id_       = generate_session_id(salt_);
@@ -207,6 +209,11 @@ int64_t SessionManager::current_session_index() {
 std::string SessionManager::previous_session_id() {
     std::lock_guard<std::mutex> lock(mu_);
     return prev_id_;
+}
+
+SessionEndReason SessionManager::last_end_reason() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return last_end_reason_;
 }
 
 SessionStamp SessionManager::stamp_for_event(const std::string& event_id) {

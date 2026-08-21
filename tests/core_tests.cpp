@@ -631,6 +631,37 @@ static void test_background_activity_does_not_extend() {
     std::remove(path);
 }
 
+// last_end_reason() phải sống sót qua resolve(): prev_reason_ bị resolve()
+// tiêu thụ ngay khi emit boundary, nhưng binding đọc reason TRONG handler
+// onSessionRotate — tức là sau đó. Hardcode "timeout" ở tầng app (cách cũ)
+// làm logout và hết-hạn-30' trông giống hệt nhau với đội Data.
+static void test_last_end_reason_survives_resolve() {
+    printf("test_last_end_reason_survives_resolve\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_end_reason.json";
+    std::remove(path);
+
+    SessionManager sm;
+    sm.load_from(path, /*headless=*/false);
+    CHECK(sm.last_end_reason() == SessionEndReason::none,
+          "end reason: none trước lần rotate đầu");
+
+    // Logout.
+    sm.rotate(SessionEndReason::manual_reset);
+    CHECK(sm.last_end_reason() == SessionEndReason::manual_reset,
+          "end reason: manual_reset sau rotate");
+    // resolve() tiêu thụ pending_boundary_ — reason vẫn phải đọc được sau đó.
+    sm.resolve(SessionEndReason::timeout);
+    CHECK(sm.last_end_reason() == SessionEndReason::manual_reset,
+          "end reason: sống sót qua resolve()");
+
+    // Lần rotate kế tiếp ghi đè.
+    sm.rotate(SessionEndReason::timeout);
+    CHECK(sm.last_end_reason() == SessionEndReason::timeout,
+          "end reason: rotate sau ghi đè reason cũ");
+    std::remove(path);
+}
+
 static void test_every_launch_rotates() {
     printf("test_every_launch_rotates\n");
     using namespace unitrack;
@@ -886,6 +917,7 @@ int main() {
     test_screen_lifecycle();
     test_c_api_end_to_end();
     test_every_launch_rotates();
+    test_last_end_reason_survives_resolve();
     test_background_activity_does_not_extend();
     test_session_activity_persisted();
     test_headless_rotates_like_any_launch();

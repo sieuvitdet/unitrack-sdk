@@ -102,6 +102,7 @@ object NativeBridge {
     fun logForeground()              = nativeLogForeground(ctxPtr)
     fun logBackground()              = nativeLogBackground(ctxPtr)
     fun setBackgroundActivity(on: Boolean) { if (ctxPtr != 0L) nativeSetBackgroundActivity(ctxPtr, on) }
+    fun lastEndReason(): String      = if (ctxPtr != 0L) nativeLastEndReason(ctxPtr) else "none"
     fun logAppStart(coldStartMs: Long) = nativeLogAppStart(ctxPtr, coldStartMs)
 
     /** Pop the crash JSON the core enqueued at init() time (from
@@ -175,6 +176,7 @@ object NativeBridge {
     private external fun nativeLogForeground(ctx: Long)
     private external fun nativeLogBackground(ctx: Long)
     private external fun nativeSetBackgroundActivity(ctx: Long, on: Boolean)
+    private external fun nativeLastEndReason(ctx: Long): String
     private external fun nativeLogAppStart(ctx: Long, coldStartMs: Long)
     private external fun nativePopRecoveredCrash(ctx: Long): String
     // length-2 result: [traceId 32-hex, spanId 16-hex]

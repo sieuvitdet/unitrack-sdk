@@ -203,6 +203,13 @@ JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogBackground(
     JNIEnv*, jobject, jlong p) { ut_log_background(ctx_of(p)); }
 
+JNIEXPORT jstring JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativeLastEndReason(
+    JNIEnv* env, jobject, jlong p) {
+    const char* s = ut_last_end_reason(ctx_of(p));
+    return env->NewStringUTF(s ? s : "none");
+}
+
 JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeSetBackgroundActivity(
     JNIEnv*, jobject, jlong p, jboolean on) {

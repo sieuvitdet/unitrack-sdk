@@ -299,6 +299,11 @@ UT_EXPORT int64_t ut_current_session_index(ut_context* ctx);
  * thread-local buffer convention as ut_current_session_id. */
 UT_EXPORT const char* ut_previous_session_id(ut_context* ctx);
 
+/* Lý do session TRƯỚC đó đóng: "timeout" | "manual_reset" |
+ * "killed_recovered" | "none". Đọc trong handler rotate để stamp đúng reason
+ * lên session_ended thay vì đoán ở tầng app. */
+UT_EXPORT const char* ut_last_end_reason(ut_context* ctx);
+
 /* Force a session rotation right now: bumps session_index, mints a new UUID,
  * records the just-closed session as previous_session_id. Apps call this on
  * logout / switch-account / app-level "new context" boundaries when the
