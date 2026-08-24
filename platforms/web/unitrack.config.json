@@ -15,8 +15,7 @@
     "sessionTimeoutMs": 1800000,
     "screen_start_event": "screen_viewed",
     "screen_end_event": "screen_exited",
-    "screen_load_event": "screen_load_completed",
-    "session_id_salt": "web"
+    "screen_load_event": "screen_load_completed"
   },
   "snowplow": {
     "enabled": true,

@@ -131,8 +131,7 @@ UniTrack.reset();</code></pre>
     "trackNetwork": true,
     "screen_start_event": "screen_viewed",
     "screen_end_event": "screen_exited",
-    "screen_load_event": "screen_load_completed",
-    "session_id_salt": "web"
+    "screen_load_event": "screen_load_completed"
   },
 
   "snowplow": {
@@ -197,6 +196,21 @@ UniTrack.reset();</code></pre>
 <p><code>allowlist_hosts</code> chỉ có tác dụng khi <code>tracing.enabled</code> là <code>true</code>. Đây là thứ ngăn <code>traceparent</code> rò sang bên thứ ba.</p>
 <p>Với <code>flavors</code>, mảng bị <strong>thay nguyên cụm</strong> chứ không nối — khai <code>allowlist_hosts</code> trong flavor là bỏ hẳn danh sách gốc.</p>
 </div>
+
+<h3>Khoá mobile có mà web chưa hỗ trợ</h3>
+
+<p>Dùng chung file với iOS/Android thì sẽ gặp vài khoá web bỏ qua. Để trong file không sao — SDK không báo lỗi, chỉ là không có tác dụng.</p>
+
+<table>
+<tr><th>Khoá</th><th>Vì sao web bỏ qua</th></tr>
+<tr><td><code>sdk_config.session_id_salt</code></td><td>Web chưa cài đặt. Mobile dùng để gắn tiền tố vào <code>session_id</code> (<code>&lt;tag8&gt;-&lt;uuid&gt;</code>) tách dữ liệu theo môi trường</td></tr>
+<tr><td><code>snowplow.options</code></td><td>Cờ của Snowplow tracker gốc. Web tự viết provider nên không dùng</td></tr>
+<tr><td><code>snowplow.hybrid_screen_view</code></td><td>Chuyển sang schema ScreenView dựng sẵn của Snowplow mobile — web không có</td></tr>
+<tr><td><code>snowplow.entities</code></td><td>Web luôn gắn <code>user_context</code> và <code>application_context</code>, chưa đọc bảng đổi tên này</td></tr>
+<tr><td><code>snowplow.ios</code> / <code>snowplow.android</code></td><td>Override của nền khác. Web đọc khối <code>web</code></td></tr>
+<tr><td><code>firebase</code></td><td>SDK riêng, web không nhúng</td></tr>
+<tr><td><code>http_providers</code></td><td>Web gắn tay bằng <code>addProvider()</code></td></tr>
+</table>
 
 <h2>3. Bắn event nghiệp vụ</h2>
 
