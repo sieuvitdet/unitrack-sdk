@@ -1,0 +1,27 @@
+{
+  "name": "unitrack-web",
+  "version": "0.1.0",
+  "description": "UniTrack — Web analytics SDK với auto-capture, offline queue, W3C trace context, Snowplow/HTTP fan-out.",
+  "main": "dist/unitrack.cjs.js",
+  "module": "dist/unitrack.esm.js",
+  "types": "dist/index.d.ts",
+  "unpkg": "dist/unitrack.iife.js",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "rollup -c rollup.config.mjs",
+    "dev": "rollup -c rollup.config.mjs -w",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["analytics", "tracking", "snowplow", "auto-capture", "session", "trace-context"],
+  "repository": "https://github.com/sieuvitdet/unitrack-sdk",
+  "license": "MIT",
+  "devDependencies": {
+    "rollup": "^4.0.0",
+    "@rollup/plugin-typescript": "^11.1.0",
+    "tslib": "^2.6.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

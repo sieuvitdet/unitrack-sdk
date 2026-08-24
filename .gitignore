@@ -100,3 +100,13 @@ ios-uikit-demo/
 react-native-demo/
 flutter-tracking-app/
 examples/
+
+# Web SDK demo: chứa API key thật của project 9 trên portal production
+# (showcase/torture/index.html). Repo public nên không commit. Bản đang chạy
+# sống trên VPS: /root/event-tracking-portal/public/unitrack-web-demo/
+platforms/web/demo/
+
+# Lock file của web SDK: cần để build tái lập được đúng version dependency.
+# .gitignore:50 chặn package-lock.json toàn repo, nhưng react-native/ và
+# portal/ đã commit lock file từ trước — mở ngoại lệ cho web để nhất quán.
+!platforms/web/package-lock.json
