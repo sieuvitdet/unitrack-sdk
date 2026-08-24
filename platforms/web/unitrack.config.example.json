@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "apiKey": "utk_khoa_cua_ban",
+  "endpoint": "",
+
+  "sdkConfig": {
+    "batchSize": 10,
+    "flushIntervalMs": 3000,
+    "samplingRate": 1.0,
+    "autoCapture": true,
+    "trackScreens": true,
+    "trackTaps": true,
+    "trackNetwork": true,
+    "trackLifecycle": true,
+    "sessionTimeoutMs": 1800000,
+    "screenStartEvent": "screen_viewed",
+    "screenEndEvent": "screen_exited",
+    "screenLoadEvent": "screen_load_completed",
+    "requireConsent": false,
+    "piiSalt": "",
+    "verboseLogging": false
+  },
+
+  "snowplow": {
+    "enabled": true,
+    "endpoint": "https://sp.example.com",
+    "appId": "my-web-app",
+    "iglu_vendor": "com.mycompany",
+    "default_version": "1-0-0",
+    "event_names": {
+      "session": "event_session",
+      "click": "event_click",
+      "screen_view": "event_screen_view"
+    },
+    "drop_events": ["app_foreground", "app_background"]
+  },
+
+  "tracing": {
+    "enabled": false,
+    "allowlistHosts": []
+  }
+}

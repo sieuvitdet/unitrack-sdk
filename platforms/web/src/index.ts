@@ -24,6 +24,9 @@ import { installNetworkInterceptor } from './network-interceptor';
 import { configureSalt, sha256 } from './pii-hash';
 import { readCrossDomainSession } from './plugins/cross-domain';
 import * as Queue from './offline-queue';
+import { loadFileConfig, toUniTrackConfig } from './file-config';
+import { SnowplowProvider } from './providers/snowplow';
+import { HttpProvider } from './providers/http-provider';
 
 export type { UniTrackConfig, AnalyticsProvider, CapturePlugin, EventProperties };
 // Plugin đầu vào — import riêng để bundler tree-shake được cái không dùng.
@@ -54,6 +57,8 @@ export {
 } from './remote-config';
 export type { RemoteConfig } from './remote-config';
 export { sha256, configureSalt } from './pii-hash';
+export type { UniTrackFileConfig } from './file-config';
+export { loadFileConfig, toUniTrackConfig } from './file-config';
 
 /** Ép MỌI giá trị trong payload về String.
  *
@@ -95,6 +100,49 @@ class UniTrackImpl {
    * nếu random mỗi lần thì một phiên bị cắt vụn (có click, mất screen_view
    * dẫn tới nó), hành trình vá lại không đọc được. Native cũng vậy. */
   private sessionSampled = true;
+
+  /** Khởi tạo từ file config JSON — parity FPT Life iOS/Android.
+   *
+   * Mọi thông tin nằm sẵn trong file: apiKey, endpoint, cờ auto-capture,
+   * cấu hình Snowplow. Host chỉ cần chỉ đường dẫn file.
+   *
+   *     await UniTrack.initializeFromConfig('/unitrack.config.json');
+   *
+   * Provider được gắn theo đúng file, nên không phải gọi addProvider() tay:
+   *  - `snowplow.enabled` → SnowplowProvider
+   *  - `endpoint` khác rỗng → HttpProvider
+   *
+   * Rỗng cả hai = SDK chạy nhưng không gửi đi đâu — đúng ý đồ khi chỉ muốn
+   * xem log lúc phát triển.
+   */
+  async initializeFromConfig(url: string): Promise<void> {
+    const file = await loadFileConfig(url);
+    this.initialize(file.apiKey || '', toUniTrackConfig(file));
+
+    const sp = file.snowplow;
+    if (sp?.enabled && sp.endpoint) {
+      this.addProvider(new SnowplowProvider({
+        endpoint:       sp.endpoint,
+        appId:          sp.appId || '',
+        igluVendor:     sp.iglu_vendor || '',
+        defaultVersion: sp.default_version,
+        eventNames:     sp.event_names,
+        dropEvents:     sp.drop_events,
+      } as never));
+    }
+    // Core ingest rỗng → chỉ fan-out Snowplow. Giống FPT Life, và log ra để
+    // không ai tưởng SDK hỏng khi thấy Network trống.
+    if (file.endpoint) {
+      this.addProvider(new HttpProvider({
+        endpoint: file.endpoint,
+        apiKey:   file.apiKey || '',
+        batchSize:       file.sdkConfig?.batchSize,
+        flushIntervalMs: file.sdkConfig?.flushIntervalMs,
+      } as never));
+    } else {
+      this.log('core ingest endpoint rỗng — fan-out provider only');
+    }
+  }
 
   initialize(apiKey: string, config?: UniTrackConfig): void {
     if (this.initialized) {

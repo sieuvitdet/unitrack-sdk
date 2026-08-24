@@ -1,0 +1,359 @@
+<title>UniTrack Web SDK</title>
+<style>
+:root{--bg:#fff;--fg:#1a1d21;--muted:#5b6470;--line:#e3e7ec;--card:#f7f9fb;
+--accent:#2563eb;--warn:#b45309;--warnbg:#fffbeb;--ok:#047857;--okbg:#ecfdf5;
+--code:#f1f5f9;--codefg:#0f172a;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1216;--fg:#e6e9ee;
+--muted:#98a2b3;--line:#242a33;--card:#161a20;--accent:#60a5fa;--warn:#fbbf24;--warnbg:#2a2109;
+--ok:#34d399;--okbg:#052e23;--code:#161a20;--codefg:#e6e9ee}}
+:root[data-theme="dark"]{--bg:#0f1216;--fg:#e6e9ee;--muted:#98a2b3;--line:#242a33;--card:#161a20;
+--accent:#60a5fa;--warn:#fbbf24;--warnbg:#2a2109;--ok:#34d399;--okbg:#052e23;--code:#161a20;--codefg:#e6e9ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:48px 24px 96px}
+h1{font-size:2rem;line-height:1.25;margin:0 0 8px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 40px;font-size:1.02rem}
+h2{font-size:1.3rem;margin:52px 0 14px;padding-top:20px;border-top:1px solid var(--line);letter-spacing:-.01em}
+h3{font-size:1.02rem;margin:26px 0 10px}
+p{margin:0 0 14px}
+code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:2px 6px;border-radius:4px}
+pre{background:var(--code);color:var(--codefg);padding:16px;border-radius:8px;overflow-x:auto;
+border:1px solid var(--line);margin:0 0 16px}
+pre code{background:none;padding:0;font-size:.84rem;line-height:1.65}
+table{width:100%;border-collapse:collapse;margin:0 0 16px;font-size:.9rem;display:block;overflow-x:auto}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+td code{white-space:nowrap}
+.note{background:var(--card);border-left:3px solid var(--accent);padding:14px 16px;border-radius:0 6px 6px 0;margin:0 0 16px}
+.warn{background:var(--warnbg);border-left:3px solid var(--warn);padding:14px 16px;border-radius:0 6px 6px 0;margin:0 0 16px}
+.ok{background:var(--okbg);border-left:3px solid var(--ok);padding:14px 16px;border-radius:0 6px 6px 0;margin:0 0 16px}
+.note p:last-child,.warn p:last-child,.ok p:last-child{margin-bottom:0}
+a{color:var(--accent)}
+ol,ul{margin:0 0 16px;padding-left:22px}
+li{margin-bottom:7px}
+.tag{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 7px;border-radius:4px;
+background:var(--accent);color:#fff;vertical-align:middle;margin-left:6px}
+</style>
+
+<div class="wrap">
+
+<h1>UniTrack Web SDK — Hướng dẫn tích hợp</h1>
+<p class="sub">Tự động thu thập screen view, click, network và session. Nhúng một file, gọi một hàm.</p>
+
+<div class="ok">
+<p><strong>Bản demo chạy thật:</strong> <a href="https://mobix.asia/event-tracking-mobile/unitrack-web-demo/showcase.html">showcase.html</a> — mở DevTools › Network, lọc <code>tp2</code> để xem event bắn đi ngay khi bạn click.</p>
+</div>
+
+<h2>1. Lấy file SDK</h2>
+
+<p>SDK là một file JavaScript duy nhất, không phụ thuộc thư viện ngoài. Bạn có hai cách dùng.</p>
+
+<table>
+<tr><th>Cách</th><th>File</th><th>Dùng khi</th></tr>
+<tr><td>Nhúng thẻ script</td><td><code>dist/unitrack.iife.js</code></td><td>HTML thuần, WordPress, hoặc muốn nhanh nhất</td></tr>
+<tr><td>Import qua bundler</td><td><code>dist/unitrack.esm.js</code></td><td>React, Vue, Next.js, Vite, webpack</td></tr>
+</table>
+
+<p>File nặng <strong>126 KB</strong>, nén gzip còn <strong>33 KB</strong>. Copy file vào thư mục tĩnh của bạn (ví dụ <code>/assets/js/</code>) rồi tự phục vụ — không cần CDN ngoài.</p>
+
+<h2>2. Tích hợp trong ba bước</h2>
+
+<h3>Bước 1 — Nhúng file</h3>
+
+<p>Đặt ngay trước thẻ đóng <code>&lt;/head&gt;</code>, càng sớm càng tốt để không bỏ lỡ event đầu trang.</p>
+
+<pre><code>&lt;script src="/assets/js/unitrack.iife.js"&gt;&lt;/script&gt;</code></pre>
+
+<h3>Bước 2 — Khởi tạo</h3>
+
+<pre><code>&lt;script&gt;
+// Tham số 1 là API key, tham số 2 là config.
+UniTrack.initialize('YOUR_API_KEY', {
+  endpoint: 'https://collector.example.com',
+});
+
+// Gắn nơi nhận dữ liệu.
+UniTrack.addProvider(new UniTrack.HttpProvider({
+  endpoint: 'https://collector.example.com',
+  apiKey:   'YOUR_API_KEY',
+}));
+&lt;/script&gt;</code></pre>
+
+<p>Xong. Từ giây này SDK tự bắt screen view, click, network request và vòng đời session — bạn không cần gọi gì thêm.</p>
+
+<div class="warn">
+<p><strong>Tên hàm là <code>initialize</code>, không phải <code>init</code>.</strong> Và phải gọi <code>addProvider()</code> — thiếu bước này SDK vẫn chạy, vẫn in log ra Console, nhưng không có gì được gửi đi đâu cả.</p>
+</div>
+
+<h3>Bước 3 — Gắn định danh khi user đăng nhập</h3>
+
+<pre><code>// Sau khi đăng nhập thành công
+UniTrack.identify('user-12345', {
+  plan: 'premium',
+});
+
+// Khi đăng xuất — bắt buộc gọi, nếu không phiên sau vẫn mang danh tính cũ
+UniTrack.reset();</code></pre>
+
+<div class="warn">
+<p><strong>Đừng truyền email, số điện thoại hay CMND vào <code>identify()</code>.</strong> Truyền ID nội bộ. Nếu buộc phải dùng dữ liệu nhạy cảm, bật <code>piiSalt</code> trong config để SDK tự băm SHA-256 trước khi gửi.</p>
+</div>
+
+<h3>Gửi sang Snowplow thay vì HTTP</h3>
+
+<pre><code>UniTrack.addProvider(new UniTrack.SnowplowProvider({
+  endpoint:   'https://sp.example.com',
+  appId:      'my-web-app',
+  igluVendor: 'com.mycompany',
+}));</code></pre>
+
+<p>Gắn được nhiều provider cùng lúc — dữ liệu fan-out song song sang từng nơi.</p>
+
+<h2>2b. Cách khuyến nghị — config bằng file JSON <span class="tag">giống FPT Life</span></h2>
+
+<p>Cách ở mục 2 phải viết thông tin vào code. Nếu bạn muốn <strong>mọi thứ nằm sẵn trong một file JSON</strong> — giống hệt cách FPT Life làm trên iOS và Android — thì dùng cách này.</p>
+
+<p>Tạo file <code>unitrack.config.json</code> đặt cùng thư mục tĩnh:</p>
+
+<pre><code>{
+  "version": 1,
+  "apiKey": "utk_khoa_cua_ban",
+  "endpoint": "",
+
+  "sdkConfig": {
+    "batchSize": 10,
+    "flushIntervalMs": 3000,
+    "samplingRate": 1.0,
+    "autoCapture": true,
+    "trackScreens": true,
+    "trackTaps": true,
+    "trackNetwork": true,
+    "trackLifecycle": true,
+    "sessionTimeoutMs": 1800000,
+    "screenStartEvent": "screen_viewed",
+    "screenEndEvent": "screen_exited",
+    "screenLoadEvent": "screen_load_completed",
+    "verboseLogging": false
+  },
+
+  "snowplow": {
+    "enabled": true,
+    "endpoint": "https://sp.example.com",
+    "appId": "my-web-app",
+    "iglu_vendor": "com.mycompany",
+    "default_version": "1-0-0",
+    "drop_events": ["app_foreground", "app_background"]
+  },
+
+  "tracing": {
+    "enabled": false,
+    "allowlistHosts": []
+  }
+}</code></pre>
+
+<p>Rồi khởi tạo bằng đúng một dòng:</p>
+
+<pre><code>&lt;script src="/assets/js/unitrack.iife.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  UniTrack.initializeFromConfig('/unitrack.config.json');
+&lt;/script&gt;</code></pre>
+
+<div class="ok">
+<p><strong>Không cần gọi <code>addProvider()</code>.</strong> SDK tự gắn provider theo file: <code>snowplow.enabled</code> bật thì gắn Snowplow, <code>endpoint</code> khác rỗng thì gắn HTTP. Đổi cấu hình chỉ cần sửa file JSON, không phải build lại.</p>
+</div>
+
+<h3>Dùng chung một file cho cả web và mobile</h3>
+
+<p>Schema này giữ nguyên tên field của bản iOS/Android (<code>sdkConfig</code>, <code>iglu_vendor</code>, <code>drop_events</code>…) nên cùng một file config dùng được cho cả ba nền. Phần nào web không dùng (<code>firebase</code>, <code>httpProviders</code>) thì SDK bỏ qua, không báo lỗi.</p>
+
+<table>
+<tr><th>Khoá</th><th>Ý nghĩa</th></tr>
+<tr><td><code>apiKey</code></td><td>Khoá dự án. Nằm trong file, không truyền qua tham số</td></tr>
+<tr><td><code>endpoint</code></td><td>Core HTTP ingest. Để rỗng thì chỉ gửi Snowplow</td></tr>
+<tr><td><code>sdkConfig</code></td><td>Toàn bộ cờ thu thập — xem bảng mục 7</td></tr>
+<tr><td><code>snowplow.enabled</code></td><td>Bật thì tự gắn Snowplow provider</td></tr>
+<tr><td><code>snowplow.iglu_vendor</code></td><td>Vendor dựng schema URI</td></tr>
+<tr><td><code>snowplow.event_names</code></td><td>Đổi tên event khi lên wire, ví dụ <code>click</code> → <code>event_click</code></td></tr>
+<tr><td><code>snowplow.drop_events</code></td><td>Chặn hẳn vài event không gửi</td></tr>
+<tr><td><code>tracing.enabled</code></td><td>Chèn header <code>traceparent</code> W3C</td></tr>
+<tr><td><code>tracing.allowlistHosts</code></td><td>Chỉ chèn cho host trong danh sách</td></tr>
+</table>
+
+<div class="warn">
+<p><code>allowlistHosts</code> chỉ có tác dụng khi <code>tracing.enabled</code> là <code>true</code>. Đây là thứ ngăn <code>traceparent</code> rò sang bên thứ ba — để trống danh sách mà bật tracing nghĩa là chèn cho mọi host.</p>
+</div>
+
+<h2>3. Bắn event nghiệp vụ</h2>
+
+<pre><code>UniTrack.track('add_to_cart', {
+  product_id: 'SKU-991',
+  price:      450000,
+  quantity:   2,
+});</code></pre>
+
+<p>Mỗi event tự động được gắn thêm <code>session_id</code>, <code>session_index</code>, <code>screen</code> và <code>ts</code>. Bạn không cần truyền tay.</p>
+
+<h2>4. Kiểu dữ liệu — mọi field đều là String <span class="tag">quan trọng</span></h2>
+
+<p>Đây là điểm dễ gây bất ngờ nhất, nên nói rõ ngay từ đầu.</p>
+
+<p>Payload gửi lên <strong>luôn có mọi giá trị ở dạng chuỗi</strong>, kể cả khi bạn truyền vào số hay boolean. SDK tự chuyển ở bước cuối trước khi gửi.</p>
+
+<pre><code>// Bạn viết thế này
+UniTrack.track('add_to_cart', { price: 450000, in_stock: true });
+
+// Thứ thực sự đi lên mạng
+{ "price": "450000", "in_stock": "true", "session_index": "26", ... }</code></pre>
+
+<p>Lý do: cùng một field ở các nguồn phát khác nhau từng có kiểu khác nhau, khiến schema kiểm tra chặt ở phía nhận từ chối dữ liệu. Chuẩn hoá về một kiểu duy nhất giải quyết triệt để.</p>
+
+<table>
+<tr><th>Bạn truyền</th><th>Gửi lên</th><th>Ghi chú</th></tr>
+<tr><td><code>26</code></td><td><code>"26"</code></td><td>Số nguyên</td></tr>
+<tr><td><code>0.5</code></td><td><code>"0.5"</code></td><td>Giữ nguyên phần thập phân</td></tr>
+<tr><td><code>true</code> / <code>false</code></td><td><code>"true"</code> / <code>"false"</code></td><td><code>false</code> <em>không</em> bị loại bỏ</td></tr>
+<tr><td><code>{a:1}</code></td><td><code>'{"a":1}'</code></td><td>JSON, không phải <code>[object Object]</code></td></tr>
+<tr><td><code>null</code> / <code>undefined</code></td><td>— bị loại bỏ</td><td>Không gửi field đó luôn</td></tr>
+</table>
+
+<div class="note">
+<p><strong>Khi phân tích dữ liệu, nhớ ép kiểu lại.</strong> Ví dụ trong SQL cần <code>CAST(price AS INTEGER)</code> trước khi tính tổng, nếu không sẽ nối chuỗi thay vì cộng số.</p>
+</div>
+
+<h2>5. Event tự sinh</h2>
+
+<p>Không cần viết dòng nào, những event sau tự có:</p>
+
+<table>
+<tr><th>Event</th><th>Khi nào</th><th>Field đáng chú ý</th></tr>
+<tr><td><code>app_start</code></td><td>Lần tải trang đầu tiên</td><td><code>nav_type</code>, <code>start_ms</code></td></tr>
+<tr><td><code>screen_viewed</code></td><td>Vào một trang / route mới</td><td><code>screen</code>, <code>title</code></td></tr>
+<tr><td><code>screen_exited</code></td><td>Rời trang</td><td><code>dwell_ms</code>, <code>foreground_sec</code>, <code>reason</code></td></tr>
+<tr><td><code>click</code></td><td>Click vào phần tử tương tác</td><td><code>element_key</code>, <code>tag</code>, <code>href</code></td></tr>
+<tr><td><code>network_request</code></td><td>Mỗi fetch / XHR</td><td><code>url</code>, <code>status_code</code>, <code>duration_ms</code></td></tr>
+<tr><td><code>network_error</code></td><td>Request ném lỗi</td><td><code>url</code>, <code>error</code></td></tr>
+<tr><td><code>crash</code></td><td>Lỗi JS không bắt được</td><td><code>message</code>, <code>stack</code></td></tr>
+<tr><td><code>session_ended</code></td><td>Phiên kết thúc</td><td><code>ended_session_id</code>, <code>session_duration_sec</code></td></tr>
+</table>
+
+<h3>Click được nhận diện thế nào</h3>
+
+<p>SDK tìm tên phần tử theo thứ tự ưu tiên sau. Muốn tên đẹp và ổn định, thêm <code>data-track-id</code>:</p>
+
+<pre><code>&lt;button data-track-id="checkout_confirm"&gt;Thanh toán&lt;/button&gt;</code></pre>
+
+<ol>
+<li><code>data-track-id</code> — bạn tự đặt, ổn định nhất</li>
+<li><code>id</code> của phần tử</li>
+<li><code>aria-label</code></li>
+<li>Nội dung chữ, cắt còn 40 ký tự</li>
+<li><code>tag.class</code> — phương án cuối</li>
+</ol>
+
+<p>Click vào vùng trống không sinh event, nên bạn không bị nhiễu.</p>
+
+<h2>6. SPA — React, Vue, Next.js</h2>
+
+<p>SDK bắt được điều hướng của <code>history.pushState</code>, nên router phía client hoạt động sẵn. Chỉ cần init một lần ở entry point.</p>
+
+<pre><code>import UniTrack, { HttpProvider } from 'unitrack-web';
+
+UniTrack.initialize('YOUR_API_KEY', {
+  endpoint: 'https://collector.example.com',
+});
+UniTrack.addProvider(new HttpProvider({
+  endpoint: 'https://collector.example.com',
+  apiKey:   'YOUR_API_KEY',
+}));</code></pre>
+
+<div class="note">
+<p><strong>Next.js:</strong> đặt trong <code>useEffect</code> của layout gốc để chỉ chạy phía client — SDK cần <code>window</code> nên không chạy được lúc server render.</p>
+</div>
+
+<h2>7. Config</h2>
+
+<p><code>endpoint</code> là thứ duy nhất bạn gần như luôn phải đặt. Còn lại đều có mặc định hợp lý.</p>
+
+<table>
+<tr><th>Tuỳ chọn</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>endpoint</code></td><td><code>''</code></td><td>Nơi nhận dữ liệu. Cũng tự loại khỏi network capture</td></tr>
+<tr><td><code>autoCapture</code></td><td><code>true</code></td><td>Công tắc tổng cho mọi thu thập tự động</td></tr>
+<tr><td><code>trackScreens</code></td><td><code>true</code></td><td>Screen view và screen exit</td></tr>
+<tr><td><code>trackTaps</code></td><td><code>true</code></td><td>Click</td></tr>
+<tr><td><code>trackNetwork</code></td><td><code>true</code></td><td>fetch và XHR</td></tr>
+<tr><td><code>trackLifecycle</code></td><td><code>true</code></td><td>App start, foreground, background</td></tr>
+<tr><td><code>batchSize</code></td><td><code>10</code></td><td>Gom đủ số event thì gửi một lượt</td></tr>
+<tr><td><code>flushIntervalMs</code></td><td><code>3000</code></td><td>Hoặc cứ 3 giây gửi một lần</td></tr>
+<tr><td><code>sessionTimeoutMs</code></td><td><code>1800000</code></td><td>Ngồi im 30 phút thì sang phiên mới</td></tr>
+<tr><td><code>samplingRate</code></td><td><code>1</code></td><td>Lấy hết. Đặt <code>0.1</code> để lấy 10%</td></tr>
+<tr><td><code>requireConsent</code></td><td><code>false</code></td><td>Bật nếu cần chờ user đồng ý (GDPR)</td></tr>
+<tr><td><code>anonymousTracking</code></td><td>tắt</td><td><code>'session'</code> hoặc <code>'full'</code> để bỏ mọi định danh</td></tr>
+<tr><td><code>piiSalt</code></td><td><code>''</code></td><td>Có giá trị thì user ID được băm SHA-256</td></tr>
+<tr><td><code>verboseLogging</code></td><td><code>true</code></td><td><strong>Nên tắt khi lên production</strong></td></tr>
+</table>
+
+<h3>Cần chờ user đồng ý</h3>
+
+<pre><code>UniTrack.initialize('YOUR_API_KEY', { endpoint: '...', requireConsent: true });
+
+// Event bị giữ lại, chưa gửi đi. Khi user bấm "Đồng ý":
+UniTrack.setConsent(true);</code></pre>
+
+<h2>8. Tự kiểm tra khi nghi có lỗi</h2>
+
+<p>Làm lần lượt bốn bước, dừng ở bước nào hỏng thì đó là nguyên nhân.</p>
+
+<h3>SDK đã nạp chưa</h3>
+<p>Mở Console gõ <code>UniTrack</code>. Ra <code>undefined</code> nghĩa là thẻ script sai đường dẫn hoặc bị chặn.</p>
+
+<h3>Event có sinh ra không</h3>
+<p>Với <code>verboseLogging: true</code>, mỗi event in ra Console dạng <code>[UniTrack] click {...}</code>. Không thấy gì thì kiểm tra <code>autoCapture</code> và <code>requireConsent</code>.</p>
+
+<h3>Event có gửi đi không</h3>
+<p>DevTools › Network, lọc <code>tp2</code>. Phải thấy request POST mỗi vài giây. Nếu event in ra Console mà không có request, khả năng cao là <code>endpoint</code> sai hoặc bị CORS chặn.</p>
+
+<h3>Ép gửi ngay để thử</h3>
+<pre><code>UniTrack.track('test_event', { hello: 'world' });
+UniTrack.flush();   // không đợi batch, gửi luôn</code></pre>
+
+<h2>9. Lỗi thường gặp</h2>
+
+<table>
+<tr><th>Hiện tượng</th><th>Nguyên nhân thường gặp</th></tr>
+<tr><td><code>UniTrack is not defined</code></td><td>Gọi <code>initialize()</code> trước khi thẻ script kịp nạp</td></tr>
+<tr><td><code>UniTrack.init is not a function</code></td><td>Tên đúng là <code>initialize</code></td></tr>
+<tr><td>Console có log, Network trống</td><td>Quên gọi <code>addProvider()</code></td></tr>
+<tr><td>Không request nào đi</td><td><code>endpoint</code> sai, hoặc CORS chặn</td></tr>
+<tr><td>Có request nhưng trả lỗi</td><td>Sai <code>appId</code>, hoặc thiếu quyền phía collector</td></tr>
+<tr><td>Mất event lúc đóng tab</td><td>SDK đã dùng <code>sendBeacon</code>. Nếu vẫn mất, kiểm tra tiện ích chặn quảng cáo</td></tr>
+<tr><td>Số cộng ra sai</td><td>Quên ép kiểu — mọi field là String, xem mục 4</td></tr>
+<tr><td>Trùng screen view ở SPA</td><td>Gọi <code>initialize()</code> nhiều lần. Lần thứ hai bị bỏ qua, nhưng <code>addProvider()</code> thì không — dễ thành gửi trùng</td></tr>
+</table>
+
+<h2>10. Câu hỏi hay gặp</h2>
+
+<h3>Có làm chậm trang không</h3>
+<p>Không đáng kể. SDK gom event vào bộ đệm và gửi nền, không chặn render.</p>
+
+<h3>Mất mạng thì sao</h3>
+<p>Event được lưu lại và gửi bù khi có mạng trở lại. Đóng tab giữa chừng cũng không mất, nhờ <code>sendBeacon</code>.</p>
+
+<h3>Có tự thu thập thông tin cá nhân không</h3>
+<p>Không. SDK không đọc nội dung người dùng nhập vào form — chỉ ghi nhận có tương tác với field nào. Định danh chỉ có khi bạn chủ động gọi <code>identify()</code>.</p>
+
+<h3>Có cần banner cookie không</h3>
+<p>SDK dùng <code>localStorage</code> cho session chứ không dùng cookie theo dõi. Tuỳ quy định áp dụng cho bạn, có thể bật <code>requireConsent</code> để chờ đồng ý.</p>
+
+<h2>Tóm tắt</h2>
+
+<ol>
+<li>Copy <code>unitrack.iife.js</code> vào thư mục tĩnh</li>
+<li>Nhúng thẻ script trong <code>&lt;head&gt;</code></li>
+<li>Cách gọn nhất: tạo <code>unitrack.config.json</code> rồi gọi <code>UniTrack.initializeFromConfig('/unitrack.config.json')</code></li>
+<li>Hoặc gọi tay: <code>initialize(apiKey, { endpoint })</code> rồi <code>addProvider(...)</code></li>
+<li>Gọi <code>identify()</code> lúc đăng nhập, <code>reset()</code> lúc đăng xuất</li>
+<li>Tắt <code>verboseLogging</code> trước khi lên production</li>
+<li>Nhớ ép kiểu khi phân tích — mọi field đều là String</li>
+</ol>
+
+</div>
