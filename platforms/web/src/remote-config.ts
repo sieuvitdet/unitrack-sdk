@@ -101,7 +101,12 @@ export function resolveSnowplow(cfg: RemoteConfig): { endpoint?: string; appId?:
 /** Map RemoteConfig → UniTrackConfig — extract subset fields cho SDK init. */
 export function toSDKConfig(cfg: RemoteConfig): UniTrackConfig {
   const s = cfg.sdk_config || {};
-  return {
+  // Bỏ hẳn khoá có giá trị undefined trước khi trả về. `initialize()` trộn
+  // bằng `{...defaultCfg(), ...config}`, nên một khoá undefined tường minh sẽ
+  // GHI ĐÈ mất mặc định — file thiếu `sampling_rate` thì `samplingRate` thành
+  // undefined, và `undefined >= 1` là false ở cả ba nhánh so sánh nên MỌI event
+  // bị sampled out im lặng (gặp thật khi dựng demo web 2026-08-24).
+  return prune({
     endpoint: cfg.endpoint || '',
     piiSalt: cfg.pii_salt,
     batchSize: s.batchSize,
@@ -116,5 +121,13 @@ export function toSDKConfig(cfg: RemoteConfig): UniTrackConfig {
     samplingRate: s.sampling_rate,
     requireConsent: s.require_consent,
     tracingAllowlistHosts: cfg.tracing?.enabled ? (cfg.tracing.allowlist_hosts || []) : [],
-  };
+  });
+}
+
+/** Xoá các khoá undefined để chúng không ghi đè giá trị mặc định khi spread. */
+function prune(o: UniTrackConfig): UniTrackConfig {
+  for (const k of Object.keys(o)) {
+    if ((o as Record<string, unknown>)[k] === undefined) delete (o as Record<string, unknown>)[k];
+  }
+  return o;
 }

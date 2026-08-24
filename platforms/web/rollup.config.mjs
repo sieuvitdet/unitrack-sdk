@@ -1,6 +1,6 @@
 import typescript from '@rollup/plugin-typescript';
 
-const banner = `/*! unitrack-web v0.2.0 — https://github.com/sieuvitdet/unitrack-sdk */`;
+const banner = `/*! unitrack-web v0.2.1 — https://github.com/sieuvitdet/unitrack-sdk */`;
 
 export default {
   input: 'src/index.ts',

@@ -1,6 +1,6 @@
 {
   "name": "unitrack-web",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "UniTrack — Web analytics SDK: auto-capture, config bằng file JSON, offline queue, W3C trace context, Snowplow/HTTP fan-out.",
   "main": "dist/unitrack.cjs.js",
   "module": "dist/unitrack.esm.js",
