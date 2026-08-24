@@ -44,17 +44,43 @@ background:var(--accent);color:#fff;vertical-align:middle;margin-left:6px}
 <p><strong>Bản demo chạy thật:</strong> <a href="https://mobix.asia/event-tracking-mobile/unitrack-web-demo/showcase.html">showcase.html</a> — mở DevTools › Network, lọc <code>tp2</code> để xem event bắn đi ngay khi bạn click.</p>
 </div>
 
-<h2>1. Lấy file SDK</h2>
+<h2>1. Lấy SDK</h2>
 
-<p>SDK là một file JavaScript duy nhất, không phụ thuộc thư viện ngoài. Bạn có hai cách dùng.</p>
+<p>Hai cách. Giao SDK cho một đội khác tích hợp thì <strong>dùng npm</strong> — họ không phải xin file, không phải nhớ copy lại mỗi lần có bản mới.</p>
+
+<h3>Cách 1 — npm <span class="tag">khuyến nghị</span></h3>
+
+<pre><code>npm install unitrack-web</code></pre>
+
+<p>Copy file config mẫu kèm sẵn trong package ra thư mục tĩnh rồi sửa:</p>
+
+<pre><code>cp node_modules/unitrack-web/unitrack.config.example.json public/unitrack.config.json</code></pre>
+
+<pre><code>import UniTrack from 'unitrack-web';
+
+await UniTrack.initializeFromConfig('/unitrack.config.json');</code></pre>
+
+<p>Package có sẵn khai báo kiểu TypeScript, nên gợi ý code và bắt lỗi hoạt động ngay không cần cài thêm gì.</p>
 
 <table>
-<tr><th>Cách</th><th>File</th><th>Dùng khi</th></tr>
-<tr><td>Nhúng thẻ script</td><td><code>dist/unitrack.iife.js</code></td><td>HTML thuần, WordPress, hoặc muốn nhanh nhất</td></tr>
-<tr><td>Import qua bundler</td><td><code>dist/unitrack.esm.js</code></td><td>React, Vue, Next.js, Vite, webpack</td></tr>
+<tr><th>Trường</th><th>File</th><th>Dùng cho</th></tr>
+<tr><td><code>main</code></td><td><code>dist/unitrack.cjs.js</code></td><td>CommonJS — <code>require()</code></td></tr>
+<tr><td><code>module</code></td><td><code>dist/unitrack.esm.js</code></td><td>ESM — bundler tự chọn cái này</td></tr>
+<tr><td><code>unpkg</code></td><td><code>dist/unitrack.iife.js</code></td><td>Nhúng thẳng thẻ script</td></tr>
+<tr><td><code>types</code></td><td><code>dist/index.d.ts</code></td><td>TypeScript</td></tr>
 </table>
 
-<p>File nặng <strong>126 KB</strong>, nén gzip còn <strong>33 KB</strong>. Copy file vào thư mục tĩnh của bạn (ví dụ <code>/assets/js/</code>) rồi tự phục vụ — không cần CDN ngoài.</p>
+<h3>Cách 2 — copy file thủ công</h3>
+
+<p>Dự án không dùng bundler (HTML thuần, WordPress) thì lấy thẳng file IIFE:</p>
+
+<pre><code>&lt;script src="/assets/js/unitrack.iife.js"&gt;&lt;/script&gt;</code></pre>
+
+<p>File nặng <strong>126 KB</strong>, nén gzip còn <strong>33 KB</strong>. Cài qua npm rồi vẫn nhúng kiểu này được — file nằm ở <code>node_modules/unitrack-web/dist/unitrack.iife.js</code>.</p>
+
+<div class="note">
+<p><strong>Giao SDK cho đội khác thì npm hơn ở đâu:</strong> nâng cấp chỉ cần <code>npm update unitrack-web</code> thay vì gửi file mới rồi dặn nhau copy đúng chỗ; version ghi trong <code>package-lock.json</code> nên biết chính xác ai đang chạy bản nào; và khai báo TypeScript có sẵn.</p>
+</div>
 
 <h2>2. Tích hợp trong ba bước</h2>
 
@@ -285,15 +311,10 @@ UniTrack.track('add_to_cart', { price: 450000, in_stock: true });
 
 <p>SDK bắt được điều hướng của <code>history.pushState</code>, nên router phía client hoạt động sẵn. Chỉ cần init một lần ở entry point.</p>
 
-<pre><code>import UniTrack, { HttpProvider } from 'unitrack-web';
+<pre><code>import UniTrack from 'unitrack-web';
 
-UniTrack.initialize('YOUR_API_KEY', {
-  endpoint: 'https://collector.example.com',
-});
-UniTrack.addProvider(new HttpProvider({
-  endpoint: 'https://collector.example.com',
-  apiKey:   'YOUR_API_KEY',
-}));</code></pre>
+// Config nằm hết trong file JSON — không hardcode gì vào code
+await UniTrack.initializeFromConfig('/unitrack.config.json');</code></pre>
 
 <div class="note">
 <p><strong>Next.js:</strong> đặt trong <code>useEffect</code> của layout gốc để chỉ chạy phía client — SDK cần <code>window</code> nên không chạy được lúc server render.</p>

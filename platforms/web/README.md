@@ -8,6 +8,34 @@ API parity với bản Flutter / iOS / Android.
 
 ## Cài đặt
 
+```bash
+npm install unitrack-web
+```
+
+Rồi khởi tạo bằng file config JSON:
+
+```bash
+# Copy file mẫu ra thư mục tĩnh, sửa apiKey + endpoint
+cp node_modules/unitrack-web/unitrack.config.example.json public/unitrack.config.json
+```
+
+```js
+import UniTrack from 'unitrack-web';
+
+await UniTrack.initializeFromConfig('/unitrack.config.json');
+```
+
+Không dùng bundler thì nhúng thẳng file IIFE:
+
+```html
+<script src="node_modules/unitrack-web/dist/unitrack.iife.js"></script>
+<script>UniTrack.initializeFromConfig('/unitrack.config.json');</script>
+```
+
+Hướng dẫn đầy đủ: https://mobix.asia/event-tracking-mobile/web-sdk-integration-guide.html
+
+## Cài đặt
+
 ```sh
 npm install unitrack-web
 ```
