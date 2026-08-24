@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "apiKey": "utk_khoa_cua_ban",
+  "endpoint": "",
+  "pii_salt": "",
+  "sdk_config": {
+    "batchSize": 10,
+    "flushIntervalMs": 3000,
+    "logLevel": "warn",
+    "autoCapture": true,
+    "trackScreens": true,
+    "trackTaps": true,
+    "trackNetwork": true,
+    "trackLifecycle": true,
+    "sessionTimeoutMs": 1800000,
+    "screen_start_event": "screen_viewed",
+    "screen_end_event": "screen_exited",
+    "screen_load_event": "screen_load_completed",
+    "session_id_salt": "web"
+  },
+  "snowplow": {
+    "enabled": true,
+    "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+    "appId": "567",
+    "iglu_vendor": "vn.fpt.ftel.snowplow",
+    "default_version": "1-0-0",
+    "hybrid_screen_view": true,
+    "event_names": {
+      "click": "ev_click",
+      "result": "ev_result",
+      "screen_view": "screen_view",
+      "screen_end": "screen_end",
+      "crash": "ev_crash",
+      "api": "ev_api",
+      "session": "ev_session"
+    },
+    "entities": {
+      "user_context": "user_context",
+      "core_action": "core_action",
+      "application_context": "application_context"
+    },
+    "drop_events": [
+      "app_foreground",
+      "app_background"
+    ],
+    "options": {
+      "base64Encoding": true,
+      "platformContext": true,
+      "applicationContext": true,
+      "sessionContext": true,
+      "screenContext": true,
+      "lifecycleAutotracking": false,
+      "screenEngagementAutotracking": true,
+      "exceptionAutotracking": false
+    },
+    "web": {
+      "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+      "appId": "567"
+    }
+  },
+  "tracing": {
+    "enabled": false,
+    "header_name": "traceparent",
+    "allowlist_hosts": [],
+    "sampled": true
+  },
+  "http_providers": [],
+  "flavors": {
+    "beta": {
+      "sdk_config": {
+        "logLevel": "error"
+      },
+      "snowplow": {
+        "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+        "appId": "567",
+        "web": {
+          "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+          "appId": "567"
+        }
+      }
+    },
+    "dev": {
+      "sdk_config": {
+        "logLevel": "debug"
+      },
+      "snowplow": {
+        "enabled": false
+      }
+    }
+  },
+  "updated_at": 1787000000000
+}

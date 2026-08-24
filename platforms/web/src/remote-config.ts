@@ -8,6 +8,8 @@
 import type { UniTrackConfig } from './types';
 
 export interface RemoteConfig {
+  /** API key. Nằm luôn trong file config, host không phải truyền tay. */
+  apiKey?: string;
   endpoint?: string;
   pii_salt?: string;
   sdk_config?: {
@@ -31,6 +33,9 @@ export interface RemoteConfig {
     iglu_vendor?: string;
     default_version?: string;
     event_names?: Record<string, string>;
+    drop_events?: string[];
+    /** Override riêng từng nền. Native dùng `ios`/`android`, web dùng `web`. */
+    web?: { endpoint?: string; appId?: string };
   };
   tracing?: {
     enabled?: boolean;
@@ -79,6 +84,18 @@ function deepMerge(a: Record<string, unknown>, b: Record<string, unknown>): Reco
     }
   }
   return out;
+}
+
+/** Endpoint/appId Snowplow sau khi tính override theo nền.
+ *
+ * Parity `UniTrackRemoteConfig.resolvedEndpoint` bên iOS: khối `snowplow.web`
+ * đè lên giá trị chung, giống cách `snowplow.ios` đè bên native. */
+export function resolveSnowplow(cfg: RemoteConfig): { endpoint?: string; appId?: string } {
+  const sp = cfg.snowplow;
+  return {
+    endpoint: sp?.web?.endpoint || sp?.endpoint,
+    appId:    sp?.web?.appId    || sp?.appId,
+  };
 }
 
 /** Map RemoteConfig → UniTrackConfig — extract subset fields cho SDK init. */

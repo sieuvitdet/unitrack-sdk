@@ -111,76 +111,91 @@ UniTrack.reset();</code></pre>
 
 <h2>2b. Cách khuyến nghị — config bằng file JSON <span class="tag">giống FPT Life</span></h2>
 
-<p>Cách ở mục 2 phải viết thông tin vào code. Nếu bạn muốn <strong>mọi thứ nằm sẵn trong một file JSON</strong> — giống hệt cách FPT Life làm trên iOS và Android — thì dùng cách này.</p>
+<p>Cách ở mục 2 phải viết thông tin vào code. Nếu muốn <strong>mọi thứ nằm sẵn trong một file JSON</strong> — giống hệt <code>trackingConfig.json</code> mà FPT Life dùng trên iOS và Android — thì dùng cách này.</p>
 
-<p>Tạo file <code>unitrack.config.json</code> đặt cùng thư mục tĩnh:</p>
+<p>Tạo <code>unitrack.config.json</code> đặt cùng thư mục tĩnh:</p>
 
 <pre><code>{
   "version": 1,
   "apiKey": "utk_khoa_cua_ban",
   "endpoint": "",
+  "pii_salt": "",
 
-  "sdkConfig": {
+  "sdk_config": {
     "batchSize": 10,
     "flushIntervalMs": 3000,
-    "samplingRate": 1.0,
+    "logLevel": "warn",
     "autoCapture": true,
     "trackScreens": true,
     "trackTaps": true,
     "trackNetwork": true,
-    "trackLifecycle": true,
-    "sessionTimeoutMs": 1800000,
-    "screenStartEvent": "screen_viewed",
-    "screenEndEvent": "screen_exited",
-    "screenLoadEvent": "screen_load_completed",
-    "verboseLogging": false
+    "screen_start_event": "screen_viewed",
+    "screen_end_event": "screen_exited",
+    "screen_load_event": "screen_load_completed",
+    "session_id_salt": "web"
   },
 
   "snowplow": {
     "enabled": true,
-    "endpoint": "https://sp.example.com",
-    "appId": "my-web-app",
-    "iglu_vendor": "com.mycompany",
+    "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+    "appId": "567",
+    "iglu_vendor": "vn.fpt.ftel.snowplow",
     "default_version": "1-0-0",
-    "drop_events": ["app_foreground", "app_background"]
+    "event_names": {
+      "click": "ev_click", "screen_view": "screen_view",
+      "crash": "ev_crash", "api": "ev_api", "session": "ev_session"
+    },
+    "drop_events": ["app_foreground", "app_background"],
+    "web": {
+      "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+      "appId": "567"
+    }
   },
 
   "tracing": {
     "enabled": false,
-    "allowlistHosts": []
+    "allowlist_hosts": []
+  },
+
+  "flavors": {
+    "dev": { "snowplow": { "enabled": false } }
   }
 }</code></pre>
 
-<p>Rồi khởi tạo bằng đúng một dòng:</p>
+<p>Khởi tạo bằng đúng một dòng:</p>
 
 <pre><code>&lt;script src="/assets/js/unitrack.iife.js"&gt;&lt;/script&gt;
 &lt;script&gt;
   UniTrack.initializeFromConfig('/unitrack.config.json');
+
+  // Chọn môi trường — lấy khối override trong "flavors"
+  // UniTrack.initializeFromConfig('/unitrack.config.json', 'dev');
 &lt;/script&gt;</code></pre>
 
 <div class="ok">
-<p><strong>Không cần gọi <code>addProvider()</code>.</strong> SDK tự gắn provider theo file: <code>snowplow.enabled</code> bật thì gắn Snowplow, <code>endpoint</code> khác rỗng thì gắn HTTP. Đổi cấu hình chỉ cần sửa file JSON, không phải build lại.</p>
+<p><strong>Không cần gọi <code>addProvider()</code>.</strong> SDK tự gắn provider theo file: <code>snowplow.enabled</code> bật thì gắn Snowplow, <code>endpoint</code> khác rỗng thì gắn HTTP. Đổi cấu hình chỉ sửa file JSON, không build lại.</p>
 </div>
 
 <h3>Dùng chung một file cho cả web và mobile</h3>
 
-<p>Schema này giữ nguyên tên field của bản iOS/Android (<code>sdkConfig</code>, <code>iglu_vendor</code>, <code>drop_events</code>…) nên cùng một file config dùng được cho cả ba nền. Phần nào web không dùng (<code>firebase</code>, <code>httpProviders</code>) thì SDK bỏ qua, không báo lỗi.</p>
+<p>Schema này <strong>giống hệt</strong> file iOS/Android đang chạy, giữ nguyên cả snake_case (<code>sdk_config</code>, <code>iglu_vendor</code>, <code>allowlist_hosts</code>). Cùng một file dùng được cho cả ba nền. Phần web không dùng (<code>firebase</code>, <code>http_providers</code>) thì SDK bỏ qua, không báo lỗi.</p>
 
 <table>
 <tr><th>Khoá</th><th>Ý nghĩa</th></tr>
-<tr><td><code>apiKey</code></td><td>Khoá dự án. Nằm trong file, không truyền qua tham số</td></tr>
-<tr><td><code>endpoint</code></td><td>Core HTTP ingest. Để rỗng thì chỉ gửi Snowplow</td></tr>
-<tr><td><code>sdkConfig</code></td><td>Toàn bộ cờ thu thập — xem bảng mục 7</td></tr>
-<tr><td><code>snowplow.enabled</code></td><td>Bật thì tự gắn Snowplow provider</td></tr>
-<tr><td><code>snowplow.iglu_vendor</code></td><td>Vendor dựng schema URI</td></tr>
-<tr><td><code>snowplow.event_names</code></td><td>Đổi tên event khi lên wire, ví dụ <code>click</code> → <code>event_click</code></td></tr>
+<tr><td><code>apiKey</code></td><td>Khoá dự án, nằm trong file</td></tr>
+<tr><td><code>endpoint</code></td><td>Core HTTP ingest. Rỗng thì chỉ gửi Snowplow</td></tr>
+<tr><td><code>pii_salt</code></td><td>Ở cấp gốc, không nằm trong <code>sdk_config</code></td></tr>
+<tr><td><code>sdk_config.logLevel</code></td><td><code>debug</code> mới bật log; <code>warn</code>/<code>error</code> đều im lặng</td></tr>
+<tr><td><code>snowplow.web</code></td><td>Đè endpoint/appId riêng cho web, như <code>ios</code>/<code>android</code> bên native</td></tr>
+<tr><td><code>snowplow.event_names</code></td><td>Đổi tên event khi lên wire</td></tr>
 <tr><td><code>snowplow.drop_events</code></td><td>Chặn hẳn vài event không gửi</td></tr>
-<tr><td><code>tracing.enabled</code></td><td>Chèn header <code>traceparent</code> W3C</td></tr>
-<tr><td><code>tracing.allowlistHosts</code></td><td>Chỉ chèn cho host trong danh sách</td></tr>
+<tr><td><code>tracing.allowlist_hosts</code></td><td>Chỉ chèn <code>traceparent</code> cho host trong danh sách</td></tr>
+<tr><td><code>flavors</code></td><td>Override theo môi trường, deep-merge lên gốc</td></tr>
 </table>
 
 <div class="warn">
-<p><code>allowlistHosts</code> chỉ có tác dụng khi <code>tracing.enabled</code> là <code>true</code>. Đây là thứ ngăn <code>traceparent</code> rò sang bên thứ ba — để trống danh sách mà bật tracing nghĩa là chèn cho mọi host.</p>
+<p><code>allowlist_hosts</code> chỉ có tác dụng khi <code>tracing.enabled</code> là <code>true</code>. Đây là thứ ngăn <code>traceparent</code> rò sang bên thứ ba.</p>
+<p>Với <code>flavors</code>, mảng bị <strong>thay nguyên cụm</strong> chứ không nối — khai <code>allowlist_hosts</code> trong flavor là bỏ hẳn danh sách gốc.</p>
 </div>
 
 <h2>3. Bắn event nghiệp vụ</h2>
