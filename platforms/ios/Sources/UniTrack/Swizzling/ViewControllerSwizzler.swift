@@ -157,15 +157,31 @@ private extension UIViewController {
             // a few ms later is dropped by core's cross-layer dedup. Falls back
             // to the legacy untagged path on contexts where the C symbol isn't
             // present (vd version skew with an older core).
-            UniTrack.setScreen(screen, layer: .iOSNative)
+            let sameScreen = UniTrack.setScreen(screen, layer: .iOSNative)
 
-            // Load time: viewDidLoad → first appearance. Reported once per VC.
+            // Load time: viewDidLoad → first appearance. Reported once per lần
+            // VÀO MÀN, không phải mỗi VC instance.
+            //
+            // App hay dựng lại VC cho cùng một màn (vd FPT Life tạo tab "all"
+            // lúc layout rồi tạo LẠI khi API items về, 1.4s sau). Đó là hai
+            // instance nên cờ ut_loadReported per-instance không chặn được,
+            // nhưng người dùng chỉ thấy MỘT màn liên tục — không có screen_end
+            // ở giữa. Lần dựng thứ hai đo thời gian thay VC, không đo trải
+            // nghiệm của ai, nên bỏ.
+            //
+            // Dùng lại kết quả dup guard của setScreen thay vì tự so tên: chỉ
+            // một nguồn sự thật cho "màn có đổi không".
+            //
             // Phải bắn SAU setScreen trong cùng closure: Snowplow gắn entity
             // `screen` theo ScreenView gần nhất, nên nếu bắn sớm hơn thì
             // screen_name trong payload lệch một nhịp so với entity.
             // Event name resolves from UniTrack.screenLoadEventName (set during
             // _initialize from config.screenLoadEvent, in turn from portal
             // `sdk_config.screen_load_event`). Default keeps "screen_load_completed".
+            guard !sameScreen else {
+                UniTrack.log("[UniTrack] screen_load_completed SKIPPED — VC dựng lại cho màn đang mở screen=%@", screen)
+                return
+            }
             guard let self = self, let ms = loadMs, !self.ut_loadReported else { return }
             self.ut_loadReported = true
             // is_cached heuristic: sub-100ms load = cache hit (view already

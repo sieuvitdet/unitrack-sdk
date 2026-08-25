@@ -20,13 +20,27 @@ class SettleFilter:
         self.seq = 0
         self.pending = []   # (fire_at_ms, my_seq, screen)
         self.emitted = []
+        self.last_screen = None
 
     def on_appear(self, screen, now_ms):
         self.seq += 1
         if self.settle_ms <= 0:          # 0 = tắt lọc, emit thẳng
-            self.emitted.append(screen)
+            self._emit(screen)
             return
         self.pending.append((now_ms + self.settle_ms, self.seq, screen))
+
+    def _emit(self, screen):
+        """Dup guard của setScreen: cùng screen 2 lần liên tiếp không phải
+        boundary thật → screen_load_completed bị bỏ. Bản Python của
+        `isSameScreen` (Swift) / `setScreenReportingDup` (Kotlin)."""
+        if screen == self.last_screen:
+            return                       # VC dựng lại cho màn đang mở
+        self.last_screen = screen
+        self.emitted.append(screen)
+
+    def on_screen_end(self):
+        """screen_end đóng màn → lần vào sau là boundary thật kể cả trùng tên."""
+        self.last_screen = None
 
     def tick(self, now_ms):
         """Chạy các closure đã tới hạn."""
@@ -35,16 +49,20 @@ class SettleFilter:
             if fire_at > now_ms:
                 still.append((fire_at, my_seq, screen))
             elif my_seq == self.seq:     # guard: chưa ai đè lên
-                self.emitted.append(screen)
+                self._emit(screen)
         self.pending = still
 
 
-def run(events, settle_ms=SETTLE_MS, end_ms=10_000):
-    """events = [(t_ms, screen)] → danh sách screen thực sự được emit."""
+def run(events, settle_ms=SETTLE_MS, end_ms=200_000):
+    """events = [(t_ms, screen)] → danh sách screen thực sự được emit.
+    screen = None nghĩa là screen_end (màn đóng lại)."""
     f = SettleFilter(settle_ms)
     for t, screen in events:
         f.tick(t)
-        f.on_appear(screen, t)
+        if screen is None:
+            f.on_screen_end()
+        else:
+            f.on_appear(screen, t)
     f.tick(end_ms)
     return f.emitted
 
@@ -104,10 +122,14 @@ def test_single_screen_still_emits():
 
 
 def test_full_session_replay():
-    """Replay toàn bộ session d36eaf25 (mốc ms thật từ VPS).
-    28 event gốc → chỉ còn các màn người dùng thật sự nhìn thấy."""
+    """Replay session d36eaf25 (mốc ms thật từ VPS, TRƯỚC fix).
+    10 lần appear → chỉ còn màn người dùng thật sự nhìn thấy.
+
+    HomeAllDevice chỉ còn MỘT lần: các lần sau là VC dựng lại cho chính màn
+    đang mở (không có screen_end xen giữa) nên dup guard nuốt."""
     got = run([
         (1486, "ISCFlashScreenSyncDataViewController"),
+        (7837, None),                       # screen_end ISCFlashScreen (fg=6.35)
         (7842, "HomeAllDeviceViewController"),
         (8732, "FSSHomeTabBarViewController"),
         (8736, "MainHomeViewController"),
@@ -118,14 +140,52 @@ def test_full_session_replay():
         (8955, "AppTabBarPagerController"),
         (8958, "HomeAllDeviceViewController"),
     ])
-    # 10 lần appear → 4 màn thật, 6 container bị lọc.
-    # HomeAllDevice xuất hiện 3 lần vì mỗi lần nó sống > 50ms (890ms, 202ms,
-    # tới hết session) — đúng với dữ liệu VPS: fg=0.89 và fg=0.2. Các
-    # container xen giữa (fg=0) mới là thứ bị loại.
+    assert got == ["ISCFlashScreenSyncDataViewController",
+                   "HomeAllDeviceViewController"], got
+
+
+def test_vc_rebuilt_for_open_screen_is_dropped():
+    """Session 496552f3 lúc 11:27: FPT Life dựng tab "all" lúc layout rồi dựng
+    LẠI khi API items về (FSSHomeViewController.swift dòng 60 và 165).
+    Hai instance, cách nhau 1.45s, KHÔNG có screen_end ở giữa → người dùng
+    thấy một màn liên tục nên chỉ tính một load."""
+    got = run([
+        (61999, "CameraHomeViewController"),   # instance #1, load=29
+        (63452, "CameraHomeViewController"),   # instance #2, load=2 — bỏ
+    ])
+    assert got == ["CameraHomeViewController"], got
+
+
+def test_revisit_after_screen_end_still_counts():
+    """Ngược lại: rời màn (có screen_end) rồi quay lại CÙNG màn là lần vào
+    thật — phải giữ. Đây là ranh giới phân biệt với case trên."""
+    got = run([
+        (0,     "HomeViewController"),
+        (5000,  None),                      # screen_end — rời màn thật
+        (5010,  "DetailViewController"),
+        (9000,  None),
+        (9010,  "HomeViewController"),      # quay lại → boundary thật
+    ])
+    assert got == ["HomeViewController",
+                   "DetailViewController",
+                   "HomeViewController"], got
+
+
+def test_session_11h26_end_to_end():
+    """Replay đủ session 496552f3 (11:26:06 → 11:27:45), build ĐÃ có fix
+    container. 12 event gốc → 3 màn thật, 2 VC-dựng-lại bị bỏ."""
+    got = run([
+        (0,     "ISCFlashScreenSyncDataViewController"),
+        (5857,  None),                          # fg=5.86
+        (5859,  "HomeAllDeviceViewController"),
+        (37143, "HomeAllDeviceViewController"), # dựng lại sau 31s — bỏ
+        (61233, None),                          # fg=55.37
+        (61241, "CameraHomeViewController"),
+        (62694, "CameraHomeViewController"),    # dựng lại sau 1.45s — bỏ
+    ])
     assert got == ["ISCFlashScreenSyncDataViewController",
                    "HomeAllDeviceViewController",
-                   "HomeAllDeviceViewController",
-                   "HomeAllDeviceViewController"], got
+                   "CameraHomeViewController"], got
 
 
 if __name__ == "__main__":

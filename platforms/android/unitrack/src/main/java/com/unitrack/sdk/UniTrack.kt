@@ -896,7 +896,7 @@ object UniTrack {
     }
 
     @JvmStatic
-    fun setScreen(name: String) = setScreen(name, reentry = false)
+    fun setScreen(name: String) { setScreen(name, reentry = false) }
 
     /**
      * Vào lại đúng screen vừa rời — dùng cho resume sau background.
@@ -911,9 +911,20 @@ object UniTrack {
      * Snowplow tự suy, previousName sẽ là màn đứng trước lúc background
      * (state nội bộ của nó không thấy exit), lệch với UniTrack.
      */
-    internal fun reenterScreen(name: String) = setScreen(name, reentry = true)
+    internal fun reenterScreen(name: String) { setScreen(name, reentry = true) }
 
-    private fun setScreen(name: String, reentry: Boolean) {
+    /** Như [setScreen] nhưng trả về dup-guard để caller (ActivityTracker) gate
+     *  các event phụ thuộc boundary. Xem doc của setScreen(name, reentry). */
+    internal fun setScreenReportingDup(name: String): Boolean =
+        setScreen(name, reentry = false)
+
+    /**
+     * @return `true` nếu đây KHÔNG phải boundary thật (cùng screen 2 lần liên
+     *   tiếp) — caller dùng để bỏ luôn event phụ thuộc boundary, vd
+     *   screen_load_completed. Trả về thay vì để caller tự so tên: chỉ một
+     *   nguồn sự thật cho "màn có đổi không".
+     */
+    private fun setScreen(name: String, reentry: Boolean): Boolean {
         // Snapshot previous screen + transition timestamp on the binding side
         // so the boundary fan-out below can build matching screen_exited /
         // screen_viewed payloads for providers. The C++ core does its own
@@ -1001,6 +1012,7 @@ object UniTrack {
         if (!isSameScreen) {
             dispatchToProviders(screenStartEventName, startPayload)
         }
+        return isSameScreen
     }
 
     // --- semantic event helpers (Phase 3) ----------------------------------

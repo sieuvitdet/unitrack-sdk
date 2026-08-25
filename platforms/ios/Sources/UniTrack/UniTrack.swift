@@ -875,7 +875,7 @@ public final class UniTrack {
     }
 
     public static func setScreen(_ name: String) {
-        setScreen(name, layer: nil)
+        _ = setScreen(name, layer: nil)
     }
 
     /// Layer-tagged variant called by the auto-capture swizzler so core's
@@ -883,7 +883,12 @@ public final class UniTrack {
     /// same screen name within the dedup window. Public API stays the
     /// untagged overload above — apps that call `setScreen("Home")`
     /// directly behave exactly as before.
-    static func setScreen(_ name: String, layer: UniTrackLayer?, reentry: Bool = false) {
+    /// - Returns: `true` nếu đây KHÔNG phải boundary thật (cùng screen 2 lần
+    ///   liên tiếp) — caller dùng để bỏ luôn các event phụ thuộc boundary,
+    ///   vd screen_load_completed. Trả về thay vì để caller tự so tên: chỉ
+    ///   một nguồn sự thật cho "màn có đổi không".
+    @discardableResult
+    static func setScreen(_ name: String, layer: UniTrackLayer?, reentry: Bool = false) -> Bool {
         // Trace so a "screen_viewed/screen_exited not firing" bug is one log
         // line away from a diagnosis. The core dedupes by screen-name equality
         // (same name twice in a row = no boundary events), so the next line
@@ -935,7 +940,7 @@ public final class UniTrack {
             forEachProvider { $0.setScreen(name, previous: cameFrom) }
         }
 
-        guard let ctx = shared.context else { return }
+        guard let ctx = shared.context else { return isSameScreen }
         if let layer = layer {
             ut_set_screen_for_layer(ctx, name, ut_layer(rawValue: layer.rawValue))
         } else {
@@ -997,6 +1002,7 @@ public final class UniTrack {
         if !isSameScreen {
             dispatchToProviders(shared.screenStartEventName, startPayload)
         }
+        return isSameScreen
     }
 
     public static func flush() {

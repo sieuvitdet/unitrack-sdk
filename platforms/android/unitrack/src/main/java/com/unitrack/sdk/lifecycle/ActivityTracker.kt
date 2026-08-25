@@ -94,12 +94,17 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // Capture previous screen BEFORE setScreen overwrites lastScreen so
             // screen_load_completed can stamp previous_screen_name.
             val prev = UniTrack.previousScreenName()
-            UniTrack.setScreen(name)
+            // Dùng lại dup guard của setScreen: app dựng lại Activity/Fragment
+            // cho CÙNG màn đang mở (vd tab bị setControllers lại khi API về)
+            // không phải một lần vào màn mới — người dùng thấy một màn liên
+            // tục, không có screen_end ở giữa. Lần dựng sau đo thời gian thay
+            // view, không đo trải nghiệm của ai, nên bỏ.
+            val sameScreen = UniTrack.setScreenReportingDup(name)
 
             // Fire screen_load_completed với create → resume delta. createdAt
             // đã remove() ở trên nên onPause/onStop/onResume cycle thứ 2 không
             // double-fire.
-            if (loadMs != null) {
+            if (loadMs != null && !sameScreen) {
                 // is_cached heuristic: sub-100ms load = cache hit (view already
                 // decoded, no cold render). Above the threshold = fresh render.
                 val props = mutableMapOf<String, Any?>(
@@ -177,12 +182,13 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             afterSettle {
                 // Capture previous screen BEFORE setScreen overwrites lastScreen.
                 val prev = UniTrack.previousScreenName()
-                UniTrack.setScreen(name)
+                // Xem ghi chú dup guard ở nhánh Activity phía trên.
+                val sameScreen = UniTrack.setScreenReportingDup(name)
 
                 // Fire screen_load_completed with the create → resume delta. The
                 // event name + auto-fire mirror the iOS swizzler so the wire shape
                 // is the same on both platforms.
-                if (loadMs != null) {
+                if (loadMs != null && !sameScreen) {
                     val props = mutableMapOf<String, Any?>(
                         "screen"        to name,
                         "screen_name"   to name,
