@@ -76,8 +76,10 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
      // ViewControllerSwizzler viewDidLoad → viewDidAppear). Activity-based
      // screens cần load event đúng như Fragment để parity.
     private val activityCreatedAtMs = java.util.WeakHashMap<Activity, Long>()
-    /** Activity đã bắn load ít nhất một lần → onStart lần sau phải re-arm mốc. */
-    private val activityLoadReported = java.util.WeakHashMap<Activity, Boolean>()
+    /** Mốc onStart gần nhất — trần cho load_ms. onResume lấy mốc MUỘN hơn
+     *  giữa cái này và onCreate, nên Activity hiện lại (onCreate không chạy
+     *  lại) hoặc nằm chờ giữa onStart→onResume đều không cộng quãng chờ. */
+    private val activityStartedAtMs = java.util.WeakHashMap<Activity, Long>()
 
     override fun onActivityCreated(a: Activity, b: Bundle?) {
         activityCreatedAtMs[a] = android.os.SystemClock.elapsedRealtime()
@@ -87,10 +89,11 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         val name = resolveScreenName(activity)
         // load_ms chốt NGAY (thời điểm resume thật) nhưng chỉ gửi sau cửa sổ
         // settle — nếu đo trong callback sẽ cộng oan settleMs vào mọi màn.
-        val createdAt = activityCreatedAtMs.remove(activity)
-        val loadMs = createdAt?.let {
-            (android.os.SystemClock.elapsedRealtime() - it).toInt()
-        }
+        val anchor = maxOf(activityCreatedAtMs.remove(activity) ?: 0L,
+                           activityStartedAtMs[activity] ?: 0L)
+        val loadMs = if (anchor > 0L) {
+            (android.os.SystemClock.elapsedRealtime() - anchor).toInt()
+        } else null
 
         afterSettle {
             // Capture previous screen BEFORE setScreen overwrites lastScreen so
@@ -107,7 +110,6 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // đã remove() ở trên nên onPause/onStop/onResume cycle thứ 2 không
             // double-fire.
             if (loadMs != null && !sameScreen) {
-                activityLoadReported[activity] = true
                 // is_cached heuristic: sub-100ms load = cache hit (view already
                 // decoded, no cold render). Above the threshold = fresh render.
                 val props = mutableMapOf<String, Any?>(
@@ -145,15 +147,13 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
      *  Lần đầu KHÔNG đụng: onActivityCreated vừa đặt mốc, ghi đè sẽ nuốt mất
      *  chính phần dựng view cần đo. */
     override fun onActivityStarted(a: Activity) {
-        if (activityLoadReported.containsKey(a)) {
-            activityCreatedAtMs[a] = android.os.SystemClock.elapsedRealtime()
-        }
+        activityStartedAtMs[a] = android.os.SystemClock.elapsedRealtime()
     }
     override fun onActivityStopped(a: Activity) {}
     override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
     override fun onActivityDestroyed(a: Activity) {
         activityCreatedAtMs.remove(a)
-        activityLoadReported.remove(a)
+        activityStartedAtMs.remove(a)
     }
 
     private fun resolveScreenName(a: Activity): String {
@@ -169,9 +169,9 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     // onFragmentResumed (= "screen visible & interactive"). This mirrors iOS
     // ViewControllerSwizzler's viewDidLoad → viewDidAppear timing.
     private val createdAtMs = java.util.WeakHashMap<Fragment, Long>()
-    /** Fragment đã bắn load ít nhất một lần → onStart lần sau phải re-arm mốc.
-     *  Xem ghi chú ở onActivityStarted. */
-    private val fragmentLoadReported = java.util.WeakHashMap<Fragment, Boolean>()
+    /** Mốc onFragmentStarted gần nhất — trần cho load_ms.
+     *  Xem ghi chú ở activityStartedAtMs. */
+    private val startedAtMs = java.util.WeakHashMap<Fragment, Long>()
 
     private fun isNoiseFragmentName(name: String): Boolean =
         name.startsWith("Nav") || name == "ReportFragment" ||
@@ -186,12 +186,7 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
 
         override fun onFragmentStarted(fm: FragmentManager, f: Fragment) {
             if (isNoiseFragmentName(f.javaClass.simpleName)) return
-            // Re-arm mốc cho Fragment hiện LẠI (back-stack pop, tab đổi).
-            // onFragmentCreated không chạy lại nên mốc cũ đã bị remove ở lần
-            // trước → không re-arm thì lần này mất hẳn load_ms.
-            if (fragmentLoadReported.containsKey(f)) {
-                createdAtMs[f] = android.os.SystemClock.elapsedRealtime()
-            }
+            startedAtMs[f] = android.os.SystemClock.elapsedRealtime()
         }
 
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
@@ -200,10 +195,10 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // load_ms chốt NGAY, gửi sau cửa sổ settle (xem afterSettle).
             // Cleared here so a re-entry (back-stack pop) gets a fresh load_ms
             // next time onFragmentCreated runs.
-            val createdAt = createdAtMs.remove(f)
-            val loadMs = createdAt?.let {
-                (android.os.SystemClock.elapsedRealtime() - it).toInt()
-            }
+            val anchor = maxOf(createdAtMs.remove(f) ?: 0L, startedAtMs[f] ?: 0L)
+            val loadMs = if (anchor > 0L) {
+                (android.os.SystemClock.elapsedRealtime() - anchor).toInt()
+            } else null
 
             afterSettle {
                 // Capture previous screen BEFORE setScreen overwrites lastScreen.
@@ -215,7 +210,6 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
                 // event name + auto-fire mirror the iOS swizzler so the wire shape
                 // is the same on both platforms.
                 if (loadMs != null && !sameScreen) {
-                    fragmentLoadReported[f] = true
                     val props = mutableMapOf<String, Any?>(
                         "screen"        to name,
                         "screen_name"   to name,

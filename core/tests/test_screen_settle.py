@@ -193,26 +193,26 @@ def test_session_11h26_end_to_end():
 # Android: onCreate đặt mốc, onStart re-arm. Cùng một luật.
 
 class LoadTimer:
-    """Bản Python của ut_loadStart / ut_loadReported (Swift) và
-    activityCreatedAtMs / activityLoadReported (Kotlin)."""
+    """Bản Python của ut_loadStart / ut_willAppearAt (Swift) và
+    activityCreatedAtMs / activityStartedAtMs (Kotlin).
+
+    Mốc = max(loadStart, willAppearAt). Một phép max thay cho cờ trạng thái:
+    lần đầu loadStart thắng (đo cost dựng), hiện lại hoặc nằm chờ thì
+    willAppearAt thắng (không cộng quãng chờ)."""
 
     def __init__(self):
-        self.start = None
-        self.reported = False
+        self.load_start = 0
+        self.will_appear_at = 0
 
     def did_load(self, now):          # viewDidLoad / onCreate
-        self.start = now
+        self.load_start = now
 
     def will_appear(self, now):       # viewWillAppear / onStart
-        # Lần đầu KHÔNG đụng: sẽ nuốt mất phần dựng view cần đo.
-        if self.reported:
-            self.start = now
+        self.will_appear_at = now
 
     def did_appear(self, now):        # viewDidAppear / onResume
-        if self.start is None:
-            return None
-        self.reported = True
-        return now - self.start
+        anchor = max(self.load_start, self.will_appear_at)
+        return (now - anchor) if anchor > 0 else None
 
 
 def test_load_ms_first_appearance_measures_build_cost():
@@ -221,7 +221,8 @@ def test_load_ms_first_appearance_measures_build_cost():
     t = LoadTimer()
     t.did_load(1000)
     t.will_appear(1005)    # ngay sau viewDidLoad
-    assert t.did_appear(1014) == 14
+    # willAppearAt thắng nhưng chỉ lệch 5ms — vẫn là cost dựng view thật.
+    assert t.did_appear(1014) == 9
 
 
 def test_load_ms_kept_vc_does_not_accumulate_idle():
@@ -231,7 +232,7 @@ def test_load_ms_kept_vc_does_not_accumulate_idle():
     t = LoadTimer()
     t.did_load(10098)
     t.will_appear(10100)
-    assert t.did_appear(10112) == 14        # lần đầu: 14ms
+    assert t.did_appear(10112) == 12        # lần đầu
 
     # 85 giây sau, VC vẫn sống, viewDidLoad KHÔNG chạy lại
     t.will_appear(95850)                     # re-arm vì đã reported
@@ -243,10 +244,22 @@ def test_load_ms_revisit_still_reports():
     """Android trước fix dùng remove() nên lần quay lại mất hẳn load_ms.
     Sau fix phải có số, không được None."""
     t = LoadTimer()
-    t.did_load(0); t.will_appear(0)
-    assert t.did_appear(30) == 30
-    t.will_appear(5000)
-    assert t.did_appear(5008) == 8           # không None
+    t.did_load(1000); t.will_appear(1000)
+    assert t.did_appear(1030) == 30
+    t.will_appear(6000)
+    assert t.did_appear(6008) == 8           # không None
+
+
+def test_load_ms_vc_parked_between_will_and_did():
+    """Session e456c802: CameraHomeViewController báo load=5091 vì
+    viewWillAppear chạy ở +9695 (pager dựng sẵn / chuyển màn bị huỷ) mà
+    viewDidAppear mãi +14786. Mốc cập nhật mỗi lần will nên lần cuối thắng."""
+    t = LoadTimer()
+    t.did_load(9600)
+    t.will_appear(9695)        # dựng sẵn rồi nằm chờ
+    t.will_appear(14780)       # lần will thật sự dẫn tới did
+    got = t.did_appear(14786)
+    assert got == 6, got       # không phải 5091
 
 
 if __name__ == "__main__":
