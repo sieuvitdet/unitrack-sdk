@@ -1,9 +1,11 @@
 // ViewControllerSwizzler.swift
 //
 // Swizzles UIViewController lifecycle to auto-capture, with NO per-controller code:
-//   • viewDidLoad  → record a start timestamp (for load timing)
+//   • viewDidLoad   → record a start timestamp (for load timing)
+//   • viewWillAppear → re-arm that timestamp for a VC that is being shown
+//                      AGAIN (kept in memory, so viewDidLoad never re-runs)
 //   • viewDidAppear → emit `screen_view` (class name / title) AND
-//                     `screen_load_completed` (viewDidLoad → first appearance ms)
+//                     `screen_load_completed` (start → appearance ms)
 // Installed once at SDK init.
 
 import UIKit
@@ -23,6 +25,9 @@ enum ViewControllerSwizzler {
         swizzle(cls: UIViewController.self,
                 from: #selector(UIViewController.viewDidLoad),
                 to:   #selector(UIViewController.ut_viewDidLoad))
+        swizzle(cls: UIViewController.self,
+                from: #selector(UIViewController.viewWillAppear(_:)),
+                to:   #selector(UIViewController.ut_viewWillAppear(_:)))
         swizzle(cls: UIViewController.self,
                 from: #selector(UIViewController.viewDidAppear(_:)),
                 to:   #selector(UIViewController.ut_viewDidAppear(_:)))
@@ -117,6 +122,20 @@ private extension UIViewController {
         if !ut_isSkippedContainer { ut_loadStart = CACurrentMediaTime() }
     }
 
+    @objc func ut_viewWillAppear(_ animated: Bool) {
+        self.ut_viewWillAppear(animated)      // original (swapped)
+        guard !ut_isSkippedContainer else { return }
+        // Mốc load cho lần hiện LẠI. VC được giữ trong bộ nhớ (đẩy vào
+        // back-stack, tab bị ẩn) không chạy lại viewDidLoad, nên nếu vẫn trừ
+        // từ mốc cũ thì load_ms cộng luôn quãng VC nằm chờ: session 6fda62c3
+        // có CameraHomeViewController báo load=85764 vì người dùng rời đi 85
+        // giây rồi quay lại. Con số đó không đo cost dựng gì cả.
+        //
+        // Lần đầu KHÔNG đụng tới: viewWillAppear chạy ngay sau viewDidLoad
+        // nên ghi đè sẽ nuốt mất chính phần dựng view mà event này cần đo.
+        if ut_loadReported { ut_loadStart = CACurrentMediaTime() }
+    }
+
     @objc func ut_viewDidAppear(_ animated: Bool) {
         self.ut_viewDidAppear(animated)       // original (swapped)
         // Probe Flutter/RN BEFORE the noise-skip list so a Flutter host VC
@@ -139,7 +158,11 @@ private extension UIViewController {
         let mySeq = ViewControllerSwizzler.appearSeq
         // load_ms chốt tại đây (thời điểm appear thật), nhưng chỉ GỬI sau khi
         // qua cửa sổ — nếu đo trong closure sẽ cộng oan 50ms vào mọi màn.
-        let loadMs: Int? = (!ut_loadReported && ut_loadStart > 0)
+        // Không gate bằng ut_loadReported nữa: VC được giữ lại rồi hiện lại
+        // là một lần vào màn THẬT (có screen_end trước đó) nên đáng được đo,
+        // với mốc đã reset ở viewWillAppear. Việc chống trùng do dup guard
+        // của setScreen đảm nhiệm — xem `sameScreen` bên dưới.
+        let loadMs: Int? = ut_loadStart > 0
             ? Int((CACurrentMediaTime() - ut_loadStart) * 1000)
             : nil
 
@@ -182,7 +205,9 @@ private extension UIViewController {
                 UniTrack.log("[UniTrack] screen_load_completed SKIPPED — VC dựng lại cho màn đang mở screen=%@", screen)
                 return
             }
-            guard let self = self, let ms = loadMs, !self.ut_loadReported else { return }
+            guard let self = self, let ms = loadMs else { return }
+            // Đánh dấu VC đã hiện ít nhất một lần → viewWillAppear lần sau
+            // biết phải reset mốc thay vì giữ mốc viewDidLoad cũ.
             self.ut_loadReported = true
             // is_cached heuristic: sub-100ms load = cache hit (view already
             // decoded, no cold render). Above the threshold = fresh render.

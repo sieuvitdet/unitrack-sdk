@@ -76,6 +76,8 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
      // ViewControllerSwizzler viewDidLoad → viewDidAppear). Activity-based
      // screens cần load event đúng như Fragment để parity.
     private val activityCreatedAtMs = java.util.WeakHashMap<Activity, Long>()
+    /** Activity đã bắn load ít nhất một lần → onStart lần sau phải re-arm mốc. */
+    private val activityLoadReported = java.util.WeakHashMap<Activity, Boolean>()
 
     override fun onActivityCreated(a: Activity, b: Bundle?) {
         activityCreatedAtMs[a] = android.os.SystemClock.elapsedRealtime()
@@ -105,6 +107,7 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // đã remove() ở trên nên onPause/onStop/onResume cycle thứ 2 không
             // double-fire.
             if (loadMs != null && !sameScreen) {
+                activityLoadReported[activity] = true
                 // is_cached heuristic: sub-100ms load = cache hit (view already
                 // decoded, no cold render). Above the threshold = fresh render.
                 val props = mutableMapOf<String, Any?>(
@@ -135,12 +138,22 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    // No-ops for the rest.
-    override fun onActivityStarted(a: Activity) {}
+    /** Re-arm mốc load cho Activity hiện LẠI. onActivityCreated chỉ chạy một
+     *  lần trong đời Activity, nên nếu không đặt lại mốc ở đây thì lần quay
+     *  lại màn hoặc không có load_ms (mốc đã bị remove), hoặc cộng luôn quãng
+     *  Activity nằm chờ. onStart là mốc tương đương iOS viewWillAppear.
+     *  Lần đầu KHÔNG đụng: onActivityCreated vừa đặt mốc, ghi đè sẽ nuốt mất
+     *  chính phần dựng view cần đo. */
+    override fun onActivityStarted(a: Activity) {
+        if (activityLoadReported.containsKey(a)) {
+            activityCreatedAtMs[a] = android.os.SystemClock.elapsedRealtime()
+        }
+    }
     override fun onActivityStopped(a: Activity) {}
     override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
     override fun onActivityDestroyed(a: Activity) {
         activityCreatedAtMs.remove(a)
+        activityLoadReported.remove(a)
     }
 
     private fun resolveScreenName(a: Activity): String {
@@ -156,6 +169,9 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
     // onFragmentResumed (= "screen visible & interactive"). This mirrors iOS
     // ViewControllerSwizzler's viewDidLoad → viewDidAppear timing.
     private val createdAtMs = java.util.WeakHashMap<Fragment, Long>()
+    /** Fragment đã bắn load ít nhất một lần → onStart lần sau phải re-arm mốc.
+     *  Xem ghi chú ở onActivityStarted. */
+    private val fragmentLoadReported = java.util.WeakHashMap<Fragment, Boolean>()
 
     private fun isNoiseFragmentName(name: String): Boolean =
         name.startsWith("Nav") || name == "ReportFragment" ||
@@ -166,6 +182,16 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         override fun onFragmentCreated(fm: FragmentManager, f: Fragment, savedInstanceState: Bundle?) {
             if (isNoiseFragmentName(f.javaClass.simpleName)) return
             createdAtMs[f] = android.os.SystemClock.elapsedRealtime()
+        }
+
+        override fun onFragmentStarted(fm: FragmentManager, f: Fragment) {
+            if (isNoiseFragmentName(f.javaClass.simpleName)) return
+            // Re-arm mốc cho Fragment hiện LẠI (back-stack pop, tab đổi).
+            // onFragmentCreated không chạy lại nên mốc cũ đã bị remove ở lần
+            // trước → không re-arm thì lần này mất hẳn load_ms.
+            if (fragmentLoadReported.containsKey(f)) {
+                createdAtMs[f] = android.os.SystemClock.elapsedRealtime()
+            }
         }
 
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
@@ -189,6 +215,7 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
                 // event name + auto-fire mirror the iOS swizzler so the wire shape
                 // is the same on both platforms.
                 if (loadMs != null && !sameScreen) {
+                    fragmentLoadReported[f] = true
                     val props = mutableMapOf<String, Any?>(
                         "screen"        to name,
                         "screen_name"   to name,

@@ -188,6 +188,67 @@ def test_session_11h26_end_to_end():
                    "CameraHomeViewController"], got
 
 
+# ── load_ms: mốc đo cho VC được giữ lại ────────────────────────────────────
+# iOS: viewDidLoad đặt mốc, viewWillAppear RE-ARM nếu VC đã từng hiện.
+# Android: onCreate đặt mốc, onStart re-arm. Cùng một luật.
+
+class LoadTimer:
+    """Bản Python của ut_loadStart / ut_loadReported (Swift) và
+    activityCreatedAtMs / activityLoadReported (Kotlin)."""
+
+    def __init__(self):
+        self.start = None
+        self.reported = False
+
+    def did_load(self, now):          # viewDidLoad / onCreate
+        self.start = now
+
+    def will_appear(self, now):       # viewWillAppear / onStart
+        # Lần đầu KHÔNG đụng: sẽ nuốt mất phần dựng view cần đo.
+        if self.reported:
+            self.start = now
+
+    def did_appear(self, now):        # viewDidAppear / onResume
+        if self.start is None:
+            return None
+        self.reported = True
+        return now - self.start
+
+
+def test_load_ms_first_appearance_measures_build_cost():
+    """Lần đầu: viewWillAppear không được ghi đè mốc, nếu không load_ms = 0
+    và ta mất chính con số cần đo."""
+    t = LoadTimer()
+    t.did_load(1000)
+    t.will_appear(1005)    # ngay sau viewDidLoad
+    assert t.did_appear(1014) == 14
+
+
+def test_load_ms_kept_vc_does_not_accumulate_idle():
+    """Bug thật của session 6fda62c3: CameraHomeViewController dựng ở +10098ms,
+    người dùng rời đi xem live 85 giây rồi quay lại → báo load=85764.
+    Sau fix, mốc được re-arm ở viewWillAppear nên chỉ đo lần hiện lại."""
+    t = LoadTimer()
+    t.did_load(10098)
+    t.will_appear(10100)
+    assert t.did_appear(10112) == 14        # lần đầu: 14ms
+
+    # 85 giây sau, VC vẫn sống, viewDidLoad KHÔNG chạy lại
+    t.will_appear(95850)                     # re-arm vì đã reported
+    got = t.did_appear(95862)
+    assert got == 12, got                    # không phải 85764
+
+
+def test_load_ms_revisit_still_reports():
+    """Android trước fix dùng remove() nên lần quay lại mất hẳn load_ms.
+    Sau fix phải có số, không được None."""
+    t = LoadTimer()
+    t.did_load(0); t.will_appear(0)
+    assert t.did_appear(30) == 30
+    t.will_appear(5000)
+    assert t.did_appear(5008) == 8           # không None
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
