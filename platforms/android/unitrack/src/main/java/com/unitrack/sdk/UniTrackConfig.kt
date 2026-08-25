@@ -60,4 +60,9 @@ data class UniTrackConfig(
      *  the iOS swizzler's `screen_load_completed`. Renameable via portal
      *  `sdk_config.screen_load_event`. */
     val screenLoadEvent: String = "screen_load_completed",
+    /** Cửa sổ chờ (ms) lọc container trung gian khỏi screen_view. Activity /
+     *  Fragment bị cái khác resume đè lên trong khoảng này không được coi là
+     *  màn thật. Override qua portal `sdk_config.screen_settle_ms`.
+     *  0 = tắt lọc. */
+    val screenSettleMs: Int = 50,
 )

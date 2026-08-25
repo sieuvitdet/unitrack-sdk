@@ -64,6 +64,9 @@ public struct UniTrackRemoteConfig: Codable {
         public var screenStartEvent: String?
         public var screenEndEvent:   String?
         public var screenLoadEvent:  String?
+        /// Cửa sổ chờ (ms) để lọc container trung gian khỏi screen_view.
+        /// Xem `ViewControllerSwizzler.settleWindow`. 0 = tắt lọc.
+        public var screenSettleMs:   Int?
         /// Per-project namespace salt for session ids. See
         /// `UniTrack.Config.sessionIdSalt`. Empty/absent = bare UUIDs.
         public var sessionIdSalt: String?
@@ -80,6 +83,7 @@ public struct UniTrackRemoteConfig: Codable {
             case screenStartEvent = "screen_start_event"
             case screenEndEvent   = "screen_end_event"
             case screenLoadEvent  = "screen_load_event"
+            case screenSettleMs   = "screen_settle_ms"
             case sessionIdSalt    = "session_id_salt"
             case customValues = "custom_values"
         }

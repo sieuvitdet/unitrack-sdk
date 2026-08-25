@@ -358,7 +358,8 @@ object UniTrack {
     @JvmOverloads
     fun applyHotConfig(screenStartEvent: String? = null,
                        screenEndEvent:   String? = null,
-                       screenLoadEvent:  String? = null) {
+                       screenLoadEvent:  String? = null,
+                       screenSettleMs:   Int?    = null) {
         screenStartEvent?.let {
             screenStartEventName = it.ifEmpty { "screen_viewed" }
         }
@@ -367,6 +368,9 @@ object UniTrack {
         }
         screenLoadEvent?.let {
             screenLoadEventName = it.ifEmpty { "screen_load_completed" }
+        }
+        screenSettleMs?.let {
+            com.unitrack.sdk.lifecycle.ActivityTracker.settleMs = maxOf(0, it).toLong()
         }
         android.util.Log.i("UniTrack",
             "hot-config screen events → start=$screenStartEventName end=$screenEndEventName load=$screenLoadEventName")
@@ -521,6 +525,8 @@ object UniTrack {
         if (config.screenLoadEvent.isNotEmpty()) {
             screenLoadEventName = config.screenLoadEvent
         }
+        com.unitrack.sdk.lifecycle.ActivityTracker.settleMs =
+            maxOf(0, config.screenSettleMs).toLong()
         // Cache wire-event names for the screen-boundary fan-out done in
         // setScreen() so providers receive screen_viewed / screen_exited
         // under whatever taxonomy the portal set — matching what the core

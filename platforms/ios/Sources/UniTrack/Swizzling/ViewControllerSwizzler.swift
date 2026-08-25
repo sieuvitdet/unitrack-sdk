@@ -10,6 +10,15 @@ import UIKit
 import ObjectiveC.runtime
 
 enum ViewControllerSwizzler {
+    /// Cửa sổ chờ trước khi chốt một VC là "màn thật". VC bị VC khác appear
+    /// đè lên trong khoảng này được coi là container trung gian và bị bỏ.
+    /// Chỉnh được từ portal `sdk_config.screen_settle_ms` (0 = tắt lọc).
+    static var settleWindow: TimeInterval = 0.05
+    /// Bộ đếm appear toàn cục. Closure so seq của mình với giá trị hiện tại
+    /// để biết có VC nào appear sau mình không. Chỉ chạm trên main thread
+    /// (viewDidAppear + main-queue closure) nên không cần khoá.
+    static var appearSeq: UInt64 = 0
+
     static let installed: Void = {
         swizzle(cls: UIViewController.self,
                 from: #selector(UIViewController.viewDidLoad),
@@ -117,10 +126,29 @@ private extension UIViewController {
         if ut_isSkippedContainer { return }
 
         let screen = ut_screenName
-        // Manual-priority arbitration cho screen: nếu DEV đã gọi setScreen
-        // hoặc track("screen_view", ...) trong window vừa rồi, swizzler giữ
-        // im lặng. Defer 50ms để DEV's viewDidAppear handler có cơ hội fire.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        // Settle-window arbitration. VC nào bị một VC khác appear đè lên trong
+        // cửa sổ này là container trung gian (tab bar host, pager, nav wrapper)
+        // — nó chưa từng hiện ra cho người dùng thấy, nên không bắn gì cả.
+        // Phân biệt bằng HÀNH VI thay vì blocklist tên class: SDK dùng chung
+        // cho nhiều app, không nên biết tên VC của app nào.
+        //
+        // Cửa sổ này vốn đã tồn tại cho manual-priority arbitration (nhường
+        // DEV's viewDidAppear handler gọi setScreen trước). Giờ nó gánh thêm
+        // việc lọc container — không thêm timer mới.
+        ViewControllerSwizzler.appearSeq &+= 1
+        let mySeq = ViewControllerSwizzler.appearSeq
+        // load_ms chốt tại đây (thời điểm appear thật), nhưng chỉ GỬI sau khi
+        // qua cửa sổ — nếu đo trong closure sẽ cộng oan 50ms vào mọi màn.
+        let loadMs: Int? = (!ut_loadReported && ut_loadStart > 0)
+            ? Int((CACurrentMediaTime() - ut_loadStart) * 1000)
+            : nil
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + ViewControllerSwizzler.settleWindow) { [weak self] in
+            // Có VC khác appear sau mình → mình chỉ là container trung gian.
+            guard ViewControllerSwizzler.appearSeq == mySeq else {
+                UniTrack.log("[UniTrack] auto screen_view SKIPPED — container superseded within settle window screen=%@", screen)
+                return
+            }
             if ManualTrackSignal.shouldSkip(.screen) {
                 UniTrack.log("[UniTrack] auto screen_view SUPPRESSED — manual signal in window screen=%@", screen)
                 return
@@ -130,23 +158,23 @@ private extension UIViewController {
             // to the legacy untagged path on contexts where the C symbol isn't
             // present (vd version skew with an older core).
             UniTrack.setScreen(screen, layer: .iOSNative)
-        }
 
-        // Load time: viewDidLoad → first appearance. Reported once per VC.
-        // Event name resolves from UniTrack.screenLoadEventName (set during
-        // _initialize from config.screenLoadEvent, in turn from portal
-        // `sdk_config.screen_load_event`). Default keeps "screen_load_completed".
-        if !ut_loadReported, ut_loadStart > 0 {
-            ut_loadReported = true
-            let ms = Int((CACurrentMediaTime() - ut_loadStart) * 1000)
+            // Load time: viewDidLoad → first appearance. Reported once per VC.
+            // Phải bắn SAU setScreen trong cùng closure: Snowplow gắn entity
+            // `screen` theo ScreenView gần nhất, nên nếu bắn sớm hơn thì
+            // screen_name trong payload lệch một nhịp so với entity.
+            // Event name resolves from UniTrack.screenLoadEventName (set during
+            // _initialize from config.screenLoadEvent, in turn from portal
+            // `sdk_config.screen_load_event`). Default keeps "screen_load_completed".
+            guard let self = self, let ms = loadMs, !self.ut_loadReported else { return }
+            self.ut_loadReported = true
             // is_cached heuristic: sub-100ms load = cache hit (view already
             // decoded, no cold render). Above the threshold = fresh render.
-            let isCached = ms < 100
             var props: [String: Any] = [
                 "screen":        screen,
                 "screen_name":   screen,
                 "load_time_ms":  String(ms),
-                "is_cached":     isCached ? "true" : "false",
+                "is_cached":     ms < 100 ? "true" : "false",
             ]
             if let prev = UniTrack.previousScreenName(), !prev.isEmpty {
                 props["previous_screen_name"] = prev

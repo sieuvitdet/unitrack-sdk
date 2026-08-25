@@ -71,6 +71,10 @@ public final class UniTrack {
         /// Default `screen_load_completed`; override via portal
         /// `sdk_config.screen_load_event`.
         public var screenLoadEvent:  String     = "screen_load_completed"
+        /// Cửa sổ chờ (ms) lọc container trung gian khỏi screen_view. VC bị
+        /// VC khác đè lên trong khoảng này không được coi là màn thật.
+        /// Override qua portal `sdk_config.screen_settle_ms`. 0 = tắt lọc.
+        public var screenSettleMs:   Int        = 50
 
         public init() {}
     }
@@ -576,7 +580,8 @@ public final class UniTrack {
     /// "screen_load_completed").
     public static func applyHotConfig(screenStartEvent: String? = nil,
                                       screenEndEvent:   String? = nil,
-                                      screenLoadEvent:  String? = nil) {
+                                      screenLoadEvent:  String? = nil,
+                                      screenSettleMs:   Int?    = nil) {
         if let v = screenStartEvent {
             shared.screenStartEventName = v.isEmpty ? "screen_viewed" : v
         }
@@ -585,6 +590,9 @@ public final class UniTrack {
         }
         if let v = screenLoadEvent {
             UniTrack.screenLoadEventName = v.isEmpty ? "screen_load_completed" : v
+        }
+        if let v = screenSettleMs {
+            ViewControllerSwizzler.settleWindow = Double(max(0, v)) / 1000.0
         }
         UniTrack.log("[UniTrack] hot-config screen events → start=%@ end=%@ load=%@",
                      shared.screenStartEventName,
@@ -1192,6 +1200,7 @@ public final class UniTrack {
         if !config.screenLoadEvent.isEmpty {
             UniTrack.screenLoadEventName = config.screenLoadEvent
         }
+        ViewControllerSwizzler.settleWindow = Double(max(0, config.screenSettleMs)) / 1000.0
         // Cache wire-event names for the screen-boundary fan-out done in
         // setScreen() so the Snowplow / Firebase providers see screen_viewed /
         // screen_exited under whatever taxonomy the portal set, matching what

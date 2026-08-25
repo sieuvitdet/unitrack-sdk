@@ -14,6 +14,29 @@ import com.unitrack.sdk.UniTrack
  */
 internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
 
+    /** Cửa sổ chờ (ms) trước khi chốt một màn là "màn thật". Activity/Fragment
+     *  bị cái khác resume đè lên trong khoảng này là container trung gian
+     *  (tab host, pager, nav wrapper) — chưa từng hiện cho người dùng thấy nên
+     *  không bắn gì. Phân biệt bằng HÀNH VI thay vì blocklist tên class: SDK
+     *  dùng chung cho nhiều app, không nên biết tên màn của app nào.
+     *  Đổi qua portal `sdk_config.screen_settle_ms`. 0 = tắt lọc. */
+    @JvmStatic
+    var settleMs: Long = 50L
+
+    /** Bộ đếm resume dùng CHUNG cho Activity lẫn Fragment — chúng đè lên nhau
+     *  trong cùng một luồng dựng UI nên phải đếm chung mới lọc đúng.
+     *  Chỉ chạm trên main thread (lifecycle callback + Handler main). */
+    private var resumeSeq: Long = 0L
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Hoãn `emit` qua cửa sổ settle; huỷ nếu có màn khác resume sau. */
+    private fun afterSettle(emit: () -> Unit) {
+        resumeSeq++
+        val mySeq = resumeSeq
+        if (settleMs <= 0L) { emit(); return }
+        mainHandler.postDelayed({ if (resumeSeq == mySeq) emit() }, settleMs)
+    }
+
     fun install(app: Application) {
         app.unregisterActivityLifecycleCallbacks(this) // idempotent
         app.registerActivityLifecycleCallbacks(this)
@@ -60,26 +83,34 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         val name = resolveScreenName(activity)
-        // Capture previous screen BEFORE setScreen overwrites lastScreen so
-        // screen_load_completed can stamp previous_screen_name.
-        val prev = UniTrack.previousScreenName()
-        UniTrack.setScreen(name)
-
-        // Fire screen_load_completed với create → resume delta. Cleared sau
-        // khi fire để onPause/onStop/onResume cycle thứ 2 không double-fire.
+        // load_ms chốt NGAY (thời điểm resume thật) nhưng chỉ gửi sau cửa sổ
+        // settle — nếu đo trong callback sẽ cộng oan settleMs vào mọi màn.
         val createdAt = activityCreatedAtMs.remove(activity)
-        if (createdAt != null) {
-            val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
-            // is_cached heuristic: sub-100ms load = cache hit (view already
-            // decoded, no cold render). Above the threshold = fresh render.
-            val props = mutableMapOf<String, Any?>(
-                "screen"        to name,
-                "screen_name"   to name,
-                "load_time_ms"  to loadMs.toString(),
-                "is_cached"     to if (loadMs < 100) "true" else "false",
-            )
-            if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
-            UniTrack.track(UniTrack.screenLoadEventName, props)
+        val loadMs = createdAt?.let {
+            (android.os.SystemClock.elapsedRealtime() - it).toInt()
+        }
+
+        afterSettle {
+            // Capture previous screen BEFORE setScreen overwrites lastScreen so
+            // screen_load_completed can stamp previous_screen_name.
+            val prev = UniTrack.previousScreenName()
+            UniTrack.setScreen(name)
+
+            // Fire screen_load_completed với create → resume delta. createdAt
+            // đã remove() ở trên nên onPause/onStop/onResume cycle thứ 2 không
+            // double-fire.
+            if (loadMs != null) {
+                // is_cached heuristic: sub-100ms load = cache hit (view already
+                // decoded, no cold render). Above the threshold = fresh render.
+                val props = mutableMapOf<String, Any?>(
+                    "screen"        to name,
+                    "screen_name"   to name,
+                    "load_time_ms"  to loadMs.toString(),
+                    "is_cached"     to if (loadMs < 100) "true" else "false",
+                )
+                if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
+                UniTrack.track(UniTrack.screenLoadEventName, props)
+            }
         }
 
         if (activity is FragmentActivity) {
@@ -135,25 +166,33 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             val name = f.javaClass.simpleName
             if (isNoiseFragmentName(name)) return
-            // Capture previous screen BEFORE setScreen overwrites lastScreen.
-            val prev = UniTrack.previousScreenName()
-            UniTrack.setScreen(name)
+            // load_ms chốt NGAY, gửi sau cửa sổ settle (xem afterSettle).
+            // Cleared here so a re-entry (back-stack pop) gets a fresh load_ms
+            // next time onFragmentCreated runs.
+            val createdAt = createdAtMs.remove(f)
+            val loadMs = createdAt?.let {
+                (android.os.SystemClock.elapsedRealtime() - it).toInt()
+            }
 
-            // Fire screen_load_completed with the create → resume delta. The
-            // event name + auto-fire mirror the iOS swizzler so the wire shape
-            // is the same on both platforms. Cleared after fire so a re-entry
-            // (back-stack pop) gets a fresh load_ms next time onFragmentCreated
-            // runs.
-            val createdAt = createdAtMs.remove(f) ?: return
-            val loadMs = (android.os.SystemClock.elapsedRealtime() - createdAt).toInt()
-            val props = mutableMapOf<String, Any?>(
-                "screen"        to name,
-                "screen_name"   to name,
-                "load_time_ms"  to loadMs.toString(),
-                "is_cached"     to if (loadMs < 100) "true" else "false",
-            )
-            if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
-            UniTrack.track(UniTrack.screenLoadEventName, props)
+            afterSettle {
+                // Capture previous screen BEFORE setScreen overwrites lastScreen.
+                val prev = UniTrack.previousScreenName()
+                UniTrack.setScreen(name)
+
+                // Fire screen_load_completed with the create → resume delta. The
+                // event name + auto-fire mirror the iOS swizzler so the wire shape
+                // is the same on both platforms.
+                if (loadMs != null) {
+                    val props = mutableMapOf<String, Any?>(
+                        "screen"        to name,
+                        "screen_name"   to name,
+                        "load_time_ms"  to loadMs.toString(),
+                        "is_cached"     to if (loadMs < 100) "true" else "false",
+                    )
+                    if (!prev.isNullOrEmpty()) props["previous_screen_name"] = prev
+                    UniTrack.track(UniTrack.screenLoadEventName, props)
+                }
+            }
         }
     }
 }
