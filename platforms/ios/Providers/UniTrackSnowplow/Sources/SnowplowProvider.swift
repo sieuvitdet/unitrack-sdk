@@ -255,8 +255,14 @@ public final class SnowplowProvider: AnalyticsProvider {
         // Only registered in hybrid mode: with hybrid off the builtin screen
         // events are not part of the contract and stamping them would add
         // entities to events nobody consumes.
+        //
+        // Cũng đòi screenEngagementAutotracking: cờ đó là thứ gắn/gỡ
+        // ScreenSummaryStateMachine (Tracker.swift:159-169), tức là thứ duy
+        // nhất sinh ra builtin screen_end. Tắt cờ mà vẫn đăng ký generator thì
+        // nó không bao giờ chạy — giữ lại chỉ làm người đọc sau tưởng builtin
+        // screen_end còn tồn tại.
         var configurations: [ConfigurationProtocol] = [trackerConfig, emitterConfig, plugin]
-        if hybridScreenView {
+        if hybridScreenView, options.screenEngagementAutotracking {
             // Resolve core_action's URI once, here, where the portal entities
             // map is in scope. Nil when the operator hasn't registered
             // core_action — the generator then emits nothing rather than
@@ -448,8 +454,19 @@ public final class SnowplowProvider: AnalyticsProvider {
         //
         // screen_load_completed stays on the custom path on purpose: Snowplow
         // has no builtin equivalent and load_time_ms only UniTrack can measure.
-        if hybridScreenView,
-           name == "screen_viewed" || name == "screen_view" || name == "screen_exited" {
+        if hybridScreenView, name == "screen_viewed" || name == "screen_view" {
+            return
+        }
+        // screen_exited chỉ skip khi builtin screen_end THẬT SỰ thay nó, tức
+        // khi ScreenSummaryStateMachine còn được gắn. Cờ đó là
+        // screenEngagementAutotracking (Tracker.swift:159-169) — tắt nó là gỡ
+        // hẳn state machine, không còn builtin screen_end nào nữa.
+        //
+        // Skip vô điều kiện như trước = mất trắng: builtin không bắn, custom bị
+        // chặn, không gì tới collector. Đây là lỗi đã dính khi tắt cờ mà quên
+        // nới guard.
+        if hybridScreenView, options.screenEngagementAutotracking,
+           name == "screen_exited" {
             return
         }
         // Auto-capture / screen-lifecycle events get routed to the right kind
