@@ -73,6 +73,16 @@ const ENTITY_BUILDERS = {
   }),
 };
 
+// Chuẩn hoá tên OS về 'ios' | 'android'. Nguồn ghi hoa/thường khác nhau:
+// application_context ghi os:'iOS'/'Android', mobile_context ghi osType:'ios'.
+// Trả null nếu không nhận ra → caller tự fallback về giá trị gốc.
+function normOs(os) {
+  const s = String(os || '').toLowerCase();
+  if (s.includes('ios') || s.includes('ipados')) return 'ios';
+  if (s.includes('android')) return 'android';
+  return null;
+}
+
 function dropEmpty(o) {
   const out = {};
   for (const [k, v] of Object.entries(o)) {
@@ -146,10 +156,71 @@ function spEventToPortal(sp) {
   if (ctxList.length) props._contexts = ctxList;
 
   // Find a user-context entity to lift user_id / screen if present.
-  let screen = null;
+  // Also extract session_id from client_session context — Snowplow builtin
+  // ScreenView (com.snowplowanalytics.mobile/screen_view/1-0-0) không stamp
+  // session_id vào top-level cũng không vào data, chỉ nằm trong entity
+  // client_session/1-0-x. Không parse ở đây → session_id=null → portal
+  // không group được builtin screen_view vào session.
+  // ƯU TIÊN screen_name trong DATA payload — SDK custom vendor
+  // (screen_load_completed, screen_exited) stamp screen_name = màn HIỆN TẠI.
+  // Snowplow context `screen` entity ATTACH auto-globally có thể ghi màn TRƯỚC
+  // (Snowplow SDK track previousName trong context). Fallback về context nếu
+  // event không có screen_name (VD builtin ScreenView chỉ có `name` trong data).
+  let screen = (sdData && typeof sdData === 'object')
+    ? (sdData.screen_name || sdData.screen || sdData.name || null)
+    : null;
+  let clientSessionId = null;
+  let coreActionSessionId = null;   // UniTrack session_id — thắng clientSessionId
+  let clientUserId = null;
+  // app_version + device lifted from application_context (custom vendor) hoặc
+  // mobile_context (Snowplow builtin). Giá trị luôn có trong _contexts nhưng
+  // trước đây không lift ra cột → filter/group theo version trên portal vô dụng.
+  let appVersion = null;
+  let deviceBlob = null;
   for (const c of ctxList) {
     if (c && c.data) {
-      if (c.data.name && /screen/i.test(c.schema || '')) screen = c.data.name;
+      if (!screen && c.data.name && /screen/i.test(c.schema || '')) screen = c.data.name;
+      if (/client_session/i.test(c.schema || '')) {
+        // Snowplow tự quản session riêng của nó — KHÁC session_id của UniTrack.
+        // Chỉ dùng làm fallback cuối, xem coreActionSessionId bên dưới.
+        clientSessionId = clientSessionId || c.data.sessionId || c.data.session_id || null;
+        clientUserId    = clientUserId    || c.data.userId    || c.data.user_id    || null;
+      }
+      // core_action = NGUỒN CHUẨN cho session_id (UniTrack stamp vào đây).
+      // Phải ưu tiên hơn client_session: với event builtin (screen_end do
+      // Snowplow tự fire), entity client_session đứng TRƯỚC core_action trong
+      // mảng _contexts, nên kiểu `x = x || ...` cũ khiến Snowplow sessionId
+      // thắng → 1 phiên thật bị tách làm 2 session_id trên portal
+      // (VD 7785b4db bị tách ra 8ed47393 cho 76 event screen_end).
+      if (/core_action/i.test(c.schema || '') && c.data.session_id) {
+        coreActionSessionId = coreActionSessionId || c.data.session_id;
+      }
+      // application_context (vn.fpt.ftel.snowplow) — nguồn đầy đủ nhất, LUÔN
+      // ghi đè mobile_context vì thứ tự entity trong _contexts không đảm bảo.
+      if (/application_context/i.test(c.schema || '')) {
+        appVersion = appVersion || c.data.app_version || null;
+        deviceBlob = {
+          model:        c.data.model || c.data.device_model || null,
+          device_name:  c.data.device_name || null,
+          manufacturer: c.data.manufacturer || null,
+          os:           c.data.os || null,
+          os_version:   c.data.os_version || null,
+          app_build:    c.data.app_build || c.data.versioncode || null,
+        };
+      }
+      // mobile_context (Snowplow builtin) — fallback khi event không kèm
+      // application_context. Không có app_version nên chỉ điền device.
+      if (/mobile_context/i.test(c.schema || '') && !deviceBlob) {
+        // ponytail: chỉ fallback khi application_context vắng mặt hẳn.
+        deviceBlob = {
+          model:        c.data.deviceModel || null,
+          device_name:  null,
+          manufacturer: c.data.deviceManufacturer || null,
+          os:           c.data.osType || null,
+          os_version:   c.data.osVersion || null,
+          app_build:    null,
+        };
+      }
     }
   }
 
@@ -157,13 +228,16 @@ function spEventToPortal(sp) {
     event_id:   sp.eid || undefined,           // tp2 event UUID (dedup key)
     event_name: eventName,
     timestamp:  Number(sp.dtm || sp.ttm || Date.now()),
-    session_id: sp.sid || null,                // session id from session context not here; sid rare
-    user_id:    sp.uid || null,
+    session_id: sp.sid || coreActionSessionId || clientSessionId || null,
+    user_id:    sp.uid || clientUserId || null,
     screen:     screen,
-    platform:   sp.p || null,                  // 'mob' | 'web' | ...
-    app_version: null,
+    // sp.p chỉ là 'mob'/'web' theo Snowplow protocol — không phân biệt được
+    // iOS/Android. deviceBlob.os đã lift sẵn từ application_context (os:'iOS')
+    // hoặc mobile_context (osType:'ios'), nên ưu tiên nó rồi mới fallback sp.p.
+    platform:   normOs(deviceBlob?.os) || sp.p || null,
+    app_version: appVersion,
     properties: props,
-    // device: left null — Snowplow device context lives in _contexts.
+    device: deviceBlob,
   };
 }
 

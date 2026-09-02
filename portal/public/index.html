@@ -257,6 +257,17 @@ const fmtAgo=(ms)=>{if(!ms)return'—';const s=(Date.now()-ms)/1000;if(s<60)retu
 const fmtTime=(ms)=>new Date(ms).toLocaleString('vi-VN',{hour12:false});
 // Short, readable session id for tracing one session across tabs.
 const shortSid=(s)=>s?('#'+String(s).slice(0,8)):'—';
+// Platform hiển thị: Snowplow gửi p='mob' cho mọi mobile nên không phân biệt
+// được iOS/Android. Backend đã resolve os thật từ application_context, ở đây
+// chỉ gắn icon cho dễ đọc. Không nhận ra → giữ NGUYÊN giá trị gốc (mob/web/…).
+const platLabel=(p)=>{
+  const s=String(p||'').toLowerCase();
+  if(!s) return '—';
+  if(s.includes('ios')) return '🍎 iOS';
+  if(s.includes('android')) return '🤖 Android';
+  if(s==='web') return '🌐 Web';
+  return esc(p);
+};
 
 // Friendly screen labels for the current project (class name → Vietnamese),
 // loaded once when a project opens. screenLabel('HomeScreen') → 'Trang chủ' or
@@ -3538,7 +3549,7 @@ async function renderSessions(pid){
           <td class="mono" style="color:var(--accent2)" title="${esc(r.session_id)}">${shortSid(r.session_id)}</td>
           <td class="mono muted" style="font-size:11px">${esc(r.user_id||'—')}</td>
           <td class="mono muted">${r.started_at?fmtTime(r.started_at):'—'}</td>
-          <td class="muted">${esc(r.platform)||'—'}</td>
+          <td class="muted">${platLabel(r.platform)}</td>
         </tr>`).join(''):'<tr><td colspan=4 class=empty>Chưa có session cho bộ lọc này.</td></tr>'}
       </tbody></table></div>`;
   document.querySelectorAll('tr.sess').forEach(tr=>tr.onclick=()=>openSessionIDE(pid,tr.dataset.sid));
@@ -3925,7 +3936,7 @@ function renderSessionOutline(pid, sid, session, allSessions){
       <button class="btn ghost sm" id="ideBackList" title="Danh sách session">← Danh sách</button>
       <div>
         <div class="mono" style="color:var(--accent2);font-size:13px;font-weight:600">${shortSid(sid)}</div>
-        <div class="muted" style="font-size:10px;margin-top:2px">${session && session.user_id ? esc(session.user_id) : '—'} · ${session && session.platform ? esc(session.platform) : '—'}</div>
+        <div class="muted" style="font-size:10px;margin-top:2px">${session && session.user_id ? esc(session.user_id) : '—'} · ${platLabel(session && session.platform)}</div>
       </div>
       <div style="display:flex;gap:18px;margin-left:auto;align-items:center">
         <div style="text-align:right">
@@ -4959,10 +4970,54 @@ function showActionDetail(a){
           <pre style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto">${esc(JSON.stringify(dataObj, null, 2))}</pre>` : ''}`;
     }
 
+    // Snowplow schema + entity. Event đi qua đường /sp/<key>/tp2 được
+    // ingest.js lưu kèm `_schema` (iglu URI của event) và `_contexts` (mảng
+    // entity). Không tách riêng thì cả hai lọt vào "Properties khác" dưới
+    // dạng một dòng JSON dài, không ai đọc nổi — mà đây đúng là thứ cần nhìn
+    // để biết web có bắn đủ entity như mobile hay chưa.
+    let igluHtml = '';
+    if (p._schema || p._contexts) {
+      const ents = Array.isArray(p._contexts) ? p._contexts : [];
+      const shortName = (uri) => String(uri || '').replace(/^iglu:/, '');
+      const entRows = ents.map((c) => {
+        const n = shortName(c && c.schema);
+        const d = (c && c.data) || {};
+        const fields = Object.keys(d).length;
+        return `<details style="border:1px solid var(--line);border-radius:6px;margin-bottom:5px">
+          <summary style="cursor:pointer;padding:6px 9px;font-size:11px">
+            <span class="mono" style="color:var(--accent2)">${esc(n)}</span>
+            <span class="muted"> · ${fields} field</span></summary>
+          <pre style="margin:0;background:var(--bg);border-top:1px solid var(--line);padding:8px 10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto">${esc(JSON.stringify(d, null, 2))}</pre>
+        </details>`;
+      }).join('');
+      // Ba entity mà mobile luôn gắn. Thiếu cái nào thì đội Data hụt khi join,
+      // nên chỉ mặt luôn thay vì bắt người xem tự đếm.
+      const want = ['user_context', 'core_action', 'application_context'];
+      const have = ents.map((c) => shortName(c && c.schema));
+      const missing = want.filter((w) => !have.some((h) => h.includes('/' + w + '/')));
+      igluHtml = `<div class="key" style="margin-top:12px">❄ Snowplow — schema &amp; entity</div>
+        <div class="kv" style="grid-template-columns:140px 1fr;font-size:11px">
+          <div class="key">event schema</div>
+          <div class="mono" style="word-break:break-all">${esc(shortName(p._schema) || '—')}</div>
+          <div class="key">entity</div>
+          <div>${ents.length} entity${
+            missing.length
+              ? ` <span style="color:var(--danger)">· thiếu: ${esc(missing.join(', '))}</span>`
+              : ' <span style="color:var(--ok,#16a34a)">· đủ user_context + core_action + application_context</span>'
+          }</div>
+        </div>
+        ${entRows || '<div class="muted" style="font-size:11px">(không có entity nào)</div>'}
+        <details style="margin-top:6px">
+          <summary style="cursor:pointer;font-size:11px;color:var(--muted)">Xem JSON thô đầy đủ</summary>
+          <pre style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto">${esc(JSON.stringify(p, null, 2))}</pre>
+        </details>`;
+    }
+
     // Raw properties (everything else). Hide the keys we already promoted
     // into the context block so the operator isn't reading them twice. The
     // notification fields are promoted too so the JSON dump doesn't repeat them.
     const promoted = new Set(['screen','screen_name','element','element_key','element_type','label','trace_id','span_id','class_name','framework','package',
+      '_schema','_contexts',
       ...(isNotification ? ['state','action','notification_id','title','body','data'] : [])]);
     const rest = Object.fromEntries(Object.entries(p).filter(([k]) => !promoted.has(k)));
     const propsHtml = Object.keys(rest).length
@@ -4977,7 +5032,7 @@ function showActionDetail(a){
     // Snowplow events directly so the portal no longer needs to relay taps
     // under a renamed schema. Apps wire UniTrack.track(<event_name>) at the
     // call site and SnowplowProvider takes care of the forward.
-    body = ctxHtml + notifHtml + netHtml + propsHtml;
+    body = ctxHtml + notifHtml + netHtml + igluHtml + propsHtml;
   }
 
   const titleColor = isErr ? 'var(--danger)' : 'var(--accent2)';
@@ -5890,7 +5945,7 @@ async function renderLogs(pid){
         <td>${providerBadge(r.provider)}</td>
         <td>${esc(r.screen_name||r.screen)||'<span class=muted>—</span>'}</td>
         <td class="mono">${esc(r.element_key)||'<span class=muted>—</span>'}</td>
-        <td class="muted">${esc(r.platform)||'—'}</td>
+        <td class="muted">${platLabel(r.platform)}</td>
         <td class="mono muted">${fmtAgo(r.timestamp)}</td>
       </tr>`).join(''):'<tr><td colspan=6 class=empty>Không có event phù hợp.</td></tr>'}
     </tbody></table></div>`;
