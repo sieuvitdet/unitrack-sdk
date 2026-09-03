@@ -36,7 +36,9 @@ Tracker::Tracker(Config cfg, ut_platform platform)
       session_()
 {
     enabled_.store(config_.enabled);
-    init_time_ms_ = current_time_ms();
+    // monotonic_ms(): chỉ dùng để đo 5 giây đầu sau init (crash_on_launch),
+    // không ghi ra đĩa, không lên wire.
+    init_time_ms_ = monotonic_ms();
     session_.set_timeout_ms(config_.session_timeout_ms);
     queue_.trim(config_.max_queue_size, config_.max_age_days, config_.max_retries);
 
@@ -151,7 +153,14 @@ void Tracker::track(const std::string& event_name, const std::string& props_json
 void Tracker::set_screen(const std::string& screen_name) {
     std::string previous;
     long long dwell_ms = 0;
-    long long now = current_time_ms();
+    // monotonic_ms(), KHÔNG phải current_time_ms(): `now` ở đây chỉ dùng để
+    // trừ ra khoảng thời gian (dwell màn hình + cửa sổ dedup cross-layer), cả
+    // hai đều nằm gọn trong một process. Wall clock nhảy khi hệ thống đồng bộ
+    // NTP → dwell_ms ra số ÂM. Đo thật trên iPhone (2026-09-02, session
+    // 0eeaebfc): dwell_ms = -9.544.502 vì máy chỉnh giờ lùi 2h39 trong lúc màn
+    // splash đang mở. Cả screen_entered_at_ms_ lẫn last_screen_at_ms_ đều
+    // không bao giờ ghi ra đĩa nên đổi trục thời gian là an toàn.
+    long long now = monotonic_ms();
     ut_layer caller = tl_caller_layer;  // snapshot before we touch state
     {
         std::lock_guard<std::mutex> lock(state_mu_);
@@ -330,7 +339,7 @@ std::string Tracker::inject_crash_on_launch(const std::string& crash_json, bool 
 void Tracker::log_crash(const std::string& crash_json) {
     // A crash within the launch window is flagged so the portal can surface
     // "crashed right after opening the app".
-    bool on_launch = (current_time_ms() - init_time_ms_) <= kLaunchCrashWindowMs;
+    bool on_launch = (monotonic_ms() - init_time_ms_) <= kLaunchCrashWindowMs;
     track("crash", inject_crash_on_launch(crash_json, on_launch));
     // Crashes should hit disk immediately — flush synchronously.
     do_flush();

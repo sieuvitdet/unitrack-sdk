@@ -6,6 +6,8 @@
 
 import Foundation
 import UIKit
+// CACurrentMediaTime — đồng hồ đơn điệu cho mọi phép đo khoảng thời gian.
+import QuartzCore
 // C core symbols come from the UniTrackCore module under SPM (two targets).
 // Under CocoaPods the pod is a single module and the C API is exposed via the
 // umbrella header, so the module does not exist there — hence the guard.
@@ -132,7 +134,11 @@ public final class UniTrack {
     // so the portal log + the Snowplow collector see the same transitions.
     private let lastScreenLock = NSLock()
     private var lastScreen: String?
-    private var lastScreenAt: Date?
+    /// Mốc vào màn hiện tại, đo bằng đồng hồ đơn điệu (CACurrentMediaTime).
+    /// KHÔNG phải Date: giá trị này chỉ dùng để trừ ra dwell_ms, mà wall clock
+    /// nhảy khi iOS đồng bộ NTP → dwell âm. Đo thật 2026-09-02 (session
+    /// 0eeaebfc): -9.544.502ms vì máy lùi giờ 2h39 lúc màn splash đang mở.
+    private var lastScreenAt: CFTimeInterval?
 
     /// Screen name of the most recent setScreen() call, or nil at cold start.
     /// Used by the ViewControllerSwizzler to stamp `previous_screen_name` on
@@ -902,6 +908,9 @@ public final class UniTrack {
         // lockstep so portal queue + Snowplow collector see identical
         // transitions (same field shape, same wire names from portal config).
         let now = Date()
+        // Hai đồng hồ, hai việc: `now` (wall) cho timestamp, `nowMono` (đơn
+        // điệu) cho mọi phép trừ ra khoảng thời gian. Xem lastScreenAt.
+        let nowMono = CACurrentMediaTime()
         var previous: String?
         var dwellMs: Int = 0
         shared.lastScreenLock.lock()
@@ -921,10 +930,13 @@ public final class UniTrack {
         if isSameScreen { previous = nil }
         if let prev = previous, !prev.isEmpty,
            let lastAt = shared.lastScreenAt {
-            dwellMs = Int(now.timeIntervalSince(lastAt) * 1000.0)
+            // max(0,…) là lưới an toàn cuối: CACurrentMediaTime không chạy lùi
+            // nên nhánh này không nên xảy ra, nhưng thà mất một phép đo còn
+            // hơn đẩy số âm vào Iglu schema.
+            dwellMs = max(0, Int((nowMono - lastAt) * 1000.0))
         }
         shared.lastScreen   = name
-        shared.lastScreenAt = now
+        shared.lastScreenAt = nowMono
         shared.lastScreenLock.unlock()
 
         // ponytail: gate provider setScreen bằng CHÍNH isSameScreen ở trên.

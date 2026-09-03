@@ -152,4 +152,12 @@ int64_t current_time_ms() {
         system_clock::now().time_since_epoch()).count();
 }
 
+int64_t monotonic_ms() {
+    using namespace std::chrono;
+    // steady_clock: chuẩn C++ đảm bảo không bao giờ chạy lùi. Trên Apple nó
+    // ánh xạ tới mach_absolute_time, trên Linux/Android là CLOCK_MONOTONIC.
+    return duration_cast<milliseconds>(
+        steady_clock::now().time_since_epoch()).count();
+}
+
 } // namespace unitrack

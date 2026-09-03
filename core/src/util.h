@@ -37,7 +37,24 @@ std::string salt_tag(const std::string& salt);
 // existing (untagged) ids stay valid.
 std::string generate_session_id(const std::string& salt);
 
-// Current time in milliseconds since Unix epoch.
+// Current time in milliseconds since Unix epoch. WALL CLOCK — nhảy khi hệ
+// thống đồng bộ NTP hoặc user đổi giờ. Dùng cho TIMESTAMP (mốc gửi lên server)
+// và cho mọi so sánh XUYÊN QUA lần app khởi động lại (session timeout, TTL
+// hàng đợi offline) — những chỗ đó cần một trục thời gian chung giữa hai
+// process, mà monotonic_ms() không cung cấp được.
 int64_t current_time_ms();
+
+// Đồng hồ đơn điệu, mili-giây kể từ một mốc tuỳ ý. Không bao giờ chạy lùi,
+// không bị chỉnh giờ tác động. Dùng cho mọi phép đo KHOẢNG THỜI GIAN nằm gọn
+// trong một process: dwell màn hình, cửa sổ dedup, throttle.
+//
+// KHÔNG dùng làm timestamp và KHÔNG ghi ra đĩa: mốc gốc reset mỗi lần process
+// chạy lại nên giá trị vô nghĩa ở lần khởi động sau.
+//
+// Vì sao cần: dwell_ms tính bằng current_time_ms() ra -9.544.502ms trên
+// iPhone thật (2026-09-02, session 0eeaebfc) khi iOS đồng bộ lại đồng hồ giữa
+// lúc màn đang mở — máy ghi rời màn sớm hơn vào màn 2h39. Web đã gặp và sửa
+// cùng lớp lỗi này (platforms/web/src/session.ts:40-49).
+int64_t monotonic_ms();
 
 } // namespace unitrack

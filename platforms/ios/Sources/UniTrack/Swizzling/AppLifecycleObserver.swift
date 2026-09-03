@@ -5,14 +5,27 @@
 // (WidgetsBindingObserver).
 
 import UIKit
+// CACurrentMediaTime — đồng hồ đơn điệu cho các bộ đếm dwell.
+import QuartzCore
 
 enum AppLifecycleObserver {
     // Timestamp app đi bg (fg→bg). Nil khi app đang fg. Dùng để tính
     // background_sec per-screen mỗi lần bg→fg trong khi 1 screen còn active.
+    /// Mốc vào background — WALL CLOCK, cố ý. Dòng emitSessionBoundariesIfNeeded
+    /// so nó với sessionTimeoutMs, mà core C++ cũng quyết định rotate bằng wall
+    /// clock (session_manager.cpp:236 — last_activity_ms_ phải sống sót qua lần
+    /// app bị kill nên không thể dùng đồng hồ đơn điệu). Đổi riêng phía Swift
+    /// sẽ làm hai tầng lệch pha: máy ngủ 35 phút thì mono không cộng khoảng
+    /// ngủ, core đã rotate mà Swift vẫn tưởng phiên còn sống.
     private static var backgroundedAt: Date?
+    /// Cùng mốc nhưng đo bằng đồng hồ đơn điệu, dùng cho bộ đếm background_sec.
+    /// Tách khỏi backgroundedAt vì hai mục đích cần hai trục thời gian khác nhau.
+    private static var backgroundedAtMono: CFTimeInterval?
     // Timestamp lần bg→fg gần nhất (hoặc cold-start). Dùng để tính
     // foreground_sec per-screen cho window fg đang mở.
-    private static var lastForegroundedAt: Date?
+    /// Mốc bắt đầu window foreground — đồng hồ đơn điệu. Chỉ dùng để cộng dồn
+    /// foreground_sec, không so với timeout nào nên không có ràng buộc lệch pha.
+    private static var lastForegroundedAt: CFTimeInterval?
 
     // ── Per-screen counters (match Snowplow screen_summary semantic) ──────
     // Snowplow builtin screen_summary/1-0-0 định nghĩa:
@@ -38,7 +51,7 @@ enum AppLifecycleObserver {
     static func foregroundDwellSec() -> Int {
         var total = screenForegroundSec
         if let fgAt = lastForegroundedAt {
-            total += Int(Date().timeIntervalSince(fgAt))
+            total += max(0, Int(CACurrentMediaTime() - fgAt))
         }
         return total
     }
@@ -48,7 +61,7 @@ enum AppLifecycleObserver {
     static func rollScreenCounters() {
         screenForegroundSec = 0
         screenBackgroundSec = 0
-        lastForegroundedAt  = Date()   // screen mới bắt đầu window fg
+        lastForegroundedAt  = CACurrentMediaTime()  // screen mới bắt đầu window fg
     }
 
     // Snapshot of the session in progress at the moment we backgrounded —
@@ -70,11 +83,14 @@ enum AppLifecycleObserver {
                        object: nil, queue: .main) { _ in
             let isResume = (backgroundedAt != nil)   // false on the very first launch
             // Roll bg window vừa completed vào per-screen counter.
-            if let bgAt = backgroundedAt {
-                screenBackgroundSec += Int(Date().timeIntervalSince(bgAt))
-                backgroundedAt = nil
+            if let bgAtMono = backgroundedAtMono {
+                screenBackgroundSec += max(0, Int(CACurrentMediaTime() - bgAtMono))
+                backgroundedAtMono = nil
             }
-            lastForegroundedAt = Date()
+            // backgroundedAt (wall) KHÔNG xoá ở đây — emitSessionBoundariesIfNeeded
+            // đọc nó ngay sau đây để quyết định có vượt session timeout không.
+            
+            lastForegroundedAt = CACurrentMediaTime()
             UniTrack.track("app_foreground", properties: [:])
             // Re-fire screen_viewed for the top VC on resume. UIKit doesn't
             // re-call viewDidAppear when the app comes back to foreground —
@@ -107,7 +123,7 @@ enum AppLifecycleObserver {
                        object: nil, queue: .main) { _ in
             // Roll fg window vừa closed vào per-screen counter.
             if let fgAt = lastForegroundedAt {
-                screenForegroundSec += Int(Date().timeIntervalSince(fgAt))
+                screenForegroundSec += max(0, Int(CACurrentMediaTime() - fgAt))
                 lastForegroundedAt = nil
             }
             // Fire screen_exited for the top VC BEFORE app_background so the
@@ -141,7 +157,8 @@ enum AppLifecycleObserver {
             // Snapshot the session state so a later session_ended carries the
             // right duration + counters (the SDK doesn't track screen_count
             // itself yet — apps may pass their own via UniTrack.setSessionStat).
-            backgroundedAt = Date()
+            backgroundedAt     = Date()              // cho phép so timeout
+            backgroundedAtMono = CACurrentMediaTime() // cho bộ đếm background_sec
             sessionAtBackground = SessionAtBackground(
                 id:          UniTrack.currentSessionId(),
                 startedAt:   UniTrack.sessionStartedAt() ?? Date(),

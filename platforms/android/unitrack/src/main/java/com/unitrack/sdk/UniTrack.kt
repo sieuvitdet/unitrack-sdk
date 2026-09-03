@@ -83,6 +83,11 @@ object UniTrack {
     // the portal log + the Snowplow collector see identical transitions.
     private val screenLock = Any()
     private var lastScreen: String? = null
+    /** Mốc vào màn hiện tại, đo bằng SystemClock.elapsedRealtime() — đồng hồ
+     *  đơn điệu. KHÔNG dùng currentTimeMillis: wall clock nhảy khi hệ thống
+     *  đồng bộ NTP → dwell_ms ra số ÂM. Đo thật trên iPhone 2026-09-02
+     *  (session 0eeaebfc): -9.544.502ms. Android cùng công thức nên cùng lỗi,
+     *  chỉ chưa gặp thiết bị nhảy giờ. Parity: UniTrack.swift lastScreenAt. */
     private var lastScreenAtMs: Long = 0L
 
     /**
@@ -932,6 +937,9 @@ object UniTrack {
         // in lockstep so the portal queue + Snowplow collector see identical
         // transitions (same field shape, same wire names from portal config).
         val now = System.currentTimeMillis()
+        // Hai đồng hồ, hai việc: `now` (wall) cho timestamp, `nowMono` (đơn
+        // điệu) cho phép trừ ra dwell. Xem lastScreenAtMs.
+        val nowMono = android.os.SystemClock.elapsedRealtime()
         var previous: String?
         var dwellMs = 0L
         var isSameScreen = false
@@ -947,10 +955,11 @@ object UniTrack {
             if (isSameScreen) previous = null
             val prev = previous
             if (prev != null && prev.isNotEmpty() && lastScreenAtMs > 0L) {
-                dwellMs = now - lastScreenAtMs
+                // max(0,…): lưới an toàn cuối, elapsedRealtime không chạy lùi.
+                dwellMs = maxOf(0L, nowMono - lastScreenAtMs)
             }
             lastScreen     = name
-            lastScreenAtMs = now
+            lastScreenAtMs = nowMono
         }
         // Gate provider setScreen bằng chính isSameScreen, và stamp previous
         // từ state của UniTrack — provider KHÔNG tự suy, nếu không hai nguồn

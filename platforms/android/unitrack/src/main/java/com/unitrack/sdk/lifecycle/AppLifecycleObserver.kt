@@ -24,9 +24,14 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     // Timestamp of the last 1→0 transition (going background). Cleared
     // when we come back foreground so `backgroundDwellSec` reports the
     // MOST RECENT bg→fg gap, not a running total.
+    /** Đo bằng elapsedRealtime() — đồng hồ đơn điệu. Chỉ dùng để cộng dồn
+     *  background_sec, không so với session timeout nào (khác iOS, nơi
+     *  emitSessionBoundariesIfNeeded buộc giữ wall clock để khớp pha với core).
+     *  Wall clock nhảy khi đồng bộ NTP → bộ đếm ra số âm hoặc phóng đại. */
     @Volatile private var backgroundedAtMs: Long = 0L
     // Timestamp of the most recent 0→1 foreground transition (or cold start).
     // 0 until the first foreground.
+    /** Mốc bắt đầu window foreground — elapsedRealtime(), lý do như trên. */
     @Volatile private var lastForegroundedAtMs: Long = 0L
 
     // ── Per-screen counters (match Snowplow screen_summary semantic) ───────
@@ -48,7 +53,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     fun foregroundDwellSec(): Int {
         var total = screenForegroundSec
         if (lastForegroundedAtMs > 0L) {
-            total += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+            total += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000L).toInt())
         }
         return total
     }
@@ -58,7 +63,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     fun rollScreenCounters() {
         screenForegroundSec = 0
         screenBackgroundSec = 0
-        lastForegroundedAtMs = System.currentTimeMillis()
+        lastForegroundedAtMs = android.os.SystemClock.elapsedRealtime()
     }
 
     fun install(app: Application) {
@@ -99,10 +104,10 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             inForeground = true
             // Roll bg window vừa completed vào per-screen counter.
             if (backgroundedAtMs > 0L) {
-                screenBackgroundSec += ((System.currentTimeMillis() - backgroundedAtMs) / 1000L).toInt()
+                screenBackgroundSec += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - backgroundedAtMs) / 1000L).toInt())
                 backgroundedAtMs = 0L
             }
-            lastForegroundedAtMs = System.currentTimeMillis()
+            lastForegroundedAtMs = android.os.SystemClock.elapsedRealtime()
             NativeBridge.logForeground()
             // Re-fire screen_viewed for the top Activity on resume. Android
             // doesn't automatically re-call onResume when the process comes
@@ -131,7 +136,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             inForeground = false
             // Roll fg window vừa closed vào per-screen counter BEFORE stamping.
             if (lastForegroundedAtMs > 0L) {
-                screenForegroundSec += ((System.currentTimeMillis() - lastForegroundedAtMs) / 1000L).toInt()
+                screenForegroundSec += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000L).toInt())
                 lastForegroundedAtMs = 0L
             }
             // Fire screen_exited for the top Activity BEFORE app_background so
@@ -151,7 +156,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                     "reason"         to "app_backgrounded",
                 ))
             }
-            backgroundedAtMs = System.currentTimeMillis()
+            backgroundedAtMs = android.os.SystemClock.elapsedRealtime()
             NativeBridge.logBackground()
             UniTrack.dispatchBackgroundCallback()
         }
