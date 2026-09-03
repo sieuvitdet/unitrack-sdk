@@ -3,6 +3,14 @@
 
 #include <fstream>
 #include <sstream>
+#include <cstdio>
+#include <cerrno>
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace unitrack {
 
@@ -151,13 +159,46 @@ void SessionManager::save_locked() {
         << "\"last_activity_ms\":"       << last_activity_ms_     << ","
         << "\"previous_session_id\":\""  << prev_id_              << "\","
         << "\"clean_shutdown\":"         << (clean_shutdown_ ? 1 : 0) << "}";
-    // Write atomically: dump to .tmp then rename. Survives a kill mid-write.
-    std::string tmp = persist_path_ + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::trunc);
-        if (!f.good()) return;
-        f << out.str();
+    // Write atomically: dump to .tmp, fsync, then rename.
+    //
+    // fsync là bắt buộc, không phải thừa. ofstream đóng ở cuối scope chỉ đẩy
+    // dữ liệu từ buffer ứng dụng xuống page cache của kernel; rename() sau đó
+    // thành công ngay cả khi nội dung vẫn nằm trong RAM. Process chết trước
+    // khi kernel flush (app crash, OS thu hồi tiến trình) → file còn lại RỖNG
+    // hoặc cụt, rơi vào nhánh saved_id.empty() ở load_from() → session_index
+    // reset về 1 và previous_session_id rỗng ở MỌI lần khởi động sau đó.
+    //
+    // Đo thật trên Xiaomi 23106RN0DA (2026-09-03, app crash NPE liên tục):
+    // index chạy 2→3→4→5 rồi kẹt vĩnh viễn ở 1 từ 10:15 trở đi, dù người dùng
+    // chỉ cài đè chứ không gỡ app — tức file không hề bị xoá, chỉ là chưa bao
+    // giờ xuống được đĩa.
+    const std::string tmp = persist_path_ + ".tmp";
+    const std::string blob = out.str();
+#if defined(_WIN32)
+    // Windows: không có fsync POSIX; _commit trên fd của FILE* làm cùng việc.
+    FILE* fp = fopen(tmp.c_str(), "wb");
+    if (!fp) return;
+    const bool ok = fwrite(blob.data(), 1, blob.size(), fp) == blob.size();
+    if (ok) { fflush(fp); _commit(_fileno(fp)); }
+    fclose(fp);
+    if (!ok) { std::remove(tmp.c_str()); return; }
+#else
+    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+    bool ok = true;
+    size_t written = 0;
+    while (written < blob.size()) {
+        ssize_t n = ::write(fd, blob.data() + written, blob.size() - written);
+        if (n > 0) { written += (size_t)n; continue; }
+        if (n < 0 && errno == EINTR) continue;   // signal, thử lại
+        ok = false; break;
     }
+    if (ok) ok = (::fsync(fd) == 0);
+    ::close(fd);
+    // Ghi hỏng thì bỏ file tạm, giữ nguyên bản cũ trên đĩa còn hơn thay bằng
+    // bản cụt — load_from() đọc được state cũ vẫn tốt hơn là reset về index 1.
+    if (!ok) { std::remove(tmp.c_str()); return; }
+#endif
     std::rename(tmp.c_str(), persist_path_.c_str());
 }
 

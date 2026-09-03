@@ -177,7 +177,16 @@ function buildSessionRow(events) {
     if (screen && screenPath[screenPath.length - 1] !== screen) screenPath.push(screen);
   }
 
-  const duration_ms = (started_at != null && ended_at != null) ? (ended_at - started_at) : null;
+  // Math.max(0,...): started_at và ended_at đến từ hai nguồn khác nhau —
+  // props.started_at/ended_at (đồng hồ thiết bị) hoặc fallback e.timestamp
+  // (đồng hồ server). Trộn hai nguồn, hoặc đồng hồ máy nhảy giữa phiên, cho
+  // ended_at < started_at. ingest.js chỉ validate từng mốc riêng lẻ, không
+  // kiểm quan hệ start/end nên clock skew lọt qua.
+  // Đo thật: 11 phiên iOS ngày 23-24/06 có duration âm, tệ nhất -58.629.064ms
+  // (ended_at sớm hơn started_at gần 17 tiếng).
+  const duration_ms = (started_at != null && ended_at != null)
+    ? Math.max(0, ended_at - started_at)
+    : null;
   // Sessions with no screen at all (only network/lifecycle/crash) get a synthetic
   // signature so Phase 2's GROUP BY flow_signature doesn't lump every unrelated
   // screenless session into one giant empty-string bucket.
