@@ -178,13 +178,20 @@ enum AppLifecycleObserver {
         guard let bgAt = backgroundedAt, let prev = sessionAtBackground else {
             backgroundedAt = nil; sessionAtBackground = nil; return
         }
-        let dwellMs = Int(Date().timeIntervalSince(bgAt) * 1000)
+        // max(0,…) bắt buộc: bgAt là WALL CLOCK (cố ý — xem backgroundedAt),
+        // nên nó ÂM được khi user chỉnh giờ lùi trong lúc app ở nền. Giá trị
+        // này vừa dùng để so timeout vừa lên wire dưới dạng background_sec.
+        // Bất biến của SDK: không bao giờ gửi khoảng thời gian âm.
+        let dwellMs = max(0, Int(Date().timeIntervalSince(bgAt) * 1000))
         let timeoutMs = UniTrack.sessionTimeoutMs()
         // If we crossed the timeout the core has already rotated by the time
         // any event resolves; emit session_ended for the closed snapshot so
         // analytics can compute duration without the app coding it.
         if dwellMs >= timeoutMs {
-            let duration = Int(Date().timeIntervalSince(prev.startedAt))
+            // max(0,…): prev.startedAt là mốc wall clock sống qua nhiều
+            // process nên không thể dùng đồng hồ đơn điệu; chỉnh giờ lùi làm
+            // hiệu này âm.
+            let duration = max(0, Int(Date().timeIntervalSince(prev.startedAt)))
             UniTrack.track("session_ended", properties: [
                 "session_id":           prev.id,
                 "session_duration_sec": duration,

@@ -19,6 +19,7 @@
 //   <img> MJPEG        → load / error (camera đời cũ, không có sự kiện nào khác)
 
 import type { CapturePlugin, EventName, EventProperties } from '../types';
+import { monoNow } from '../mono-clock';
 
 type Emit = (name: EventName, props: EventProperties) => void;
 
@@ -75,7 +76,7 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
       });
 
       on('loadstart', (el) => {
-        startedAt.set(el, Date.now());
+        startedAt.set(el, monoNow());
         gotFrame.delete(el);
         emit('stream_connecting', base(el));
       });
@@ -88,13 +89,13 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
         const t0 = startedAt.get(el);
         emit('stream_first_frame', {
           ...base(el),
-          ttff_ms: t0 ? Date.now() - t0 : undefined,   // time to first frame
+          ttff_ms: t0 ? monoNow() - t0 : undefined,   // time to first frame
         });
       });
 
       const markStall = (el: HTMLMediaElement) => {
         if (stalledAt.has(el)) return;                  // đã đang khựng
-        stalledAt.set(el, Date.now());
+        stalledAt.set(el, monoNow());
       };
       on('waiting', markStall);
       on('stalled', markStall);
@@ -103,7 +104,7 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
         const s0 = stalledAt.get(el);
         if (s0 === undefined) return;
         stalledAt.delete(el);
-        const gap = Date.now() - s0;
+        const gap = monoNow() - s0;
         if (gap < minStall) return;                     // nấc nhỏ, bỏ qua
         emit('stream_stalled', { ...base(el), stall_ms: gap });
         emit('stream_resumed', { ...base(el), stall_ms: gap });
@@ -113,7 +114,7 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
         const t0 = startedAt.get(el);
         emit('stream_ended', {
           ...base(el),
-          watched_ms: t0 ? Date.now() - t0 : undefined,
+          watched_ms: t0 ? monoNow() - t0 : undefined,
         });
       });
 
@@ -171,7 +172,7 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
         const Orig = RTC;
         const Patched = function (this: unknown, ...args: unknown[]) {
           const pc = new (Orig as unknown as new (...a: unknown[]) => RTCPeerConnection)(...args);
-          const t0 = Date.now();
+          const t0 = monoNow();
           let connectedAt = 0;
 
           pc.addEventListener('connectionstatechange', () => {
@@ -180,8 +181,8 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
             if (st === 'connecting') {
               emit('stream_connecting', p);
             } else if (st === 'connected') {
-              connectedAt = Date.now();
-              emit('stream_first_frame', { ...p, ttff_ms: Date.now() - t0 });
+              connectedAt = monoNow();
+              emit('stream_first_frame', { ...p, ttff_ms: Math.max(0, monoNow() - t0) });
             } else if (st === 'disconnected') {
               // 'disconnected' của WebRTC thường tự hồi — báo là "đang nối lại"
               // chứ không phải thất bại, nếu không sẽ thổi phồng tỉ lệ lỗi.
@@ -191,7 +192,7 @@ export function streamingPlugin(opts: StreamingOptions = {}): CapturePlugin {
             } else if (st === 'closed') {
               emit('stream_ended', {
                 ...p,
-                watched_ms: connectedAt ? Date.now() - connectedAt : undefined,
+                watched_ms: connectedAt ? monoNow() - connectedAt : undefined,
               });
             }
           });

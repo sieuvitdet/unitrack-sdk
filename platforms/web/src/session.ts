@@ -1,3 +1,4 @@
+import { monoNow } from './mono-clock';
 // Session ID generator + persistence + inactivity timeout.
 //
 // Tương đương SessionManager bên C++ core (Flutter/iOS/Android): persist
@@ -52,6 +53,10 @@ export class SessionManager {
    * trong `rotate()` — id mới đã thay xong, nên snapshot phải chụp trước đó.
    * Parity iOS `emitSessionBoundariesIfNeeded()`. */
   onRotate: ((closed: ClosedSession) => void) | null = null;
+  /** Phiên vừa được mở trong constructor (cold start / hết hạn qua reload).
+   *  `initialize()` đọc một lần rồi tự xoá, để `session_started` không bắn lại
+   *  ở lần khởi tạo kế tiếp trong cùng lần tải trang. */
+  freshlyStarted = false;
   /** Đếm cho phiên hiện tại — nuôi `session_ended`. Native lấy các số này từ
    * core; web chưa có core nên SDK tự đếm qua `note*()`. */
   private screenCount = 0;
@@ -90,6 +95,13 @@ export class SessionManager {
       this.startedAtMono = 0;
     } else {
       // Cold start hoặc đã timeout → rotate.
+      // Phiên này dựng THẲNG trong constructor, không đi qua rotate(), nên
+      // callback onRotate không chạy và `session_started` không được bắn.
+      // Đánh dấu để initialize() bắn bù — nếu không thì phiên MỞ ĐẦU mỗi lần
+      // người dùng vào site vĩnh viễn không được đếm, chỉ phiên thứ 2 trở đi
+      // mới có. Mobile đếm cả phiên đầu (portal project 8: 28 session_started
+      // / 1 session_ended).
+      this.freshlyStarted = true;
       if (storedId) safeSet(KEY_PREV, storedId);
       this.currentId = uuidV4();
       this.currentIndex = (storedIdx || 0) + 1;
@@ -211,15 +223,6 @@ export class SessionManager {
  * `performance.timeOrigin + now()` thì khác nhau theo từng tab, và counter
  * bảo đảm hai lần gọi trong cùng một tab không bao giờ giống nhau. */
 let localCounter = 0;
-
-/** Đồng hồ đơn điệu (ms). Không bao giờ chạy lùi, không bị chỉnh giờ tác động. */
-function monoNow(): number {
-  try {
-    return performance.now();
-  } catch {
-    return Date.now();
-  }
-}
 
 function uuidV4(): string {
   const c = typeof crypto !== 'undefined' ? crypto : undefined;

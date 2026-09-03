@@ -170,8 +170,10 @@ private extension UIViewController {
         // khi VC nằm chờ giữa viewWillAppear và viewDidAppear — quãng đó không
         // phải cost dựng màn nên không được tính vào.
         let anchor = max(ut_loadStart, ut_willAppearAt)
+        // max(0,…): CACurrentMediaTime đơn điệu nên không âm được, giữ guard
+        // như bất biến của SDK — không bao giờ gửi khoảng thời gian âm.
         let loadMs: Int? = anchor > 0
-            ? Int((CACurrentMediaTime() - anchor) * 1000)
+            ? max(0, Int((CACurrentMediaTime() - anchor) * 1000))
             : nil
 
         DispatchQueue.main.asyncAfter(deadline: .now() + ViewControllerSwizzler.settleWindow) {

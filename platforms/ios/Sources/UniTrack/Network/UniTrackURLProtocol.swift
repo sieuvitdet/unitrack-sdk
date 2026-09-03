@@ -8,6 +8,8 @@
 // stripped. Override `shouldRedact(_:)` for partner-specific rules.
 
 import Foundation
+// CACurrentMediaTime — đồng hồ đơn điệu cho duration_ms của request.
+import QuartzCore
 
 final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
 
@@ -64,7 +66,9 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
     private var session: URLSession?
     // Renamed from `task` to avoid illegally overriding URLProtocol.task.
     private var dataTask: URLSessionDataTask?
-    private var startAt: Date = Date()
+    /// Mốc bắt đầu request — đồng hồ đơn điệu. Wall clock nhảy giữa lúc
+    /// request đang bay (NTP, user đổi giờ) làm duration_ms ra âm.
+    private var startAt: CFTimeInterval = CACurrentMediaTime()
     private var responseBytes: Int = 0
     // Trace ids minted in startLoading() so the same ids appear on the wire
     // header AND in the network_request event we log on completion.
@@ -91,7 +95,7 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
     override class func canonicalRequest(for r: URLRequest) -> URLRequest { r }
 
     override func startLoading() {
-        startAt = Date()
+        startAt = CACurrentMediaTime()
         let mreq = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mreq)
 
@@ -153,7 +157,7 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        let durationMs = Int(Date().timeIntervalSince(startAt) * 1000)
+        let durationMs = max(0, Int((CACurrentMediaTime() - startAt) * 1000))
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         let url    = redacted(request.url)
         let method = request.httpMethod ?? "GET"

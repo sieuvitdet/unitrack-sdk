@@ -13,6 +13,7 @@
 // PerformanceObserver hoặc fallback DOMContentLoaded.
 
 import type { EventName, EventProperties } from './types';
+import { monoNow } from './mono-clock';
 
 type Emit = (name: EventName, props: EventProperties) => void;
 
@@ -191,19 +192,6 @@ function resolveElementKey(el: HTMLElement): string | null {
 
 let lastScreen = '';
 /** Mốc vào màn hiện tại — để tính dwell_ms lúc rời đi. */
-/** Đồng hồ đơn điệu (ms). Không bao giờ chạy lùi, không bị chỉnh giờ tác động.
- *  Cùng mẫu với session.ts:227 — ở đó nó đã sửa bug "phiên 33 giây báo thành
- *  2088 giây" đo được trên production 2026-08-22. Mọi mốc dùng để TRỪ ra
- *  khoảng thời gian (dwell màn, cửa sổ fg/bg) phải đi qua đây; `Date.now()`
- *  chỉ dành cho timestamp gửi lên server. */
-function monoNow(): number {
-  try {
-    return performance.now();
-  } catch {
-    return Date.now();
-  }
-}
-
 let screenEnteredAt = 0;
 /** Tên event kết thúc màn + hàm emit, đặt lúc install để pagehide/background
  * dùng lại được (chúng không đi qua emitScreen). */
@@ -370,7 +358,7 @@ export function setCurrentScreen(name: string): void {
     // onRouteChange đặt; app gọi setScreen() ngoài route change (mở modal,
     // đổi tab nội bộ) thì không có mốc và bỏ hẳn field.
     const loadMs = routeChangeAt > 0
-      ? Math.round(performance.now() - routeChangeAt) : undefined;
+      ? Math.max(0, Math.round(performance.now() - routeChangeAt)) : undefined;
     routeChangeAt = 0;
     screenEmit(screenStartEvent || 'screen_viewed', {
       screen: name,
@@ -505,16 +493,16 @@ function emitScreen(startEvent: string, emit: Emit, isInitial: boolean): void {
   // trên hàng screen_view thay vì phải join hai event theo screen + thời gian.
   let loadMs: number | undefined;
   if (!isInitial && routeChangeAt > 0) {
-    loadMs = Math.round(performance.now() - routeChangeAt);
+    loadMs = Math.max(0, Math.round(performance.now() - routeChangeAt));
     routeChangeAt = 0;
   } else if (isInitial) {
     // Cold start: đo qua navigation timing. `loadEventEnd` = 0 cho tới khi
     // `load` fire xong, mà hàm này chạy sớm hơn → rơi về
     // domContentLoadedEventEnd, cuối cùng là thời gian đã trôi.
     const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    loadMs = Math.round(
+    loadMs = Math.max(0, Math.round(
       nav?.loadEventEnd || nav?.domContentLoadedEventEnd || performance.now(),
-    );
+    ));
   }
 
   emit(startEvent, {

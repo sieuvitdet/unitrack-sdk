@@ -45,7 +45,9 @@ object OkHttpTracker {
     private class TrackingInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val req = chain.request()
-            val started = System.currentTimeMillis()
+            // elapsedRealtime: đồng hồ đơn điệu. Wall clock nhảy giữa lúc
+            // request đang bay làm durationMs ra âm.
+            val started = android.os.SystemClock.elapsedRealtime()
             val reqBytes = req.body?.contentLength() ?: 0L
             var status   = 0
             var respBytes = 0L
@@ -60,7 +62,7 @@ object OkHttpTracker {
                 error = e.javaClass.simpleName + ": " + e.message.orEmpty()
                 throw e
             } finally {
-                val dur = System.currentTimeMillis() - started
+                val dur = maxOf(0L, android.os.SystemClock.elapsedRealtime() - started)
                 NativeBridge.logNetwork(
                     url        = req.url.toString().substringBefore('?'),
                     method     = req.method,

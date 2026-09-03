@@ -92,7 +92,7 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
         val anchor = maxOf(activityCreatedAtMs.remove(activity) ?: 0L,
                            activityStartedAtMs[activity] ?: 0L)
         val loadMs = if (anchor > 0L) {
-            (android.os.SystemClock.elapsedRealtime() - anchor).toInt()
+            maxOf(0, (android.os.SystemClock.elapsedRealtime() - anchor).toInt())
         } else null
 
         afterSettle {
@@ -197,7 +197,7 @@ internal object ActivityTracker : Application.ActivityLifecycleCallbacks {
             // next time onFragmentCreated runs.
             val anchor = maxOf(createdAtMs.remove(f) ?: 0L, startedAtMs[f] ?: 0L)
             val loadMs = if (anchor > 0L) {
-                (android.os.SystemClock.elapsedRealtime() - anchor).toInt()
+                maxOf(0, (android.os.SystemClock.elapsedRealtime() - anchor).toInt())
             } else null
 
             afterSettle {

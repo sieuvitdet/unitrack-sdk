@@ -94,7 +94,9 @@ public final class UniTrack {
     /// initialize() succeeds. NOT public — bindings should call high-level
     /// APIs (LayerRegistry.register, setScreen, …) instead.
     static var coreContext: OpaquePointer? { shared.context }
-    private let coldStartAt = Date()
+    /// Mốc khởi động — đồng hồ đơn điệu. Chỉ dùng để trừ ra cold_start_ms,
+    /// wall clock nhảy giữa lúc app boot làm số này âm hoặc phóng đại.
+    private let coldStartAt = CACurrentMediaTime()
     private(set) public var isInitialized = false
 
     private init() {}
@@ -1307,7 +1309,7 @@ public final class UniTrack {
         }
 
         // Cold-start metric
-        let coldMs = Int(Date().timeIntervalSince(coldStartAt) * 1000)
+        let coldMs = max(0, Int((CACurrentMediaTime() - coldStartAt) * 1000))
         ut_log_app_start(context, coldMs)
         isInitialized = true
 

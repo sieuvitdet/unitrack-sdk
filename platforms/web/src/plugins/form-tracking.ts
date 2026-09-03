@@ -9,6 +9,7 @@
 // chứ không dựa vào người tích hợp nhớ tắt.
 
 import type { CapturePlugin, EventName, EventProperties } from '../types';
+import { monoNow } from '../mono-clock';
 
 type Emit = (name: EventName, props: EventProperties) => void;
 
@@ -62,7 +63,7 @@ export function formTrackingPlugin(opts: FormTrackingOptions = {}): CapturePlugi
 
       const onFocus = (ev: FocusEvent) => {
         if (!isField(ev.target)) return;
-        focusedAt.set(ev.target, Date.now());
+        focusedAt.set(ev.target, monoNow());
         emit('form_field_focus', {
           form: formName(ev.target),
           field: fieldName(ev.target),
@@ -82,7 +83,7 @@ export function formTrackingPlugin(opts: FormTrackingOptions = {}): CapturePlugi
           filled: value.length > 0,
           length: value.length,
           changed: changed.has(el),
-          duration_ms: t0 ? Date.now() - t0 : undefined,
+          duration_ms: t0 ? monoNow() - t0 : undefined,
         });
       };
 
