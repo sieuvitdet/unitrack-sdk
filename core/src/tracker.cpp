@@ -4,6 +4,7 @@
 #include "util.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <chrono>
 #include <random>
 #include <sstream>
@@ -192,7 +193,7 @@ void Tracker::set_screen(const std::string& screen_name) {
             // xảy ra về lý thuyết. Giữ guard vì đây là bất biến của SDK —
             // không bao giờ đẩy khoảng thời gian âm lên schema, kể cả khi một
             // lần refactor sau này vô tình đổi lại nguồn thời gian.
-            dwell_ms = std::max(0LL, now - screen_entered_at_ms_);
+            dwell_ms = std::max<long long>(0, now - screen_entered_at_ms_);
         current_screen_ = screen_name;
         screen_entered_at_ms_ = now;
         last_screen_name_   = screen_name;
@@ -296,7 +297,7 @@ void Tracker::log_network(const std::string& url, const std::string& method,
       // Kẹp tại core, không phải ở binding: duration_ms là tham số ngoài,
       // guard ở đây che cho MỌI binding cùng lúc — kể cả React Native và
       // Flutter còn dùng bản core cũ. Bất biến: không gửi thời gian âm.
-      << "\"duration_ms\":" << std::max(0L, duration_ms) << ","
+      << "\"duration_ms\":" << std::max<long>(0, duration_ms) << ","
       << "\"req_bytes\":"  << req_bytes  << ","
       << "\"resp_bytes\":" << resp_bytes;
     if (!error.empty()) o << ",\"error\":\"" << error << "\"";
@@ -384,9 +385,9 @@ void Tracker::emit_session_boundary(SessionEndReason on_rotate) {
         // prev_started_ms == 0 nghĩa là state file thiếu field (bản SDK cũ,
         // file cụt): hiệu sẽ ra ~1.7e12 — dương nhưng vô nghĩa. Gửi 0 để
         // downstream biết là không đo được, thay vì một con số rác.
-        long long prev_duration_ms = 0;
+        int64_t prev_duration_ms = 0;
         if (s.prev_started_ms > 0 && s.prev_ended_ms > 0)
-            prev_duration_ms = std::max(0LL, s.prev_ended_ms - s.prev_started_ms);
+            prev_duration_ms = std::max<int64_t>(0, s.prev_ended_ms - s.prev_started_ms);
         std::ostringstream end;
         end << "{\"session_id\":\"" << s.prev_id << "\","
             << "\"reason\":\""      << session_end_reason_str(s.prev_reason) << "\","
@@ -435,7 +436,7 @@ void Tracker::log_app_start(long cold_start_ms) {
     std::ostringstream o;
     // std::max: cold_start_ms do binding đo, iOS còn dùng wall clock nên âm
     // được. Kẹp tại core để che mọi binding cùng lúc.
-    o << "{\"cold_start_ms\":" << std::max(0L, cold_start_ms) << "}";
+    o << "{\"cold_start_ms\":" << std::max<long>(0, cold_start_ms) << "}";
     track("app_start", o.str());
 }
 
