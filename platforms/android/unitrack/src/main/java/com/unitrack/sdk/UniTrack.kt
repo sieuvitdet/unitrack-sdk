@@ -1119,18 +1119,37 @@ object UniTrack {
      * lỗi nào → trả về false = coi như user launch, tức giữ nguyên hành vi cũ.
      * Đoán sai theo hướng này chỉ mất đi phần tối ưu, không hỏng dữ liệu.
      */
-    private fun detectHeadlessLaunch(): Boolean {
+    private fun detectHeadlessLaunch(ctx: Context): Boolean {
         return try {
-            val atClass = Class.forName("android.app.ActivityThread")
-            val thread = atClass.getMethod("currentActivityThread").invoke(null)
-                ?: return false
-            @Suppress("UNCHECKED_CAST")
-            val activities = atClass.getDeclaredField("mActivities")
-                .apply { isAccessible = true }
-                .get(thread) as? Map<Any, Any>
-                ?: return false
-            activities.isEmpty()
+            // importance của CHÍNH process này, đọc qua API công khai.
+            //
+            // FOREGROUND (100) = user đang mở app. Process bị FCM/JobService
+            // đánh thức có importance thấp hơn hẳn (SERVICE=300,
+            // CACHED=400...). Không có nhánh nào ở giữa gây nhập nhằng.
+            //
+            // Cách cũ soi ActivityThread.mActivities qua reflection và coi map
+            // rỗng là headless. Giả định "hệ thống đã tạo activity record
+            // trước khi Application.onCreate() trả về" SAI trên Android hiện
+            // đại: record chỉ có SAU khi onCreate() xong. Mà SDK khởi tạo
+            // trong onCreate() nên map LUÔN rỗng → mọi lần mở app đều bị coi
+            // là headless.
+            //
+            // Đo thật trên Xiaomi 23106RN0DA (2026-09-03, project 8): toàn bộ
+            // event Android mang is_headless=true kể cả phiên 36 event có
+            // camera stream, và 0 event app_start (tracker.cpp:433 thoát sớm
+            // khi headless). Cùng lúc iOS báo is_headless=false. Hệ quả nặng
+            // hơn: load_from() giữ nguyên clean_shutdown cũ thay vì reset
+            // (session_manager.cpp:149), làm session_index reset về 1.
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE)
+                as? android.app.ActivityManager ?: return false
+            val mine = android.os.Process.myPid()
+            val self = am.runningAppProcesses?.firstOrNull { it.pid == mine }
+                ?: return false   // không đọc được → coi như user launch
+            self.importance >
+                android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         } catch (_: Throwable) {
+            // Đoán sai theo hướng "user launch" chỉ mất phần tối ưu, không
+            // hỏng dữ liệu. Đoán sai hướng kia thì hỏng session_index.
             false
         }
     }
@@ -1145,7 +1164,7 @@ object UniTrack {
         obj.put("journey_capture",   c.journeyCapture)
         obj.put("session_timeout_ms", c.sessionTimeoutMs)
         if (c.sessionIdSalt.isNotEmpty()) obj.put("session_id_salt", c.sessionIdSalt)
-        headlessLaunch = c.headlessLaunch ?: detectHeadlessLaunch()
+        headlessLaunch = c.headlessLaunch ?: detectHeadlessLaunch(ctx)
         obj.put("headless_launch",   headlessLaunch)
         obj.put("screen_lifecycle",   c.screenLifecycle)
         obj.put("screen_start_event", c.screenStartEvent)
