@@ -1169,9 +1169,60 @@ object UniTrack {
         obj.put("screen_lifecycle",   c.screenLifecycle)
         obj.put("screen_start_event", c.screenStartEvent)
         obj.put("screen_end_event",   c.screenEndEvent)
-        obj.put("db_path",
-                ctx.filesDir.absolutePath + "/unitrack_queue.db")
+        obj.put("db_path", storageDir(ctx) + "/unitrack_queue.db")
         return obj.toString()
+    }
+
+    /**
+     * Thư mục cho state của SDK: queue db, session.json, crash file. Core dẫn
+     * xuất cả ba từ db_path (tracker.cpp:48) nên đổi ở đây là đổi cả ba.
+     *
+     * `databases/` chứ KHÔNG phải filesDir. Lý do là một hành vi có thật ngoài
+     * production: thư viện IoT rogocore (app/libs/rogocore-release.aar trong
+     * FPT Life) gọi FileCache.clearApplicationData() ngay trong
+     * RogoServiceCore.onCreate(), quét sạch mọi thư mục con của data dir TRỪ
+     * `databases`, `shared_prefs`, `lib`. filesDir nằm trong diện bị xoá.
+     *
+     * Đo trên Xiaomi 23106RN0DA (2026-09-04, vn.fpt.fptlife.staging):
+     * session.json xuất hiện ở giây thứ 3 sau khi mở app rồi biến mất ở giây
+     * thứ 4, mọi lần khởi động. load_from() không đọc được gì → session_index
+     * kẹt ở 1 và previous_session_id rỗng vĩnh viễn, tức mỗi lần mở app bị
+     * báo cáo như một lần cài mới. Queue db cũng mất sạch cùng lúc.
+     *
+     * Không tự bảo là chống được mọi thứ: một thư viện khác xoá `databases`
+     * thì lại hỏng. Nhưng đây là vùng an toàn nhất còn lại trong sandbox và
+     * đúng nơi Android dành cho state lâu dài.
+     */
+    private fun storageDir(ctx: Context): String {
+        // getDatabasePath() tự tạo `databases/` nếu chưa có; lấy parent để
+        // dùng chung cho cả ba loại file.
+        val dir = ctx.getDatabasePath("unitrack_queue.db").parentFile
+            ?: return ctx.filesDir.absolutePath
+        dir.mkdirs()
+        migrateLegacyState(ctx, dir)
+        return dir.absolutePath
+    }
+
+    /**
+     * Dời state từ filesDir (chỗ cũ) sang chỗ mới, một lần.
+     *
+     * Không có bước này thì bản nâng cấp SDK sẽ làm session_index reset về 1
+     * đúng một lần trên MỌI app — kể cả app không dính rogocore, nơi state cũ
+     * vẫn còn nguyên. Chỉ dời session.json: queue db dở dang không đáng mang
+     * theo, và crash file cũ thì lần khởi động này đã bỏ qua rồi.
+     */
+    private fun migrateLegacyState(ctx: Context, dest: java.io.File) {
+        val old = java.io.File(ctx.filesDir, "session.json")
+        val new = java.io.File(dest, "session.json")
+        if (!old.exists() || new.exists()) return
+        try {
+            if (!old.renameTo(new)) {
+                old.copyTo(new, overwrite = false)
+                old.delete()
+            }
+        } catch (_: Throwable) {
+            // Dời hụt chỉ mất session_index một lần, không đáng để crash app.
+        }
     }
 
     internal const val PLATFORM_ANDROID = 2
