@@ -92,7 +92,6 @@ void SessionManager::load_from(const std::string& path, bool headless) {
     int64_t saved_clean      = read_int_field(blob, "clean_shutdown");
     bool saved_clean_present = blob.find("\"clean_shutdown\":") != std::string::npos;
     bool was_clean = !saved_clean_present || saved_clean != 0;
-    (void)was_clean;  // chỉ còn dùng cho clean_shutdown_ ở cuối hàm
 
     if (saved_id.empty() || saved_idx <= 0) {
         // Corrupt or partial file — start fresh but keep index=1.
@@ -101,6 +100,36 @@ void SessionManager::load_from(const std::string& path, bool headless) {
     }
 
     int64_t now = current_time_ms();
+
+    // NGOẠI LỆ: process do noti/job đánh thức thì NỐI LẠI session đã persist
+    // thay vì mở session mới.
+    //
+    // Quyết định 2026-09-04, thu hẹp rule "mỗi lần kích hoạt là một session"
+    // bên dưới. Lý do: một cái noti không phải một phiên sử dụng. Rule cũ
+    // biến 60 noti thành 60 session, đẩy session_index tăng vọt vì những lần
+    // user không hề chạm vào app — đúng con số nhưng sai ý nghĩa.
+    //
+    // Vẫn rotate khi gap vượt timeout_ms_: session phải là một quãng liền
+    // mạch. Không có nhánh này thì noti 8h sáng và noti 8h tối cùng mang một
+    // session_id, và session đó không bao giờ đóng chừng nào user còn nhận
+    // noti mà không mở app.
+    //
+    // Không đụng clean_shutdown_: process headless không có UI nên sẽ không
+    // chạy qua onActivityStopped để set lại cờ. Giữ nguyên giá trị đã persist
+    // để lần user mở app thật sau đó chẩn đoán đúng — cùng lý do như nhánh
+    // `headless ? was_clean : false` ở cuối hàm.
+    if (headless && now - saved_last_act <= timeout_ms_) {
+        session_id_       = saved_id;
+        session_index_    = saved_idx;
+        started_at_ms_    = saved_started;
+        last_activity_ms_ = saved_last_act;   // noti KHÔNG gia hạn phiên
+        prev_id_          = saved_prev;
+        clean_shutdown_   = was_clean;
+        // Không save_locked(): không có gì đổi, và ghi lại chỉ thêm một cơ
+        // hội để process headless chết giữa chừng làm cụt file.
+        return;
+    }
+
     // MỖI LẦN PROCESS KHỞI ĐỘNG LÀ MỘT SESSION MỚI.
     //
     // Quyết định của product owner 2026-08-21, khôi phục rule của SDK cũ:

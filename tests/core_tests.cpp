@@ -701,30 +701,102 @@ static void test_every_launch_rotates() {
     std::remove(path);
 }
 
-static void test_headless_rotates_like_any_launch() {
-    printf("test_headless_rotates_like_any_launch\n");
+// Noti KHÔNG phải một phiên sử dụng — quyết định 2026-09-04, thu hẹp rule
+// "mỗi lần kích hoạt là một session" của 2026-08-21.
+//
+// Process do FCM đánh thức nối lại session đã persist: giữ nguyên session_id
+// và session_index. Rule cũ biến 60 noti thành 60 session, đẩy session_index
+// tăng vọt vì những lần user không hề chạm vào app.
+//
+// Ngoại lệ vẫn giữ: gap vượt timeout thì rotate, vì session phải là một quãng
+// liền mạch — nếu không, noti 8h sáng và noti 8h tối cùng mang một session_id
+// và session đó không bao giờ đóng chừng nào user còn nhận noti mà không mở
+// app.
+static void test_headless_resumes_within_timeout() {
+    printf("test_headless_resumes_within_timeout\n");
     using namespace unitrack;
-    const char* path = "/tmp/ut_test_headless_rotates.json";
+    const char* path = "/tmp/ut_test_headless_resume.json";
     const std::string ORIG = "cccccccc-0000-0000-0000-000000000003";
+    const std::string PREV = "dddddddd-0000-0000-0000-000000000004";
 
-    // Session last touched 45 min ago — past the 30-min timeout.
-    std::remove(path);
-    int64_t last = current_time_ms() - 45 * 60 * 1000;
-    FILE* f = fopen(path, "w");
-    fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
-               "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
-               "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
-            ORIG.c_str(), (long long)(last - 60000), (long long)last);
-    fclose(f);
+    // Ghi state với last_activity cách đây `gap_ms`.
+    auto seed = [&](int64_t gap_ms) {
+        std::remove(path);
+        int64_t last = current_time_ms() - gap_ms;
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"%s\",\"clean_shutdown\":1}",
+                ORIG.c_str(), (long long)(last - 60000), (long long)last,
+                PREV.c_str());
+        fclose(f);
+    };
 
-    SessionManager sm;
-    sm.load_from(path, /*headless=*/true);
-    CHECK(sm.current_session_id() != ORIG,
-          "headless launch past timeout mints a new session");
-    CHECK(sm.current_session_index() == 8,
-          "headless launch past timeout bumps the index");
-    CHECK(sm.previous_session_id() == ORIG,
-          "headless rotate chains previous_session_id for the data team");
+    // Trong timeout: nối lại, không đụng gì.
+    seed(10 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_id() == ORIG,
+              "headless within timeout resumes the stored session id");
+        CHECK(sm.current_session_index() == 7,
+              "headless within timeout leaves the index alone");
+        CHECK(sm.previous_session_id() == PREV,
+              "headless within timeout keeps the stored previous id");
+    }
+
+    // Ngay sát biên (29') vẫn nối lại.
+    seed(29 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_index() == 7,
+              "headless just under the timeout still resumes");
+    }
+
+    // Quá timeout: rotate như mọi launch khác.
+    seed(45 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_id() != ORIG,
+              "headless past timeout mints a new session");
+        CHECK(sm.current_session_index() == 8,
+              "headless past timeout bumps the index");
+        CHECK(sm.previous_session_id() == ORIG,
+              "headless rotate chains previous_session_id for the data team");
+    }
+
+    // Đối chứng: cùng gap ngắn đó, launch do USER mở thì vẫn phải rotate.
+    // Đây là thứ phân biệt "noti" với "user mở app" — nếu nhánh resume rò rỉ
+    // sang launch thường thì session_index sẽ đứng im ở mọi lần mở app.
+    seed(10 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_index() == 8,
+              "user launch within timeout still rotates");
+    }
+
+    // Bất biến chính của bug: N noti liên tiếp không được đụng vào index, và
+    // lần user mở app kế tiếp phải tăng tiếp — KHÔNG reset về 1.
+    seed(1000);
+    for (int i = 0; i < 60; ++i) {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+    }
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.current_session_index() == 7,
+              "60 notifications leave session_index untouched");
+    }
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(sm.current_session_index() == 8,
+              "the user launch after 60 notifications resumes counting, not 1");
+    }
     std::remove(path);
 }
 
@@ -920,7 +992,7 @@ int main() {
     test_last_end_reason_survives_resolve();
     test_background_activity_does_not_extend();
     test_session_activity_persisted();
-    test_headless_rotates_like_any_launch();
+    test_headless_resumes_within_timeout();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();
