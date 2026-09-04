@@ -425,6 +425,22 @@ void Tracker::log_background() {
     // ngay (reason=killed_recovered) thay vì đợi timeout.
     session_.mark_clean_shutdown();
 }
+void Tracker::promote_to_user_launch() {
+    // Launch này vốn đã được nhận đúng là user launch → log_app_start() đã
+    // mở boundary rồi, không có gì để sửa.
+    if (!config_.headless_launch) return;
+    config_.headless_launch = false;
+
+    // Chỉ rotate khi session đang mang là bản NỐI LẠI. Nếu load_from() đã
+    // rotate sẵn (gap vượt timeout, hoặc không có state để nối) thì session
+    // hiện tại vốn đã mới — rotate lần nữa sẽ đẻ ra một session rỗng thừa.
+    if (session_.resumed_persisted_session()) {
+        session_.rotate(SessionEndReason::killed_recovered);
+    }
+    emit_session_boundary(SessionEndReason::killed_recovered);
+    track("app_start", "{\"cold_start_ms\":0}");
+}
+
 void Tracker::log_app_start(long cold_start_ms) {
     // Headless launch (FCM wake, background job): không có user mở app nên
     // không có "app start" để báo, và mở session boundary ở đây sẽ đẻ ra

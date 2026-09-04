@@ -189,6 +189,19 @@ UT_EXPORT void ut_log_foreground(ut_context* ctx);
 UT_EXPORT void ut_log_background(ut_context* ctx);
 UT_EXPORT void ut_log_app_start(ut_context* ctx, long cold_start_ms);
 
+/* Sửa lại một launch đã bị đoán nhầm là headless.
+ *
+ * Binding không biết chắc "user có mở app không" tại thời điểm init — trên
+ * Android, importance của process ở Application.onCreate() chưa lên FOREGROUND
+ * khi app khởi động lại sau crash hoặc được service đánh thức. Tín hiệu đáng
+ * tin duy nhất là một Activity thực sự xuất hiện, mà điều đó chỉ biết được SAU
+ * init. Binding vì thế đoán theo hướng an toàn (headless = không rotate) rồi
+ * gọi hàm này khi Activity đầu tiên tới.
+ *
+ * No-op nếu launch vốn đã được nhận đúng là user launch, hoặc đã promote rồi.
+ * An toàn khi gọi nhiều lần. */
+UT_EXPORT void ut_promote_to_user_launch(ut_context* ctx);
+
 /* Đánh dấu mọi event từ giờ KHÔNG phải user hoạt động, cho tới khi tắt bằng
  * ut_set_background_activity(ctx, 0). Event vẫn stamp session đang chạy; chỉ
  * đồng hồ timeout không được gia hạn, nên khoảng nghỉ vẫn tính từ lần tương

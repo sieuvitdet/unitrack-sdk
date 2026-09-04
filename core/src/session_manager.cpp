@@ -125,6 +125,7 @@ void SessionManager::load_from(const std::string& path, bool headless) {
         last_activity_ms_ = saved_last_act;   // noti KHÔNG gia hạn phiên
         prev_id_          = saved_prev;
         clean_shutdown_   = was_clean;
+        resumed_          = true;
         // Không save_locked(): không có gì đổi, và ghi lại chỉ thêm một cơ
         // hội để process headless chết giữa chừng làm cụt file.
         return;
@@ -251,6 +252,7 @@ void SessionManager::rotate_locked(SessionEndReason reason) {
     last_activity_ms_ = now;
     session_index_   += 1;
     first_event_id_.clear();
+    resumed_          = false;   // session mới, không còn là bản nối lại
     save_locked();
 }
 

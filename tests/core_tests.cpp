@@ -800,6 +800,77 @@ static void test_headless_resumes_within_timeout() {
     std::remove(path);
 }
 
+// promote_to_user_launch(): sửa lại một launch bị đoán nhầm là headless.
+//
+// Binding Android không biết chắc "user có mở app không" tại
+// Application.onCreate() — importance chưa lên FOREGROUND khi app khởi động
+// lại sau crash. Đo 2026-09-04 trên Xiaomi: sau crash lúc 12:52, MỌI event
+// mang is_headless=true kể cả screen_view do user bấm, và session 31f1c995 bị
+// đóng băng gần một tiếng vì load_from() cứ nối lại mãi.
+//
+// Nên binding mặc định headless (an toàn) rồi gọi promote khi Activity đầu
+// tiên tới. Test này pin: promote PHẢI rotate khi session là bản nối lại, và
+// KHÔNG được rotate thêm khi load_from() đã rotate sẵn.
+static void test_promote_to_user_launch() {
+    printf("test_promote_to_user_launch\n");
+    using namespace unitrack;
+    const char* path = "/tmp/ut_test_promote.json";
+    const std::string ORIG = "eeeeeeee-0000-0000-0000-000000000005";
+
+    auto seed = [&](int64_t gap_ms) {
+        std::remove(path);
+        int64_t last = current_time_ms() - gap_ms;
+        FILE* f = fopen(path, "w");
+        fprintf(f, "{\"session_id\":\"%s\",\"session_index\":7,"
+                   "\"started_at_ms\":%lld,\"last_activity_ms\":%lld,"
+                   "\"previous_session_id\":\"\",\"clean_shutdown\":1}",
+                ORIG.c_str(), (long long)(last - 60000), (long long)last);
+        fclose(f);
+    };
+
+    // Nối lại (headless, trong timeout) -> cờ resumed bật.
+    seed(10 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(sm.resumed_persisted_session(),
+              "promote: resumed flag set khi noi lai session");
+        CHECK(sm.current_session_index() == 7,
+              "promote: chua promote thi index giu nguyen");
+
+        // Activity xuất hiện -> Tracker rotate qua promote.
+        sm.rotate(SessionEndReason::killed_recovered);
+        CHECK(sm.current_session_index() == 8,
+              "promote: rotate bumps index cho user launch that");
+        CHECK(sm.previous_session_id() == ORIG,
+              "promote: previous_session_id chuoi ve session vua noi lai");
+        CHECK(!sm.resumed_persisted_session(),
+              "promote: rotate xoa co resumed");
+    }
+
+    // load_from đã rotate sẵn (gap vượt timeout) -> cờ KHÔNG bật, promote sẽ
+    // không rotate thêm nên không đẻ session rỗng.
+    seed(45 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/true);
+        CHECK(!sm.resumed_persisted_session(),
+              "promote: gap qua timeout thi load_from rotate, khong phai noi lai");
+        CHECK(sm.current_session_index() == 8,
+              "promote: index da bump san o load_from");
+    }
+
+    // User launch bình thường cũng không phải bản nối lại.
+    seed(10 * 60 * 1000);
+    {
+        SessionManager sm;
+        sm.load_from(path, /*headless=*/false);
+        CHECK(!sm.resumed_persisted_session(),
+              "promote: user launch khong bao gio la ban noi lai");
+    }
+    std::remove(path);
+}
+
 static void test_session_id_salt() {
     printf("test_session_id_salt\n");
     using namespace unitrack;
@@ -993,6 +1064,7 @@ int main() {
     test_background_activity_does_not_extend();
     test_session_activity_persisted();
     test_headless_resumes_within_timeout();
+    test_promote_to_user_launch();
     test_layer_registry();
     test_screen_dedup_cross_layer();
     test_uuid_entropy();

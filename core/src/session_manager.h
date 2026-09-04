@@ -69,6 +69,12 @@ public:
     int64_t     current_session_index();
     std::string previous_session_id();
 
+    // True khi load_from() NỐI LẠI session đã persist thay vì mở session mới
+    // — chỉ xảy ra ở nhánh headless trong timeout. Tracker đọc cờ này để biết
+    // có cần rotate hay không khi phát hiện launch thật ra là user launch
+    // (xem Tracker::promote_to_user_launch).
+    bool resumed_persisted_session() const { return resumed_; }
+
     // Lý do session TRƯỚC đó đóng ("timeout" / "manual_reset" /
     // "killed_recovered" / "none"). Giữ riêng khỏi prev_reason_, thứ bị
     // resolve() tiêu thụ ngay khi emit boundary — binding cần đọc được sau
@@ -158,6 +164,9 @@ private:
     // SDK fire session_ended ngay (reason=killed_recovered) thay vì đợi
     // 30 phút timeout.
     bool           clean_shutdown_   = false;
+    // Xem resumed_persisted_session(). Chỉ load_from() đặt; rotate() xoá vì
+    // sau khi rotate thì session hiện tại không còn là session nối lại nữa.
+    bool           resumed_          = false;
 
     // Persisted across launches via load_from + save_locked. session_index_
     // increments on every rotation (first install = 1). first_event_id_ is

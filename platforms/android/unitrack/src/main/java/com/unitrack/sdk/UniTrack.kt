@@ -1,5 +1,6 @@
 package com.unitrack.sdk
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.util.Log
@@ -580,6 +581,11 @@ object UniTrack {
 
         NativeBridge.logAppStart(0L)
 
+        // Sau logAppStart: launch được coi là headless cho tới khi Activity
+        // đầu tiên xuất hiện. Đăng ký NGOÀI khối autoCapture — quyết định
+        // session không được phụ thuộc vào việc host có bật auto-capture.
+        installUserLaunchDetector(app)
+
         // Bring up any providers registered before initialize().
         forEachProvider { it.initialize(app) }
 
@@ -1119,39 +1125,56 @@ object UniTrack {
      * lỗi nào → trả về false = coi như user launch, tức giữ nguyên hành vi cũ.
      * Đoán sai theo hướng này chỉ mất đi phần tối ưu, không hỏng dữ liệu.
      */
-    private fun detectHeadlessLaunch(ctx: Context): Boolean {
-        return try {
-            // importance của CHÍNH process này, đọc qua API công khai.
-            //
-            // FOREGROUND (100) = user đang mở app. Process bị FCM/JobService
-            // đánh thức có importance thấp hơn hẳn (SERVICE=300,
-            // CACHED=400...). Không có nhánh nào ở giữa gây nhập nhằng.
-            //
-            // Cách cũ soi ActivityThread.mActivities qua reflection và coi map
-            // rỗng là headless. Giả định "hệ thống đã tạo activity record
-            // trước khi Application.onCreate() trả về" SAI trên Android hiện
-            // đại: record chỉ có SAU khi onCreate() xong. Mà SDK khởi tạo
-            // trong onCreate() nên map LUÔN rỗng → mọi lần mở app đều bị coi
-            // là headless.
-            //
-            // Đo thật trên Xiaomi 23106RN0DA (2026-09-03, project 8): toàn bộ
-            // event Android mang is_headless=true kể cả phiên 36 event có
-            // camera stream, và 0 event app_start (tracker.cpp:433 thoát sớm
-            // khi headless). Cùng lúc iOS báo is_headless=false. Hệ quả nặng
-            // hơn: load_from() giữ nguyên clean_shutdown cũ thay vì reset
-            // (session_manager.cpp:149), làm session_index reset về 1.
-            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE)
-                as? android.app.ActivityManager ?: return false
-            val mine = android.os.Process.myPid()
-            val self = am.runningAppProcesses?.firstOrNull { it.pid == mine }
-                ?: return false   // không đọc được → coi như user launch
-            self.importance >
-                android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-        } catch (_: Throwable) {
-            // Đoán sai theo hướng "user launch" chỉ mất phần tối ưu, không
-            // hỏng dữ liệu. Đoán sai hướng kia thì hỏng session_index.
-            false
-        }
+    /**
+     * KHÔNG đoán "user có mở app không" ở đây nữa — luôn khởi đầu bằng
+     * headless, rồi sửa lại khi Activity đầu tiên xuất hiện.
+     *
+     * Hai phép đoán trước đều sai, và mỗi lần đều hỏng dữ liệu thật:
+     *
+     *  1. Soi `ActivityThread.mActivities` qua reflection, map rỗng = headless.
+     *     Sai vì activity record chỉ được tạo SAU khi Application.onCreate()
+     *     trả về, mà SDK init TRONG onCreate() nên map luôn rỗng → mọi lần mở
+     *     app đều thành headless.
+     *
+     *  2. Đọc `RunningAppProcessInfo.importance`, cao hơn FOREGROUND =
+     *     headless. Sai khi app khởi động lại sau crash hoặc process được
+     *     service đánh thức rồi user mở app: tại onCreate() importance chưa
+     *     kịp lên FOREGROUND. Đo thật 2026-09-04 trên Xiaomi 23106RN0DA: từ
+     *     lúc app crash lúc 12:52, MỌI event sau đó mang is_headless=true kể
+     *     cả screen_view do user bấm, và session 31f1c995 bị đóng băng gần
+     *     một tiếng vì load_from() cứ nối lại mãi session đó.
+     *
+     * Điểm chung: tại onCreate() chưa tồn tại thông tin để trả lời câu hỏi
+     * này. Tín hiệu đáng tin duy nhất là một Activity thực sự được tạo — biết
+     * được ngay sau đó qua ActivityLifecycleCallbacks.
+     *
+     * Nên mặc định headless=true (an toàn: không rotate, không đẻ session
+     * rác), và [installUserLaunchDetector] gọi promoteToUserLaunch() khi
+     * Activity đầu tiên tới. Noti không tạo Activity nên giữ nguyên session,
+     * đúng như thiết kế.
+     */
+    private fun installUserLaunchDetector(app: Application) {
+        app.registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {
+                    // Chỉ cần lần đầu — core tự no-op ở các lần sau, nhưng gỡ
+                    // callback luôn để không giữ tham chiếu thừa.
+                    app.unregisterActivityLifecycleCallbacks(this)
+                    if (!initialized) return
+                    // Cập nhật cờ TRƯỚC khi gọi core: host đọc
+                    // isHeadlessLaunch() trong handler onSessionRotate mà
+                    // promoteToUserLaunch() sẽ kích hoạt ngay bên dưới.
+                    headlessLaunch = false
+                    NativeBridge.promoteToUserLaunch()
+                }
+                override fun onActivityStarted(a: Activity) {}
+                override fun onActivityResumed(a: Activity) {}
+                override fun onActivityPaused(a: Activity) {}
+                override fun onActivityStopped(a: Activity) {}
+                override fun onActivitySaveInstanceState(a: Activity, b: android.os.Bundle) {}
+                override fun onActivityDestroyed(a: Activity) {}
+            }
+        )
     }
 
     private fun buildConfigJson(ctx: Context, c: UniTrackConfig): String {
@@ -1164,7 +1187,10 @@ object UniTrack {
         obj.put("journey_capture",   c.journeyCapture)
         obj.put("session_timeout_ms", c.sessionTimeoutMs)
         if (c.sessionIdSalt.isNotEmpty()) obj.put("session_id_salt", c.sessionIdSalt)
-        headlessLaunch = c.headlessLaunch ?: detectHeadlessLaunch(ctx)
+        // Mặc định headless=true: an toàn (không rotate, không đẻ session
+        // rác). installUserLaunchDetector() sửa lại khi Activity đầu tiên
+        // xuất hiện. Host vẫn override được qua config.headlessLaunch.
+        headlessLaunch = c.headlessLaunch ?: true
         obj.put("headless_launch",   headlessLaunch)
         obj.put("screen_lifecycle",   c.screenLifecycle)
         obj.put("screen_start_event", c.screenStartEvent)

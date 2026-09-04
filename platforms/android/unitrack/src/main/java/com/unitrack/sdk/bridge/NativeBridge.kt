@@ -104,6 +104,7 @@ object NativeBridge {
     fun setBackgroundActivity(on: Boolean) { if (ctxPtr != 0L) nativeSetBackgroundActivity(ctxPtr, on) }
     fun lastEndReason(): String      = if (ctxPtr != 0L) nativeLastEndReason(ctxPtr) else "none"
     fun logAppStart(coldStartMs: Long) = nativeLogAppStart(ctxPtr, coldStartMs)
+    fun promoteToUserLaunch() = nativePromoteToUserLaunch(ctxPtr)
 
     /** Pop the crash JSON the core enqueued at init() time (from
      *  crash-pending.json). Empty string if nothing to recover. Single-shot —
@@ -178,6 +179,7 @@ object NativeBridge {
     private external fun nativeSetBackgroundActivity(ctx: Long, on: Boolean)
     private external fun nativeLastEndReason(ctx: Long): String
     private external fun nativeLogAppStart(ctx: Long, coldStartMs: Long)
+    private external fun nativePromoteToUserLaunch(ctx: Long)
     private external fun nativePopRecoveredCrash(ctx: Long): String
     // length-2 result: [traceId 32-hex, spanId 16-hex]
     private external fun nativeNewTrace(): Array<String>

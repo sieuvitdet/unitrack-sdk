@@ -220,6 +220,10 @@ JNIEXPORT void JNICALL
 Java_com_unitrack_sdk_bridge_NativeBridge_nativeLogAppStart(
     JNIEnv*, jobject, jlong p, jlong ms) { ut_log_app_start(ctx_of(p), (long)ms); }
 
+JNIEXPORT void JNICALL
+Java_com_unitrack_sdk_bridge_NativeBridge_nativePromoteToUserLaunch(
+    JNIEnv*, jobject, jlong p) { ut_promote_to_user_launch(ctx_of(p)); }
+
 // Pop the JSON the core stashed at init() from crash-pending.json. UniTrack.kt
 // calls this AFTER providers init and fans out the crash via forEachProvider
 // so Snowplow / Firebase see the recovered crash through their own track()

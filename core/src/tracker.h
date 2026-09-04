@@ -98,6 +98,21 @@ public:
     void log_background();
     void log_app_start(long cold_start_ms);
 
+    // Sửa lại một launch đã bị đoán nhầm là headless.
+    //
+    // Binding không biết chắc "user có mở app không" tại thời điểm init: trên
+    // Android, importance của process ở Application.onCreate() chưa lên
+    // FOREGROUND khi app khởi động lại sau crash hay được service đánh thức,
+    // nên phép đoán trả về headless cho cả lần user mở app thật. Tín hiệu
+    // đáng tin duy nhất là một Activity thực sự xuất hiện — mà điều đó chỉ
+    // biết được SAU init.
+    //
+    // Vì vậy binding đoán theo hướng an toàn (headless = không rotate) rồi
+    // gọi hàm này khi Activity đầu tiên tới. No-op nếu launch vốn đã được
+    // nhận đúng là user launch, hoặc nếu đã promote rồi — an toàn khi gọi
+    // nhiều lần.
+    void promote_to_user_launch();
+
     // Forces a flush (blocks briefly).
     void flush_now();
 

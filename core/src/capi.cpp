@@ -138,6 +138,10 @@ void ut_log_app_start(ut_context* ctx, long cold_start_ms) {
     if (ctx && ctx->tracker) ctx->tracker->log_app_start(cold_start_ms);
 }
 
+void ut_promote_to_user_launch(ut_context* ctx) {
+    if (ctx && ctx->tracker) ctx->tracker->promote_to_user_launch();
+}
+
 void ut_set_background_activity(ut_context* ctx, int on) {
     if (ctx && ctx->tracker) ctx->tracker->set_background_activity(on != 0);
 }
