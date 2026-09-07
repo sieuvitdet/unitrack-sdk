@@ -569,11 +569,12 @@ public final class SnowplowProvider: AnalyticsProvider {
             // whose job is resolving the SCHEMA name, and FPT Life sets
             // event_names.screen_view = "screen_view" — which silently
             // overrode the default and shipped action_name="screen_view".
-            _ = sv.entities(buildEntities(forEventName: "screen_view",
-                                          screen: name, elementKey: nil,
-                                          extra: nil,
-                                          skipGlobalContexts: false,
-                                          actionName: Self.actionScreenViewed))
+            let entities = buildEntities(forEventName: "screen_view",
+                                         screen: name, elementKey: nil,
+                                         extra: nil,
+                                         skipGlobalContexts: false,
+                                         actionName: Self.actionScreenViewed)
+            _ = sv.entities(entities)
             // Snowplow fires screen_end for the OUTGOING screen as a
             // side-effect of this track() call, and makeScreenEndContext()
             // runs inside it. Hand that generator the outgoing name here:
@@ -585,7 +586,23 @@ public final class SnowplowProvider: AnalyticsProvider {
             Self.exitingScreen = previous
             Self.exitingScreenLock.unlock()
             tracker.track(sv)
-            UniTrack.log("[UniTrackSnowplow] hybrid setScreen → builtin ScreenView(name=%@) fired (com.snowplowanalytics.mobile/screen_view/1-0-0).", name)
+            // In cùng envelope JSON như đường track(), nếu không nhánh builtin
+            // thành điểm mù: screen_viewed thoát sớm ở track() nên không bao
+            // giờ tới logTracking(), người tích hợp chỉ thấy một dòng vắn tắt
+            // trong khi screen_exited / screen_load_completed in đủ payload.
+            // Dựng lại phần `data` theo đúng field Snowplow gửi cho
+            // com.snowplowanalytics.mobile/screen_view (ScreenView.swift):
+            // id do Snowplow sinh nên không đọc lại được ở đây, các field
+            // nil (type/transitionType/previousId) vốn không lên wire.
+            var svData: [String: Any] = ["name": name]
+            if let previous = previous, !previous.isEmpty {
+                svData["previousName"] = previous
+            }
+            Self.logTracking(endpoint: endpoint,
+                             eventName: Self.actionScreenViewed,
+                             schema: "iglu:com.snowplowanalytics.mobile/screen_view/jsonschema/1-0-0",
+                             data: svData,
+                             contexts: entities)
             return
         }
         // Legacy path: no-op. Fire builtin ScreenView khi hybridScreenView=false
