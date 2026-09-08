@@ -43,26 +43,35 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     //   • setScreen(newName)   → close screen cũ, rollScreenCounters() cho screen mới
     //   • onActivityStopped    → +fg dwell hiện tại vào screenForegroundSec
     //   • onActivityStarted    → +bg dwell hiện tại vào screenBackgroundSec
-    @Volatile private var screenForegroundSec: Int = 0
-    @Volatile private var screenBackgroundSec: Int = 0
+    //
+    // Double chứ không Int: làm tròn về giây ở TỪNG window rồi cộng lại làm
+    // mất tới ~1s mỗi lần chuyển fg/bg, và dwell_ms suy ra từ đây (xem
+    // UniTrack.setScreen) mất luôn độ phân giải mili giây. Snowplow builtin
+    // screen_summary/1-0-0 cũng dùng số thực làm tròn 2 chữ số — giữ cùng
+    // ngữ nghĩa để đội Data đọc hai nguồn như nhau.
+    @Volatile private var screenForegroundSec: Double = 0.0
+    @Volatile private var screenBackgroundSec: Double = 0.0
 
-    /** Cumulative giây screen hiện tại đã ở bg. Đọc bởi setScreen(). */
-    fun backgroundDwellSec(): Int = screenBackgroundSec
+    /** Làm tròn 2 chữ số thập phân, parity Snowplow screen_summary. */
+    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
 
-    /** Cumulative giây screen hiện tại đã ở fg. Bao gồm window fg đang mở. */
-    fun foregroundDwellSec(): Int {
+    /** Giây screen hiện tại đã ở bg, cộng dồn. Đọc bởi setScreen(). */
+    fun backgroundDwellSec(): Double = round2(screenBackgroundSec)
+
+    /** Giây screen hiện tại đã ở fg, cộng dồn. Gồm cả window fg đang mở. */
+    fun foregroundDwellSec(): Double {
         var total = screenForegroundSec
         if (lastForegroundedAtMs > 0L) {
-            total += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000L).toInt())
+            total += maxOf(0.0, (android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000.0)
         }
-        return total
+        return round2(total)
     }
 
     /** Called by UniTrack.setScreen() sau khi đã stamp counters vào
      *  screen_exited payload. Reset để screen mới đếm lại từ 0. */
     fun rollScreenCounters() {
-        screenForegroundSec = 0
-        screenBackgroundSec = 0
+        screenForegroundSec = 0.0
+        screenBackgroundSec = 0.0
         lastForegroundedAtMs = android.os.SystemClock.elapsedRealtime()
     }
 
@@ -104,7 +113,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             inForeground = true
             // Roll bg window vừa completed vào per-screen counter.
             if (backgroundedAtMs > 0L) {
-                screenBackgroundSec += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - backgroundedAtMs) / 1000L).toInt())
+                screenBackgroundSec += maxOf(0.0, (android.os.SystemClock.elapsedRealtime() - backgroundedAtMs) / 1000.0)
                 backgroundedAtMs = 0L
             }
             lastForegroundedAtMs = android.os.SystemClock.elapsedRealtime()
@@ -136,7 +145,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             inForeground = false
             // Roll fg window vừa closed vào per-screen counter BEFORE stamping.
             if (lastForegroundedAtMs > 0L) {
-                screenForegroundSec += maxOf(0, ((android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000L).toInt())
+                screenForegroundSec += maxOf(0.0, (android.os.SystemClock.elapsedRealtime() - lastForegroundedAtMs) / 1000.0)
                 lastForegroundedAtMs = 0L
             }
             // Fire screen_exited for the top Activity BEFORE app_background so
@@ -150,8 +159,12 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                     "screen_name"    to current,
                     // Per-screen semantics — match Snowplow screen_summary/1-0-0.
                     // String parity Iglu schema.
-                    "foreground_sec" to screenForegroundSec.toString(),
-                    "background_sec" to screenBackgroundSec.toString(),
+                    "foreground_sec" to foregroundDwellSec().toString(),
+                    "background_sec" to backgroundDwellSec().toString(),
+                    // dwell_ms suy từ chính hai field trên — nhánh này trước
+                    // đây thiếu hẳn dwell_ms, khiến consumer phải xử lý hai
+                    // hình dạng payload khác nhau cho cùng một event.
+                    "dwell_ms"       to ((foregroundDwellSec() + backgroundDwellSec()) * 1000.0).toLong().toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))

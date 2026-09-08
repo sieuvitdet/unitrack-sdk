@@ -84,13 +84,6 @@ object UniTrack {
     // the portal log + the Snowplow collector see identical transitions.
     private val screenLock = Any()
     private var lastScreen: String? = null
-    /** Mốc vào màn hiện tại, đo bằng SystemClock.elapsedRealtime() — đồng hồ
-     *  đơn điệu. KHÔNG dùng currentTimeMillis: wall clock nhảy khi hệ thống
-     *  đồng bộ NTP → dwell_ms ra số ÂM. Đo thật trên iPhone 2026-09-02
-     *  (session 0eeaebfc): -9.544.502ms. Android cùng công thức nên cùng lỗi,
-     *  chỉ chưa gặp thiết bị nhảy giờ. Parity: UniTrack.swift lastScreenAt. */
-    private var lastScreenAtMs: Long = 0L
-
     /**
      * Screen name of the most recent setScreen() call, or null at cold
      * start. Callers should read this BEFORE invoking setScreen() when
@@ -943,11 +936,7 @@ object UniTrack {
         // in lockstep so the portal queue + Snowplow collector see identical
         // transitions (same field shape, same wire names from portal config).
         val now = System.currentTimeMillis()
-        // Hai đồng hồ, hai việc: `now` (wall) cho timestamp, `nowMono` (đơn
-        // điệu) cho phép trừ ra dwell. Xem lastScreenAtMs.
-        val nowMono = android.os.SystemClock.elapsedRealtime()
         var previous: String?
-        var dwellMs = 0L
         var isSameScreen = false
         var cameFrom: String? = null
         synchronized(screenLock) {
@@ -959,13 +948,7 @@ object UniTrack {
             // về null, để stamp xuống provider. Ở reentry nó chính là `name`.
             cameFrom = previous
             if (isSameScreen) previous = null
-            val prev = previous
-            if (prev != null && prev.isNotEmpty() && lastScreenAtMs > 0L) {
-                // max(0,…): lưới an toàn cuối, elapsedRealtime không chạy lùi.
-                dwellMs = maxOf(0L, nowMono - lastScreenAtMs)
-            }
-            lastScreen     = name
-            lastScreenAtMs = nowMono
+            lastScreen = name
         }
         // Gate provider setScreen bằng chính isSameScreen, và stamp previous
         // từ state của UniTrack — provider KHÔNG tự suy, nếu không hai nguồn
@@ -993,10 +976,31 @@ object UniTrack {
                 val obs = com.unitrack.sdk.lifecycle.AppLifecycleObserver
                 val fgSec = obs.foregroundDwellSec()
                 val bgSec = obs.backgroundDwellSec()
+                // dwell_ms suy TỪ bộ đếm, không đo riêng bằng lastScreenAtMs.
+                //
+                // Cách cũ lấy hiệu `nowMono - lastScreenAtMs`, nhưng hai giá
+                // trị đó cập nhật theo hai nhịp khác nhau: lastScreenAtMs bị
+                // ghi đè ở MỌI lần setScreen (không điều kiện), còn
+                // screen_exited chỉ phát khi `screenLifecycleEnabled &&
+                // !reentry`. Lần setScreen nào không phát event sẽ dời mốc mà
+                // không ai roll bộ đếm → lần đo kế tiếp tính từ mốc sai.
+                //
+                // Khác biệt ngữ nghĩa thứ hai: dwell_ms cũ KHÔNG cộng thời
+                // gian màn ở nền, còn fg+bg thì có.
+                //
+                // Đo thật (ftracking_505.json, 04/09): FliFlutterActivity sống
+                // 08:43:14.411 → 08:43:23.446 = 9.035ms, fg=9 đúng còn
+                // dwell_ms báo 2.885. Nặng nhất là HomeFragmentNew với
+                // fg=13 bg=385 mà dwell_ms chỉ 6.024 — lệch 392 giây.
+                //
+                // Nay dwell_ms = (fg + bg) × 1000, luôn khớp hai field kia.
+                // Nó vốn là field legacy (xem tracker.cpp:218) nên không cần
+                // độ phân giải mili giây riêng.
+                val dwellFromCounters = ((fgSec + bgSec) * 1000.0).toLong()
                 val endPayload: Map<String, Any?> = mapOf(
                     "screen"          to prev,
                     "screen_name"     to prev,
-                    "dwell_ms"        to dwellMs.toString(),
+                    "dwell_ms"        to dwellFromCounters.toString(),
                     "foreground_sec"  to fgSec.toString(),
                     "background_sec"  to bgSec.toString(),
                     // ponytail: string "false" thay vì Boolean để parity iOS
