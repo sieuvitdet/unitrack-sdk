@@ -68,11 +68,21 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
     }
 
     /** Called by UniTrack.setScreen() sau khi đã stamp counters vào
-     *  screen_exited payload. Reset để screen mới đếm lại từ 0. */
+     *  screen_exited payload. Reset để screen mới đếm lại từ 0.
+     *  Mở luôn window fg mới vì màn mới đang hiện trên foreground. */
     fun rollScreenCounters() {
         screenForegroundSec = 0.0
         screenBackgroundSec = 0.0
         lastForegroundedAtMs = android.os.SystemClock.elapsedRealtime()
+    }
+
+    /** Như [rollScreenCounters] nhưng KHÔNG mở window fg mới — dùng khi app
+     *  vừa vào nền. Mở window fg ở đây sẽ tính quãng nằm nền thành
+     *  foreground_sec; window fg thật sẽ do onActivityStarted mở lại. */
+    private fun rollScreenCountersForBackground() {
+        screenForegroundSec = 0.0
+        screenBackgroundSec = 0.0
+        lastForegroundedAtMs = 0L
     }
 
     fun install(app: Application) {
@@ -154,20 +164,31 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
             // screen_exited.
             val current = UniTrack.previousScreenName()
             if (!current.isNullOrEmpty()) {
+                // Đọc MỘT lần: mỗi lần gọi foregroundDwellSec() lại cộng thêm
+                // window fg đang mở, nên gọi ba lần cho ba field sẽ ra ba số
+                // lệch nhau và dwell_ms không khớp tổng.
+                val fg = foregroundDwellSec()
+                val bg = backgroundDwellSec()
                 UniTrack.track("screen_exited", mapOf(
                     "screen"         to current,
                     "screen_name"    to current,
                     // Per-screen semantics — match Snowplow screen_summary/1-0-0.
                     // String parity Iglu schema.
-                    "foreground_sec" to foregroundDwellSec().toString(),
-                    "background_sec" to backgroundDwellSec().toString(),
+                    "foreground_sec" to fg.toString(),
+                    "background_sec" to bg.toString(),
                     // dwell_ms suy từ chính hai field trên — nhánh này trước
                     // đây thiếu hẳn dwell_ms, khiến consumer phải xử lý hai
                     // hình dạng payload khác nhau cho cùng một event.
-                    "dwell_ms"       to ((foregroundDwellSec() + backgroundDwellSec()) * 1000.0).toLong().toString(),
+                    "dwell_ms"       to ((fg + bg) * 1000.0).toLong().toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))
+                // Roll NGAY sau khi stamp. Trước đây chỉ setScreen() mới roll,
+                // nên chuỗi Home→mở lại→Home (không đổi màn) cộng dồn mãi:
+                // đo thật 08/09 trên Xiaomi, cùng FliFlutterActivity ra
+                // fg=30.17 → 45.2 → 78.76 và bg=0 → 5.32 → 11.33 thay vì mỗi
+                // lần một quãng độc lập.
+                rollScreenCountersForBackground()
             }
             backgroundedAtMs = android.os.SystemClock.elapsedRealtime()
             NativeBridge.logBackground()
