@@ -179,7 +179,7 @@ internal object AppLifecycleObserver : Application.ActivityLifecycleCallbacks,
                     // dwell_ms suy từ chính hai field trên — nhánh này trước
                     // đây thiếu hẳn dwell_ms, khiến consumer phải xử lý hai
                     // hình dạng payload khác nhau cho cùng một event.
-                    "dwell_ms"       to ((fg + bg) * 1000.0).toLong().toString(),
+                    "dwell_ms"       to kotlin.math.round((fg + bg) * 1000.0).toLong().toString(),
                     "is_exit_screen" to "true",
                     "reason"         to "app_backgrounded",
                 ))

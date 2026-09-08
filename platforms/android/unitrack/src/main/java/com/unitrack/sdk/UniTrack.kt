@@ -996,7 +996,11 @@ object UniTrack {
                 // Nay dwell_ms = (fg + bg) × 1000, luôn khớp hai field kia.
                 // Nó vốn là field legacy (xem tracker.cpp:218) nên không cần
                 // độ phân giải mili giây riêng.
-                val dwellFromCounters = ((fgSec + bgSec) * 1000.0).toLong()
+                // round chứ KHÔNG toLong() trần: toLong() cắt phần thập phân,
+                // mà (4.85 + 3.02) * 1000 ra 7869.999… trong dấu phẩy
+                // động nên bị cắt thành 7869 thay vì 7870 — đo thật
+                // 08/09 trên Xiaomi, lệch 1ms so với (fg+bg)*1000.
+                val dwellFromCounters = kotlin.math.round((fgSec + bgSec) * 1000.0).toLong()
                 val endPayload: Map<String, Any?> = mapOf(
                     "screen"          to prev,
                     "screen_name"     to prev,
