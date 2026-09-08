@@ -37,23 +37,32 @@ enum AppLifecycleObserver {
     //   • setScreen(newName)   → close screen cũ, reset counters cho screen mới
     //   • didEnterBackground   → +fg dwell hiện tại, ghi vào screenForegroundSec
     //   • didBecomeActive      → +bg dwell hiện tại, ghi vào screenBackgroundSec
-    private static var screenForegroundSec: Int = 0
-    private static var screenBackgroundSec: Int = 0
+    //
+    // Double chứ không Int: làm tròn về giây ở TỪNG window rồi cộng lại làm
+    // mất tới ~1s mỗi lần chuyển fg/bg, và dwell_ms suy ra từ đây (xem
+    // UniTrack.setScreen) mất luôn độ phân giải mili giây. Snowplow builtin
+    // screen_summary/1-0-0 cũng dùng số thực làm tròn 2 chữ số — giữ cùng
+    // ngữ nghĩa để đội Data đọc hai nguồn như nhau. Parity: AppLifecycleObserver.kt.
+    private static var screenForegroundSec: Double = 0
+    private static var screenBackgroundSec: Double = 0
 
-    /// Cumulative giây screen hiện tại đã ở bg. Đọc bởi setScreen() lúc
+    /// Làm tròn 2 chữ số thập phân, parity Snowplow screen_summary.
+    private static func round2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
+
+    /// Giây screen hiện tại đã ở bg, cộng dồn. Đọc bởi setScreen() lúc
     /// close screen để stamp `background_sec` lên screen_exited.
-    static func backgroundDwellSec() -> Int { screenBackgroundSec }
+    static func backgroundDwellSec() -> Double { round2(screenBackgroundSec) }
 
-    /// Cumulative giây screen hiện tại đã ở fg. Bao gồm window fg đang mở.
+    /// Giây screen hiện tại đã ở fg, cộng dồn. Gồm cả window fg đang mở.
     /// Đọc bởi setScreen() lúc close screen để stamp `foreground_sec` lên
     /// screen_exited (dùng thay cho dwell_ms — chính xác hơn khi có bg
     /// window ở giữa).
-    static func foregroundDwellSec() -> Int {
+    static func foregroundDwellSec() -> Double {
         var total = screenForegroundSec
         if let fgAt = lastForegroundedAt {
-            total += max(0, Int(CACurrentMediaTime() - fgAt))
+            total += max(0, CACurrentMediaTime() - fgAt)
         }
-        return total
+        return round2(total)
     }
 
     /// Called by UniTrack.setScreen() SAU khi đã stamp counters vào
@@ -62,6 +71,15 @@ enum AppLifecycleObserver {
         screenForegroundSec = 0
         screenBackgroundSec = 0
         lastForegroundedAt  = CACurrentMediaTime()  // screen mới bắt đầu window fg
+    }
+
+    /// Như `rollScreenCounters` nhưng KHÔNG mở window fg mới — dùng khi app
+    /// vừa vào nền. Mở window fg ở đây sẽ tính quãng nằm nền thành
+    /// foreground_sec; window fg thật sẽ do didBecomeActive mở lại.
+    private static func rollScreenCountersForBackground() {
+        screenForegroundSec = 0
+        screenBackgroundSec = 0
+        lastForegroundedAt  = nil
     }
 
     // Snapshot of the session in progress at the moment we backgrounded —
@@ -84,7 +102,7 @@ enum AppLifecycleObserver {
             let isResume = (backgroundedAt != nil)   // false on the very first launch
             // Roll bg window vừa completed vào per-screen counter.
             if let bgAtMono = backgroundedAtMono {
-                screenBackgroundSec += max(0, Int(CACurrentMediaTime() - bgAtMono))
+                screenBackgroundSec += max(0, CACurrentMediaTime() - bgAtMono)
                 backgroundedAtMono = nil
             }
             // backgroundedAt (wall) KHÔNG xoá ở đây — emitSessionBoundariesIfNeeded
@@ -123,7 +141,7 @@ enum AppLifecycleObserver {
                        object: nil, queue: .main) { _ in
             // Roll fg window vừa closed vào per-screen counter.
             if let fgAt = lastForegroundedAt {
-                screenForegroundSec += max(0, Int(CACurrentMediaTime() - fgAt))
+                screenForegroundSec += max(0, CACurrentMediaTime() - fgAt)
                 lastForegroundedAt = nil
             }
             // Fire screen_exited for the top VC BEFORE app_background so the
@@ -131,18 +149,35 @@ enum AppLifecycleObserver {
             // lifecycle transition downstream. Product spec: "app bị pop /
             // exit" counts as screen_exited.
             if let current = UniTrack.previousScreenName(), !current.isEmpty {
+                // Đọc MỘT lần: mỗi lần gọi foregroundDwellSec() lại cộng thêm
+                // window fg đang mở, nên gọi nhiều lần cho nhiều field sẽ ra
+                // các số lệch nhau và dwell_ms không khớp tổng.
+                let fg = foregroundDwellSec()
+                let bg = backgroundDwellSec()
                 let endPayload: [String: Any] = [
                     "screen":         current,
                     "screen_name":    current,
                     // Per-screen semantics, matches Snowplow builtin
                     // screen_summary/1-0-0. String để parity Iglu schema
                     // (is_debug/is_rooted/... đã string).
-                    "foreground_sec": String(screenForegroundSec),
-                    "background_sec": String(screenBackgroundSec),
+                    "foreground_sec": String(fg),
+                    "background_sec": String(bg),
+                    // dwell_ms suy từ chính hai field trên — nhánh này trước
+                    // đây thiếu hẳn dwell_ms, khiến consumer phải xử lý hai
+                    // hình dạng payload khác nhau cho cùng một event.
+                    // rounded() chứ không Int() trần: Int() cắt phần thập phân,
+                    // mà (4.85 + 3.02) * 1000 ra 7869.999… trong dấu phẩy động
+                    // nên bị cắt thành 7869 thay vì 7870.
+                    "dwell_ms":       String(Int(((fg + bg) * 1000).rounded())),
                     "is_exit_screen": "true",
                     "reason":         "app_backgrounded",
                 ]
                 UniTrack.track("screen_exited", properties: endPayload)
+                // Roll NGAY sau khi stamp. Trước đây chỉ setScreen() mới roll,
+                // nên chuỗi Home→mở lại→Home (không đổi màn) cộng dồn mãi: đo
+                // thật 08/09 trên Xiaomi (Android, cùng lỗi), cùng một màn ra
+                // fg=30.17 → 45.2 → 78.76 thay vì mỗi lần một quãng độc lập.
+                rollScreenCountersForBackground()
             }
             // ut_log_background() — NOT UniTrack.track("app_background").
             // The core fires app_background itself inside log_background()

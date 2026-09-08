@@ -136,12 +136,6 @@ public final class UniTrack {
     // so the portal log + the Snowplow collector see the same transitions.
     private let lastScreenLock = NSLock()
     private var lastScreen: String?
-    /// Mốc vào màn hiện tại, đo bằng đồng hồ đơn điệu (CACurrentMediaTime).
-    /// KHÔNG phải Date: giá trị này chỉ dùng để trừ ra dwell_ms, mà wall clock
-    /// nhảy khi iOS đồng bộ NTP → dwell âm. Đo thật 2026-09-02 (session
-    /// 0eeaebfc): -9.544.502ms vì máy lùi giờ 2h39 lúc màn splash đang mở.
-    private var lastScreenAt: CFTimeInterval?
-
     /// Screen name of the most recent setScreen() call, or nil at cold start.
     /// Used by the ViewControllerSwizzler to stamp `previous_screen_name` on
     /// screen_load_completed events fired BEFORE the 50ms-deferred
@@ -910,11 +904,7 @@ public final class UniTrack {
         // lockstep so portal queue + Snowplow collector see identical
         // transitions (same field shape, same wire names from portal config).
         let now = Date()
-        // Hai đồng hồ, hai việc: `now` (wall) cho timestamp, `nowMono` (đơn
-        // điệu) cho mọi phép trừ ra khoảng thời gian. Xem lastScreenAt.
-        let nowMono = CACurrentMediaTime()
         var previous: String?
-        var dwellMs: Int = 0
         shared.lastScreenLock.lock()
         previous = shared.lastScreen
         // ponytail: 1-line dup guard. Cùng screen 2 lần liên tiếp (vd viewDidAppear
@@ -930,15 +920,7 @@ public final class UniTrack {
         // cần biết điều đó thay vì tự suy ra màn đứng trước lúc background.
         let cameFrom = previous
         if isSameScreen { previous = nil }
-        if let prev = previous, !prev.isEmpty,
-           let lastAt = shared.lastScreenAt {
-            // max(0,…) là lưới an toàn cuối: CACurrentMediaTime không chạy lùi
-            // nên nhánh này không nên xảy ra, nhưng thà mất một phép đo còn
-            // hơn đẩy số âm vào Iglu schema.
-            dwellMs = max(0, Int((nowMono - lastAt) * 1000.0))
-        }
-        shared.lastScreen   = name
-        shared.lastScreenAt = nowMono
+        shared.lastScreen = name
         shared.lastScreenLock.unlock()
 
         // ponytail: gate provider setScreen bằng CHÍNH isSameScreen ở trên.
@@ -981,10 +963,33 @@ public final class UniTrack {
             // ngay sau đây để screen mới bắt đầu đếm từ 0.
             let fgSec = AppLifecycleObserver.foregroundDwellSec()
             let bgSec = AppLifecycleObserver.backgroundDwellSec()
+            // dwell_ms suy TỪ bộ đếm, không đo riêng bằng lastScreenAt.
+            //
+            // Cách cũ lấy hiệu `nowMono - lastScreenAt`, nhưng hai giá trị đó
+            // cập nhật theo hai nhịp khác nhau: lastScreenAt bị ghi đè ở MỌI
+            // lần setScreen (không điều kiện), còn screen_exited chỉ phát khi
+            // `screenLifecycleEnabled && !reentry`. Lần setScreen nào không
+            // phát event sẽ dời mốc mà không ai roll bộ đếm → lần đo kế tiếp
+            // tính từ mốc sai.
+            //
+            // Khác biệt ngữ nghĩa thứ hai: dwell_ms cũ KHÔNG cộng thời gian
+            // màn ở nền, còn fg+bg thì có.
+            //
+            // Đo thật (ftracking_505.json, 04/09): FlutterLoginViewController
+            // báo dwell_ms=54.814 trong khi fg=0 bg=0 — lệch 55 giây.
+            //
+            // Nay dwell_ms = (fg + bg) × 1000, luôn khớp hai field kia. Nó vốn
+            // là field legacy (xem tracker.cpp:218) nên không cần độ phân giải
+            // mili giây riêng. Parity: UniTrack.kt cùng công thức.
+            // rounded() chứ KHÔNG Int() trần: Int() cắt phần thập phân, mà
+            // (4.85 + 3.02) * 1000 ra 7869.999… trong dấu phẩy động nên bị cắt
+            // thành 7869 thay vì 7870 — đo thật 08/09 trên Xiaomi (Android,
+            // cùng công thức), lệch 1ms so với (fg+bg)*1000.
+            let dwellFromCounters = Int(((fgSec + bgSec) * 1000).rounded())
             let endPayload: [String: Any] = [
                 "screen":          prev,
                 "screen_name":     prev,
-                "dwell_ms":        String(dwellMs),
+                "dwell_ms":        String(dwellFromCounters),
                 "foreground_sec":  String(fgSec),
                 "background_sec":  String(bgSec),
                 // ponytail: string ("true"/"false") thay vì bool để parity với
