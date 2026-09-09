@@ -955,6 +955,7 @@ router.get('/projects/:id/event-detail', ownProject, (req, res) => {
   // only within the ±NEAR_MS window so we don't fetch a same-named event from
   // a different session entirely.
   if (session && t > 0) {
+    // Match by name first — Firebase mirrors keep the unitrack event name.
     const loose = db.prepare(`
       SELECT provider, properties, timestamp, screen_name, element_key
       FROM events
@@ -969,6 +970,35 @@ router.get('/projects/:id/event-detail', ownProject, (req, res) => {
       let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) {}
       byProvider[p] = { properties: props, timestamp: r.timestamp,
                         screen_name: r.screen_name, element_key: r.element_key };
+    }
+
+    // Snowplow RENAMES the event on the way out: the SDK maps a raw name onto
+    // a convention kind, so `click`→`ev_click`, `screen_viewed`→`screen_view`,
+    // `screen_exited`→`screen_end`, `network_request`→`ev_api`,
+    // `session_*`→`ev_session`. Matching on event_name alone therefore never
+    // finds the Snowplow twin of any auto-captured event, and the drawer shows
+    // no schema/entity block at all. event_id differs per provider (each
+    // builds its own), but both rows are stamped from the same track() call so
+    // the timestamp is identical — match on that, inside the session, and
+    // confirm via the mirror's own event_action which carries the RAW name.
+    if (!byProvider.snowplow) {
+      const twins = db.prepare(`
+        SELECT provider, properties, timestamp, screen_name, element_key
+        FROM events
+        WHERE project_id = ? AND provider = 'snowplow' AND session_id = ?
+          AND timestamp BETWEEN ? AND ?
+        ORDER BY ABS(timestamp - ?) ASC
+        LIMIT 24
+      `).all(req.params.id, session, t - NEAR_MS, t + NEAR_MS, t);
+      for (const r of twins) {
+        let props = {}; try { props = JSON.parse(r.properties || '{}'); } catch (_) { continue; }
+        // event_action is the raw name the app called track() with — the only
+        // field that ties the renamed mirror back to this row.
+        if (props.event_action !== name) continue;
+        byProvider.snowplow = { properties: props, timestamp: r.timestamp,
+                                screen_name: r.screen_name, element_key: r.element_key };
+        break;
+      }
     }
   }
   res.json({ event_name: name, providers: byProvider });

@@ -49,10 +49,84 @@ app.use((req, _res, next) => {
 
 const router = express.Router();
 
-router.post('/v1/events', handleIngest);          // open — uses project API key
+// CORS cho đường ingest — web SDK chạy trong browser nên bị preflight chặn nếu
+// thiếu header này. Chỉ mở trên ingest (auth = api_key trong body/header, không
+// dùng cookie) — KHÔNG mở cho /api/* vì đó là cookie-auth, credentials:true +
+// origin:* sẽ thành lỗ CSRF.
+const ingestCors = (req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'content-type,authorization,x-api-key,x-unitrack-provider,traceparent');
+  res.set('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+};
+router.options('/v1/events', ingestCors);
+router.options('/sp/:apiKey/com.snowplowanalytics.snowplow/tp2', ingestCors);
+
+router.post('/v1/events', ingestCors, handleIngest);   // open — uses project API key
 // Snowplow collector-compatible endpoint (proxy). Point a Snowplow tracker's
 // collector at {BASE}/sp/<api_key>. Open — auth is the per-project api_key.
-router.post('/sp/:apiKey/com.snowplowanalytics.snowplow/tp2', handleSnowplow);
+router.post('/sp/:apiKey/com.snowplowanalytics.snowplow/tp2', ingestCors, handleSnowplow);
+
+// Lite echo endpoint cho @unitrack/web demo — không lưu DB, chỉ log + trả 200.
+// Dùng để team verify event SDK web đến server thật. KHÔNG là production
+// pipeline — production app nên dùng /v1/events hoặc /sp/<key>/...
+{
+  const webEvents = [];
+  const WEB_EVENTS_CAP = 200;
+  router.post('/web-events', (req, res) => {
+    const batch = Array.isArray(req.body) ? req.body : [req.body];
+    const stamped = batch.map((ev) => ({
+      received_at: Date.now(),
+      ip: req.headers['x-forwarded-for'] || req.ip,
+      ua: req.headers['user-agent'],
+      channel: 'http',
+      ...ev,
+    }));
+    webEvents.unshift(...stamped);
+    if (webEvents.length > WEB_EVENTS_CAP) webEvents.length = WEB_EVENTS_CAP;
+    console.log(`[web-events] ${stamped.length} event received (total ${webEvents.length})`);
+    res.json({ ok: true, received: stamped.length });
+  });
+  // Snowplow tp2 endpoint — SDK web POST `${endpoint}/com.snowplowanalytics.snowplow/tp2`
+  // với body {schema, data:[…]}. Portal accept + đưa vào cùng buffer,
+  // tag channel="snowplow" để phân biệt ở UI list.
+  router.post('/web-events/com.snowplowanalytics.snowplow/tp2', (req, res) => {
+    const payload = req.body || {};
+    const events = Array.isArray(payload.data) ? payload.data : [];
+    const stamped = events.map((ev) => ({
+      received_at: Date.now(),
+      ip: req.headers['x-forwarded-for'] || req.ip,
+      ua: req.headers['user-agent'],
+      channel: 'snowplow',
+      // Parse ue_pr + co (Snowplow JSON string-encoded)
+      aid: ev.aid,
+      eid: ev.eid,
+      e: ev.e,
+      p: ev.p,
+      url: ev.url,
+      page: ev.page,
+      ue_pr: safeParseJson(ev.ue_pr),
+      co: safeParseJson(ev.co),
+    }));
+    webEvents.unshift(...stamped);
+    if (webEvents.length > WEB_EVENTS_CAP) webEvents.length = WEB_EVENTS_CAP;
+    console.log(`[snowplow-tp2] ${stamped.length} event received (total ${webEvents.length})`);
+    // Snowplow collector protocol expect 200 với body rỗng
+    res.status(200).end();
+  });
+  function safeParseJson(s) {
+    if (typeof s !== 'string') return s;
+    try { return JSON.parse(s); } catch { return s; }
+  }
+  router.get('/web-events', (_req, res) => {
+    res.json({ count: webEvents.length, events: webEvents });
+  });
+  router.delete('/web-events', (_req, res) => {
+    webEvents.length = 0;
+    res.json({ ok: true });
+  });
+}
 // Remote config fetch — open, authenticated by the per-project api_key. The app
 // calls this at startup to get its tracking config (endpoint, providers, …).
 router.get('/config', handleConfig);
