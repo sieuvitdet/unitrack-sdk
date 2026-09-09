@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <mutex>
 #include <set>
 #include <cstdlib>
 #include <cstring>
@@ -257,11 +258,19 @@ static void test_backoff() {
 // Counts HTTP calls received by mock transport.
 static std::atomic<int> g_http_calls{0};
 static std::string      g_last_payload;
+// Nối MỌI batch đã gửi. g_last_payload chỉ giữ batch cuối, nên test nào bắn
+// nhiều event hơn batch_size sẽ mất các event nằm ở batch đầu — số batch phụ
+// thuộc tốc độ máy nên test thành flaky theo runner (xanh trên macOS, đỏ trên
+// Linux). Test nào cần "event X đã được gửi đi" thì tra biến này.
+static std::string      g_all_payloads;
+static std::mutex       g_payload_mu;
 static int mock_http(const char* /*url*/, const char* /*method*/,
                      const char* /*headers*/, const char* body, size_t len,
                      void* /*ud*/) {
     g_http_calls.fetch_add(1);
+    std::lock_guard<std::mutex> lk(g_payload_mu);
     g_last_payload.assign(body, len);
+    g_all_payloads.append(body, len);
     return 200;
 }
 
@@ -271,6 +280,7 @@ static void test_c_api_end_to_end() {
 
     g_http_calls.store(0);
     g_last_payload.clear();
+    g_all_payloads.clear();
 
     const char* cfg =
         "{\"db_path\":\"/tmp/ut_e2e.db\","
@@ -298,7 +308,11 @@ static void test_c_api_end_to_end() {
     CHECK(g_http_calls.load() >= 1, "HTTP send happened");
     CHECK(g_last_payload.front() == '[' && g_last_payload.back() == ']',
           "payload is JSON array");
-    CHECK(g_last_payload.find("button_clicked") != std::string::npos,
+    // Tra trong TẤT CẢ batch: batch_size=3 mà test bắn 5 event, nên
+    // button_clicked (event thứ 2) rơi vào batch đầu còn g_last_payload giữ
+    // batch cuối. Máy nhanh gộp cả 5 vào một batch nên vẫn thấy, máy chậm chia
+    // hai batch thì mất — đúng lý do CI đỏ trên Linux mà xanh trên macOS.
+    CHECK(g_all_payloads.find("button_clicked") != std::string::npos,
           "payload contains tracked event");
 
     ut_shutdown(ctx);
