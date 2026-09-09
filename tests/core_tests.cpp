@@ -407,7 +407,13 @@ static void test_screen_lifecycle() {
     CHECK(p.find("page_leave") != std::string::npos, "screen: renamed end event present");
     CHECK(p.find("\"screen_start\"") == std::string::npos, "screen: default start name NOT used");
     CHECK(p.find("dwell_ms") != std::string::npos, "screen: end carries dwell_ms");
-    CHECK(p.find("screen_view") != std::string::npos, "screen: screen_view kept for back-compat");
+    // Fan-out `screen_view` legacy đã bị bỏ ở 60dc7ba: trước đây core bắn 2
+    // event mỗi lần đổi màn (screen_view hardcode + screen_start_event từ
+    // config), cả hai cùng iglu schema screen_view/1-0-0 nên DB nhận 2 record
+    // trùng và record legacy stamp event_action="screen_view" lệch với
+    // core_action.action_name. Nay chỉ còn đúng một event mang tên từ config.
+    CHECK(p.find("\"event_name\":\"screen_view\"") == std::string::npos,
+          "screen: khong con fan-out screen_view legacy");
     // Home should have a leave event; Detail should have an enter event.
     CHECK(p.find("\"screen\":\"Home\"") != std::string::npos, "screen: Home tracked");
     CHECK(p.find("\"from\":\"Home\"") != std::string::npos, "screen: Detail start records from=Home");
@@ -969,8 +975,11 @@ static void test_screen_dedup_cross_layer() {
     // matches keeps the count = number of distinct events. Simplest robust
     // approach: count occurrences of the (event_name + screen) pair in the
     // batch JSON, where the pair only co-occurs once per event.
+    // Đếm theo `screen_viewed` — default của config.screen_start_event
+    // (core/src/config.h:62). Trước đây hàm này tìm "screen_view", tên mà core
+    // không còn phát từ 60dc7ba, nên mọi phép đếm ra 0 và cả 5 assert fail.
     auto count_screen_view = [](const std::string& payload, const std::string& screen) {
-        // Pattern unique per event: "event_name":"screen_view" appears once
+        // Pattern unique per event: "event_name":"screen_viewed" appears once
         // per event, then the same event carries "screen":"<name>" twice. We
         // count by splitting on event_id (one per event) and checking each
         // object for the matching screen.
@@ -981,7 +990,7 @@ static void test_screen_dedup_cross_layer() {
             // Find the end of this event object (next event_id or end-of-array).
             size_t next = payload.find(evid, p + evid.size());
             std::string obj = payload.substr(p, next == std::string::npos ? std::string::npos : next - p);
-            if (obj.find("\"event_name\":\"screen_view\"") != std::string::npos &&
+            if (obj.find("\"event_name\":\"screen_viewed\"") != std::string::npos &&
                 obj.find("\"screen\":\"" + screen + "\"") != std::string::npos) {
                 ++n;
             }
@@ -991,6 +1000,21 @@ static void test_screen_dedup_cross_layer() {
     };
 
     // 1) Same name from two layers within the window → exactly 1 emission.
+    //
+    // CẢNH BÁO về sức mạnh của test này: lượt gọi thứ hai bị chặn bởi guard
+    // "cùng tên với màn hiện tại" (tracker.cpp:169) chứ KHÔNG phải bởi dedup
+    // cross-layer bên dưới nó. Đã kiểm bằng mutation: tắt hẳn nhánh cross-layer
+    // thì test vẫn pass, và đặt fprintf trong nhánh đó cho ra 0 lần chạy trên
+    // toàn bộ test suite.
+    //
+    // Nguyên nhân: last_screen_name_ và current_screen_ luôn được gán cùng giá
+    // trị tại cùng một chỗ, nên điều kiện của nhánh cross-layer chỉ đúng khi
+    // guard phía trên cũng đúng — mà guard đó đã return trước. Nhánh
+    // cross-layer hiện là dead code.
+    //
+    // Chưa sửa ở đây vì đó là thay đổi ngữ nghĩa của tính năng cross-binary,
+    // không thuộc phạm vi việc sửa CI. Test giữ nguyên hành vi đang đúng
+    // (không phát trùng screen_viewed), coi như test hồi quy cho guard.
     ut_set_screen_for_layer(ctx, "Home", UT_LAYER_NATIVE_IOS);
     ut_set_screen_for_layer(ctx, "Home", UT_LAYER_FLUTTER);   // dedup-drop
     ut_flush(ctx);
