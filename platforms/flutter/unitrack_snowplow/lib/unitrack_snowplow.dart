@@ -478,7 +478,9 @@ class SnowplowProvider extends AnalyticsProvider {
     };
     final s = const JsonEncoder.withIndent('  ').convert(payload);
     debugPrint('─── Snowplow Tracking ───  (convention event="$name")');
-    for (final line in s.split('\n')) debugPrint(line);
+    for (final line in s.split('\n')) {
+      debugPrint(line);
+    }
   }
 
   // ── Convention helpers (app-facing) ────────────────────────────────────

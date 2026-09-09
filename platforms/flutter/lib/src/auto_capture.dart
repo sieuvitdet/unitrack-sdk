@@ -676,7 +676,7 @@ class _TrackingHttpRequest implements HttpClientRequest {
     if (bytes.isEmpty) return null;
     try {
       var s = utf8.decode(bytes, allowMalformed: true);
-      if (s.length > _body.maxChars) s = s.substring(0, _body.maxChars) + '…';
+      if (s.length > _body.maxChars) s = '${s.substring(0, _body.maxChars)}…';
       return s;
     } catch (_) { return '<${bytes.length} bytes>'; }
   }

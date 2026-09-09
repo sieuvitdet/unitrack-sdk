@@ -16,7 +16,7 @@ import 'package:flutter/widgets.dart';
 import 'src/auto_capture.dart' show installUniTrackHttpAutoCapture, UniTrackBodyCapture;
 import 'src/analytics_provider.dart';
 import 'src/native_screen_channel.dart';
-import 'src/trace_context.dart' as _trace;
+import 'src/trace_context.dart' as trace;
 
 // Dart-layer auto-capture (tap + screen + network). See src/auto_capture.dart.
 export 'src/auto_capture.dart'
@@ -422,7 +422,7 @@ class UniTrack {
     List<String> allowlistHosts = const [],
     bool sampled = true,
   }) {
-    _trace.unitrackTracing = _trace.UniTrackTracingConfig(
+    trace.unitrackTracing = trace.UniTrackTracingConfig(
       enabled: enabled,
       headerName: headerName,
       allowlistHosts: allowlistHosts,
@@ -432,7 +432,7 @@ class UniTrack {
 
   /// Read-only snapshot dùng cho UniTrackHttpClient inject traceparent.
   /// Tách thành getter để client không phải import lib internal trace_context.
-  _trace.UniTrackTracingConfig tracingSnapshot() => _trace.unitrackTracing;
+  trace.UniTrackTracingConfig tracingSnapshot() => trace.unitrackTracing;
 
   Future<void> track(String event, {Map<String, Object?>? properties}) {
     final props = properties ?? const <String, Object?>{};
