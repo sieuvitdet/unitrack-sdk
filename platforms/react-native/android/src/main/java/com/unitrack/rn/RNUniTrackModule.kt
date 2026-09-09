@@ -67,6 +67,26 @@ class RNUniTrackModule(reactContext: ReactApplicationContext)
         UniTrack.track(event, jsonToMap(propsJson)); promise.resolve(null)
     }
 
+    /**
+     * Custom event API — parity với iOS Swift / Android Kotlin / Flutter Dart.
+     * Native side stamp `session_id` + `event_action` (= action ?? eventName)
+     * + `user_id` (nếu includeUser=true, lấy từ cache identify()).
+     */
+    @ReactMethod
+    fun customTrack(eventName: String, action: String?,
+                    dataJson: String, includeUser: Boolean, promise: Promise) {
+        // RN bridge encodes JS null as empty string on Android for @ReactMethod
+        // String? args — normalize để native SDK nhận đúng nil semantics.
+        val effectiveAction = if (action.isNullOrEmpty()) null else action
+        UniTrack.customTrack(
+            eventName   = eventName,
+            action      = effectiveAction,
+            data        = jsonToMap(dataJson),
+            includeUser = includeUser,
+        )
+        promise.resolve(null)
+    }
+
     @ReactMethod
     fun setScreen(name: String, promise: Promise) {
         UniTrack.setScreen(name); promise.resolve(null)

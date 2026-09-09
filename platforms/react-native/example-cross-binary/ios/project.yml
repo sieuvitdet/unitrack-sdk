@@ -1,0 +1,43 @@
+name: UniTrackRNHost
+options:
+  bundleIdPrefix: com.unitrack.example
+  deploymentTarget:
+    iOS: "14.0"
+
+# 1 native Swift app đã link SPM UniTrack + Pod RNUniTrack. AppDelegate init
+# UniTrack native TRƯỚC khi mount RCTBridge → RN plugin detect co-resident
+# qua NSClassFromString("UniTrack.UniTrack") và piggyback.
+
+packages:
+  # SPM local — trỏ về monorepo iOS SDK. Không cần publish trước khi test.
+  UniTrack:
+    path: ../../../../platforms/ios
+
+targets:
+  UniTrackRNHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: AppDelegate.swift
+      - path: SceneDelegate.swift
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: UniTrackRN
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true   # metro bundler http local
+    dependencies:
+      - package: UniTrack
+        product: UniTrack
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        PRODUCT_BUNDLE_IDENTIFIER: com.unitrack.example.rn

@@ -1,6 +1,21 @@
 apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+// Co-resident mode (skipVendor): khi host Android app ALREADY link native
+// UniTrack Maven (vd app native nhúng RN + app đã có UniTrack riêng cho UIKit-
+// equivalent), kéo cùng FQN `com.unitrack.sdk.UniTrack` sẽ gây Gradle duplicate
+// class error. Set `unitrack.skipVendor=true` trong gradle.properties hoặc
+// `-Punitrack.skipVendor=true` ở command line → RN plugin đổi sang `compileOnly`
+// → code RN bridge (RNUniTrackModule.kt) vẫn compile được nhưng KHÔNG ship
+// runtime binary. Host app phải supply UniTrack Maven qua dependencies block.
+def skipVendor = providers.gradleProperty('unitrack.skipVendor')
+    .map { it.toBoolean() }.getOrElse(false)
+
+if (skipVendor) {
+    logger.lifecycle("[unitrack-rn] skipVendor=true — host app phải supply " +
+        "com.github.sieuvitdet.unitrack-sdk:unitrack ở dependencies block")
+}
+
 android {
     namespace 'com.unitrack.rn'
     compileSdk 34
@@ -30,9 +45,14 @@ repositories {
 dependencies {
     implementation 'com.facebook.react:react-native:+'
     // UniTrack Android SDK — published to JitPack from the same monorepo.
-    // Pinned to the tag that ships the matching API surface; bump together
-    // with the npm package version.
-    // Bump kèm FirebaseAdapter setDefaultEventParameters. Yêu cầu app side
-    // Firebase Android SDK 21.0.0+ (older SDK → no-op an toàn qua reflection).
-    implementation 'com.github.sieuvitdet:unitrack-sdk:0.3.37'
+    // - skipVendor=false (default): implementation → binary + kotlin class
+    //   được kéo vào RN plugin. Standalone RN app dùng path này.
+    // - skipVendor=true: chỉ compileOnly để RN bridge code (UniTrack.foo(...))
+    //   compile được. Host native app supply runtime binary → 1 singleton
+    //   UniTrack duy nhất trong process.
+    if (skipVendor) {
+        compileOnly 'com.github.sieuvitdet:unitrack-sdk:0.3.37'
+    } else {
+        implementation 'com.github.sieuvitdet:unitrack-sdk:0.3.37'
+    }
 }

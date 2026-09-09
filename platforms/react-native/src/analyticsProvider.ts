@@ -1,7 +1,7 @@
 // AnalyticsProvider — extension point for forwarding UniTrack events to
 // third-party analytics SDKs (Snowplow, Firebase, …).
 //
-// The core '@unitrack/react-native' package depends on NOTHING third-party. A
+// The core 'unitrack-react-native' package depends on NOTHING third-party. A
 // provider lives in its own package (@unitrack/snowplow, @unitrack/firebase)
 // that pulls in the heavy SDK, implements this interface, and is registered by
 // the app:

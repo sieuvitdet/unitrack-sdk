@@ -1,4 +1,4 @@
-# @unitrack/react-native
+# unitrack-react-native
 
 Universal mobile analytics SDK for React Native. Auto-captures screens, taps,
 network calls, crashes, OOM warnings, and JSON parse errors with a persistent
@@ -19,7 +19,7 @@ offline queue, session journey tracking, and W3C trace propagation.
 ## Install
 
 ```bash
-npm install @unitrack/react-native
+npm install unitrack-react-native
 # iOS
 cd ios && pod install
 ```
@@ -27,7 +27,7 @@ cd ios && pod install
 ## Initialize
 
 ```ts
-import { UniTrack } from '@unitrack/react-native';
+import { UniTrack } from 'unitrack-react-native';
 
 await UniTrack.initialize('utk_your_api_key', {
   endpoint: 'https://your-portal.com/event-tracking/v1/events',
@@ -104,7 +104,7 @@ UniTrack.setTracing({
 ## React Navigation auto-capture
 
 ```tsx
-import { UniTrackRouteObserver } from '@unitrack/react-native';
+import { UniTrackRouteObserver } from 'unitrack-react-native';
 
 <NavigationContainer onStateChange={UniTrackRouteObserver.onStateChange}>
   ...
@@ -117,7 +117,7 @@ Snowplow is a separate npm package. Firebase Analytics mirror is built-in via
 reflection — host app links Firebase itself, SDK has zero Firebase dependency.
 
 ```ts
-import { UniTrack } from '@unitrack/react-native';
+import { UniTrack } from 'unitrack-react-native';
 import { SnowplowProvider } from '@unitrack/snowplow';
 
 UniTrack.addProvider(new SnowplowProvider({

@@ -8,7 +8,7 @@
 //
 // Usage — declare ONCE at the root:
 //
-//   import { UniTrackTapBoundary } from '@unitrack/react-native';
+//   import { UniTrackTapBoundary } from 'unitrack-react-native';
 //
 //   export default function App() {
 //     return (

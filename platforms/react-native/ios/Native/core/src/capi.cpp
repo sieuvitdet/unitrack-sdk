@@ -17,6 +17,12 @@
 
 using namespace unitrack;
 
+// Declared in tracker.cpp; capi.cpp tags the calling thread's layer here
+// immediately before forwarding into Tracker::set_screen so cross-layer
+// dedup inside the tracker can see who emitted the screen. Per-thread =
+// safe under concurrent calls from different bindings.
+namespace unitrack { extern thread_local ut_layer tl_caller_layer; }
+
 // Opaque struct exposed to C — contains our C++ Tracker.
 struct ut_context {
     Tracker* tracker;
@@ -68,8 +74,21 @@ void ut_track(ut_context* ctx, const char* event_name, const char* properties_js
 }
 
 void ut_set_screen(ut_context* ctx, const char* screen_name) {
-    if (ctx && ctx->tracker && screen_name)
+    if (ctx && ctx->tracker && screen_name) {
+        tl_caller_layer = UT_LAYER_NONE;  // legacy path, no dedup
         ctx->tracker->set_screen(screen_name);
+    }
+}
+
+// Layer-tagged set_screen. The thread_local hand-off keeps ut_set_screen's
+// ABI untouched while still letting the tracker's dedup logic see who is
+// emitting. Reset to NONE after the call so a later untagged call on the
+// same thread doesn't inherit a stale layer tag.
+void ut_set_screen_for_layer(ut_context* ctx, const char* screen_name, ut_layer layer) {
+    if (!ctx || !ctx->tracker || !screen_name) return;
+    tl_caller_layer = layer;
+    ctx->tracker->set_screen(screen_name);
+    tl_caller_layer = UT_LAYER_NONE;
 }
 
 void ut_log_tap(ut_context* ctx, const char* element_key,
@@ -235,6 +254,40 @@ void ut_set_flush_callback(ut_context* ctx, ut_flush_success_fn fn, void* userda
     if (!ctx || !ctx->tracker) return;
     ctx->tracker->set_flush_callback(
         reinterpret_cast<unitrack::Tracker::FlushCallback>(fn), userdata);
+}
+
+// ── Layer registry bridge ────────────────────────────────────────────────
+// Thin pass-through to Tracker. The active_layers / subtree_claimed_by
+// readers are designed for hot paths (swizzlers call them on every screen
+// boundary) — Tracker keeps active_layers_ atomic and subtree_owners_ in
+// a small mutex-guarded map so cost is essentially a single lock acquire.
+
+void ut_register_layer(ut_context* ctx, ut_layer layer) {
+    if (ctx && ctx->tracker) ctx->tracker->register_layer(layer);
+}
+
+uint32_t ut_active_layers(ut_context* ctx) {
+    if (!ctx || !ctx->tracker) return 0;
+    return ctx->tracker->active_layers();
+}
+
+void ut_claim_subtree(ut_context* ctx, ut_layer layer, const char* subtree_id) {
+    if (ctx && ctx->tracker && subtree_id)
+        ctx->tracker->claim_subtree(layer, subtree_id);
+}
+
+void ut_release_subtree(ut_context* ctx, const char* subtree_id) {
+    if (ctx && ctx->tracker && subtree_id)
+        ctx->tracker->release_subtree(subtree_id);
+}
+
+ut_layer ut_subtree_claimed_by(ut_context* ctx, const char* subtree_id) {
+    if (!ctx || !ctx->tracker || !subtree_id) return UT_LAYER_NONE;
+    return ctx->tracker->subtree_claimed_by(subtree_id);
+}
+
+void ut_set_screen_dedup_window_ms(ut_context* ctx, int window_ms) {
+    if (ctx && ctx->tracker) ctx->tracker->set_screen_dedup_window_ms(window_ms);
 }
 
 } // extern "C"

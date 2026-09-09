@@ -1,5 +1,5 @@
 "use strict";
-// @unitrack/react-native
+// unitrack-react-native
 //
 // Public API. Calls the native module which forwards to the iOS / Android
 // SDK installed underneath. Auto-capture (screens, taps, network) is
@@ -22,7 +22,7 @@ function hostPath(url) {
     return m ? m[1] + m[2] : url.split('?')[0];
 }
 const LINK_HINT = `[UniTrack] Native module not found. ` +
-    `Ensure '@unitrack/react-native' is properly linked. ` +
+    `Ensure 'unitrack-react-native' is properly linked. ` +
     `Run 'pod install' (iOS) and rebuild.`;
 const native = (_a = react_native_1.NativeModules.UniTrack) !== null && _a !== void 0 ? _a : new Proxy({}, {
     get() {
@@ -162,6 +162,24 @@ class UniTrackClass {
         this.forEachProvider((p) => p.track(name, props));
         return native.track(name, JSON.stringify(props));
     }
+    /**
+     * Custom event API — parity với iOS Swift `UniTrack.customTrack` + Android
+     * Kotlin `UniTrack.customTrack` + Flutter Dart. Native side stamp
+     * `session_id`, `event_action` (= [action] ?? [eventName]) và `user_id`
+     * (nếu [includeUser] true, lấy từ cache `identify()` đã set).
+     *
+     * 2 pattern:
+     *  1. 1 schema = 1 action: `customTrack('banner_clicked', { data })`
+     *  2. 1 schema = nhiều action: `customTrack('payment_event',
+     *       { action: 'payment_completed', data, includeUser: true })`
+     */
+    customTrack(eventName, opts = {}) {
+        var _a, _b, _c;
+        const action = (_a = opts.action) !== null && _a !== void 0 ? _a : null;
+        const data = (_b = opts.data) !== null && _b !== void 0 ? _b : {};
+        const includeUser = (_c = opts.includeUser) !== null && _c !== void 0 ? _c : false;
+        return native.customTrack(eventName, action, JSON.stringify(data), includeUser);
+    }
     setScreen(name) {
         this.forEachProvider((p) => p.setScreen(name));
         return native.setScreen(name);
@@ -262,6 +280,23 @@ class UniTrackClass {
     markSessionError() { return native.markSessionError(); }
     markSessionCrash() { return native.markSessionCrash(); }
     resetSessionStats() { return native.resetSessionStats(); }
+    // ─── Provider Adapters (Phase 6) ───────────────────────────────────────
+    //
+    // Add HTTP backends (Kibana / ELK / FPT internal) or attach Firebase
+    // Analytics via reflection. UniTrack has 0 import on Firebase; the adapter
+    // is a runtime auto-detect via NSClassFromString / Class.forName.
+    /**
+     * Attach the Firebase Adapter. Resolves to true if Firebase Analytics was
+     * found at runtime and the adapter is now active. False means the host
+     * hasn't linked Firebase — call again after they do, no rebuild needed.
+     */
+    attachFirebaseAdapter() {
+        return native.attachFirebaseAdapter();
+    }
+    /** Snapshot of events waiting in the per-provider ack queue. Demo/debug. */
+    pendingProviderRetryCount() {
+        return native.pendingProviderRetryCount();
+    }
     // --- semantic event helpers (Phase 3) ----------------------------------
     /** Notification received/opened/dismissed.
      *  state: 'foreground'|'background'|'silent'

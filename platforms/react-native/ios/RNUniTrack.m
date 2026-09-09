@@ -31,6 +31,13 @@ RCT_EXTERN_METHOD(track:(NSString *)event
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(customTrack:(NSString *)eventName
+                  action:(NSString *)action
+                  data:(NSString *)dataJson
+                  includeUser:(BOOL)includeUser
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(setScreen:(NSString *)name
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

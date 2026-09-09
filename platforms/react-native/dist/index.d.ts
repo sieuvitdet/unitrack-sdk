@@ -51,6 +51,22 @@ declare class UniTrackClass {
     private resolveKind;
     private kindForRawEvent;
     track(event: string, properties?: EventProperties): Promise<void>;
+    /**
+     * Custom event API — parity với iOS Swift `UniTrack.customTrack` + Android
+     * Kotlin `UniTrack.customTrack` + Flutter Dart. Native side stamp
+     * `session_id`, `event_action` (= [action] ?? [eventName]) và `user_id`
+     * (nếu [includeUser] true, lấy từ cache `identify()` đã set).
+     *
+     * 2 pattern:
+     *  1. 1 schema = 1 action: `customTrack('banner_clicked', { data })`
+     *  2. 1 schema = nhiều action: `customTrack('payment_event',
+     *       { action: 'payment_completed', data, includeUser: true })`
+     */
+    customTrack(eventName: string, opts?: {
+        action?: string;
+        data?: EventProperties;
+        includeUser?: boolean;
+    }): Promise<void>;
     setScreen(name: string): Promise<void>;
     flush(): Promise<void>;
     setEnabled(e: boolean): Promise<void>;
@@ -97,6 +113,14 @@ declare class UniTrackClass {
     markSessionError(): Promise<void>;
     markSessionCrash(): Promise<void>;
     resetSessionStats(): Promise<void>;
+    /**
+     * Attach the Firebase Adapter. Resolves to true if Firebase Analytics was
+     * found at runtime and the adapter is now active. False means the host
+     * hasn't linked Firebase — call again after they do, no rebuild needed.
+     */
+    attachFirebaseAdapter(): Promise<boolean>;
+    /** Snapshot of events waiting in the per-provider ack queue. Demo/debug. */
+    pendingProviderRetryCount(): Promise<number>;
     /** Notification received/opened/dismissed.
      *  state: 'foreground'|'background'|'silent'
      *  action: 'received'|'opened'|'dismissed' (default 'received')

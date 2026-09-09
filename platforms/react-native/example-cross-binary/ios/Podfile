@@ -1,0 +1,28 @@
+# Podfile chỉ để install RNUniTrack (RN plugin) + React-Core.
+# UniTrack native đã link qua SPM ở project.yml, KHÔNG install lại qua pod.
+# → 1 binary UniTrack duy nhất trong app.
+
+platform :ios, '14.0'
+
+# Use RN 0.75.4 CocoaPods spec repo (matches rn/package.json version).
+require_relative '../rn/node_modules/react-native/scripts/react_native_pods'
+require_relative '../rn/node_modules/@react-native-community/cli-platform-ios/native_modules'
+
+target 'UniTrackRNHost' do
+  use_frameworks! :linkage => :static
+  config = use_native_modules!
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => true,
+    :fabric_enabled => false,
+    :app_path       => "#{Pod::Config.instance.installation_root}/../rn"
+  )
+
+  # RN plugin — trỏ tới package trong monorepo. Trước đó `sync_native.sh` phải
+  # populate ios/Native/ (bên RNUniTrack.podspec đã có s.source_files trỏ vào).
+  pod 'RNUniTrack', :path => '../../../../platforms/react-native'
+end
+
+post_install do |installer|
+  react_native_post_install(installer)
+end

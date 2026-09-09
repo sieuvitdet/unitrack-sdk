@@ -99,13 +99,26 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
         // on the allowlist. Skip if the app already set the header (manual
         // propagation wins — don't clobber an explicit upstream trace).
         let (enabled, hdrName, allow, sampled) = Self.tracingSnapshot()
+        let host = request.url?.host ?? "?"
         if enabled,
            UniTrackTracing.shouldInject(host: request.url?.host, allowlist: allow),
            mreq.value(forHTTPHeaderField: hdrName) == nil {
             let ids = UniTrackTracing.newTrace()
-            mreq.setValue(UniTrackTracing.traceparent(ids, sampled: sampled),
-                          forHTTPHeaderField: hdrName)
+            let header = UniTrackTracing.traceparent(ids, sampled: sampled)
+            mreq.setValue(header, forHTTPHeaderField: hdrName)
             traceIds = ids
+            UniTrack.log("[W3C] inject host=%@ %@: %@",
+                         host, hdrName, header)
+        } else if enabled {
+            let reason: String
+            if !UniTrackTracing.shouldInject(host: request.url?.host, allowlist: allow) {
+                reason = "host not in allowlist (allow=[\(allow.joined(separator: ", "))])"
+            } else if mreq.value(forHTTPHeaderField: hdrName) != nil {
+                reason = "header already set by app"
+            } else {
+                reason = "unknown"
+            }
+            UniTrack.log("[W3C] skip   host=%@ reason=%@", host, reason)
         }
 
         let cfg = URLSessionConfiguration.default
@@ -161,7 +174,14 @@ final class UniTrackURLProtocol: URLProtocol, URLSessionDataDelegate {
             props["trace_id"] = ids.traceId
             props["span_id"]  = ids.spanId
         }
-        UniTrack.track("network_request", properties: props)
+        // Manual-priority arbitration: skip auto network_request nếu DEV đã
+        // log API thủ công qua interceptor Alamofire / OkHttp trong 500ms
+        // vừa rồi. Window dài hơn click vì network có async delay tự nhiên.
+        if ManualTrackSignal.shouldSkip(.networkRequest) {
+            UniTrack.log("[UniTrack] auto network_request SUPPRESSED — manual signal in window url=%@", url)
+        } else {
+            UniTrack.track("network_request", properties: props, isAuto: true)
+        }
 
         if let err = error {
             client?.urlProtocol(self, didFailWithError: err)

@@ -66,14 +66,25 @@ private extension UIApplication {
         // sendAction funnel never gets called? -> answer is "yes, but you're
         // tapping a non-UIControl").
         UniTrack.log("[UniTrack] tap captured key=%@ screen=%@ class=%@", key, screen, className)
-        UniTrack.track("click", properties: [
-            "element_key": key,
-            "screen":      screen,
-            "class_name":  className,
-            "framework":   "uikit",
-            "package":     pkg,
-            "extra":       extra,
-        ])
+        // Manual-priority arbitration: emit on next runloop tick so DEV's
+        // handler (Firebase.logEvent / UniTrack.track / Snowplow track) has a
+        // chance to record a manual signal first. If it did, skip the auto
+        // click to avoid double-counting on buttons that already have manual
+        // tracking. 50ms is empirical — covers a sync handler stack.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if ManualTrackSignal.shouldSkip(.click) {
+                UniTrack.log("[UniTrack] auto click SUPPRESSED — manual signal in window")
+                return
+            }
+            UniTrack.track("click", properties: [
+                "element_key": key,
+                "screen":      screen,
+                "class_name":  className,
+                "framework":   "uikit",
+                "package":     pkg,
+                "extra":       extra,
+            ], isAuto: true)
+        }
         return handled
     }
 }

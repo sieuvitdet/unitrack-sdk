@@ -101,6 +101,29 @@ public class RNUniTrack: RCTEventEmitter {
         resolve(nil)
     }
 
+    @objc(customTrack:action:data:includeUser:resolver:rejecter:)
+    func customTrack(_ eventName: String, action: String?, dataJson: String,
+                     includeUser: Bool,
+                     resolver resolve: @escaping RCTPromiseResolveBlock,
+                     rejecter reject: @escaping RCTPromiseRejectBlock) {
+        // JS gửi `null` action qua bridge → String? ở đây có thể là empty string.
+        let effectiveAction: String? =
+            (action?.isEmpty == false) ? action : nil
+        let data = dict(from: dataJson)
+        if UniTrackHostProxy.isCoResident {
+            UniTrackHostProxy.customTrack(eventName,
+                                          action: effectiveAction,
+                                          data: data,
+                                          includeUser: includeUser)
+        } else {
+            UniTrack.customTrack(eventName,
+                                 action: effectiveAction,
+                                 data: data,
+                                 includeUser: includeUser)
+        }
+        resolve(nil)
+    }
+
     @objc(setScreen:resolver:rejecter:)
     func setScreen(_ name: String,
                    resolver resolve: @escaping RCTPromiseResolveBlock,

@@ -1,4 +1,4 @@
-// @unitrack/react-native
+// unitrack-react-native
 //
 // Public API. Calls the native module which forwards to the iOS / Android
 // SDK installed underneath. Auto-capture (screens, taps, network) is
@@ -23,6 +23,8 @@ interface NativeAPI {
   identify(userId: string, traitsJson: string): Promise<void>;
   reset(): Promise<void>;
   track(event: string, propsJson: string): Promise<void>;
+  customTrack(eventName: string, action: string | null,
+              dataJson: string, includeUser: boolean): Promise<void>;
   setScreen(name: string): Promise<void>;
   flush(): Promise<void>;
   setEnabled(enabled: boolean): Promise<void>;
@@ -57,7 +59,7 @@ interface NativeAPI {
 
 const LINK_HINT =
   `[UniTrack] Native module not found. ` +
-  `Ensure '@unitrack/react-native' is properly linked. ` +
+  `Ensure 'unitrack-react-native' is properly linked. ` +
   `Run 'pod install' (iOS) and rebuild.`;
 
 const native: NativeAPI =
@@ -225,6 +227,27 @@ class UniTrackClass {
     }
     this.forEachProvider((p) => p.track(name, props));
     return native.track(name, JSON.stringify(props));
+  }
+
+  /**
+   * Custom event API — parity với iOS Swift `UniTrack.customTrack` + Android
+   * Kotlin `UniTrack.customTrack` + Flutter Dart. Native side stamp
+   * `session_id`, `event_action` (= [action] ?? [eventName]) và `user_id`
+   * (nếu [includeUser] true, lấy từ cache `identify()` đã set).
+   *
+   * 2 pattern:
+   *  1. 1 schema = 1 action: `customTrack('banner_clicked', { data })`
+   *  2. 1 schema = nhiều action: `customTrack('payment_event',
+   *       { action: 'payment_completed', data, includeUser: true })`
+   */
+  customTrack(eventName: string,
+              opts: { action?: string;
+                      data?: EventProperties;
+                      includeUser?: boolean } = {}) {
+    const action = opts.action ?? null;
+    const data   = opts.data   ?? {};
+    const includeUser = opts.includeUser ?? false;
+    return native.customTrack(eventName, action, JSON.stringify(data), includeUser);
   }
 
   setScreen(name: string) {
