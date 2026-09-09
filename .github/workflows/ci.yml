@@ -86,4 +86,9 @@ jobs:
       - run: |
           cd platforms/flutter
           flutter pub get
+          # unitrack_snowplow là package RIÊNG, dependency snowplow_tracker khai
+          # trong pubspec của nó chứ không phải của package cha. flutter analyze
+          # quét cả thư mục con nên thiếu bước này sẽ báo 33 lỗi undefined symbol
+          # trên runner sạch (máy dev không thấy vì .dart_tool còn từ lần trước).
+          (cd unitrack_snowplow && flutter pub get)
           flutter analyze
