@@ -19,7 +19,7 @@ import type {
   UniTrackConfig,
 } from './types';
 import { SessionManager } from './session';
-import { installAutoCapture, setCurrentScreen, currentScreen } from './auto-capture';
+import { installAutoCapture, setCurrentScreen, currentScreen, resetScreenOwnership } from './auto-capture';
 import { installNetworkInterceptor } from './network-interceptor';
 import { configureSalt, sha256 } from './pii-hash';
 import { readCrossDomainSession } from './plugins/cross-domain';
@@ -69,6 +69,10 @@ export { resolveSnowplow } from './remote-config';
  * Đặt ở `track()` vì đó là cửa duy nhất mọi event đi qua trước khi fan-out,
  * nên Snowplow lẫn HTTP provider đều nhận cùng payload đã chuẩn hoá.
  */
+/** Trait mang PII — hash trước khi rời máy người dùng. Khớp field name mà
+ *  user_context của FPT Life dùng (đo thật trên portal project 8). */
+const PII_TRAITS = ['user_name', 'phone_number', 'email'];
+
 function stringifyProps(props: EventProperties): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of Object.keys(props)) {
@@ -120,10 +124,14 @@ class UniTrackImpl {
     if (!raw) { this.log('config: không tải được', url); return; }
     const file = flavor ? applyFlavor(raw, flavor) : raw;
 
-    this.initialize(file.apiKey || '', toSDKConfig(file));
-
     const sp = file.snowplow;
     const { endpoint: spEndpoint, appId: spAppId } = resolveSnowplow(file);
+    // Đăng ký TRƯỚC initialize(): network-interceptor được cài bên trong
+    // initialize() và chốt danh sách exclude ngay lúc đó.
+    if (sp?.enabled && spEndpoint) this.providerEndpoints.push(spEndpoint);
+
+    this.initialize(file.apiKey || '', toSDKConfig(file));
+
     if (sp?.enabled && spEndpoint) {
       this.addProvider(new SnowplowProvider({
         endpoint:       spEndpoint,
@@ -131,8 +139,15 @@ class UniTrackImpl {
         igluVendor:     sp.iglu_vendor || '',
         defaultVersion: sp.default_version,
         eventNames:     sp.event_names,
+        entities:       sp.entities,
         dropEvents:     sp.drop_events,
-      } as never));
+        businessKind:   sp.business_kind,
+        businessEventKinds: sp.business_event_kinds,
+        ownSchemaEvents: sp.own_schema_events,
+        flushIntervalMs: file.sdk_config?.flushIntervalMs,
+        batchSize:      file.sdk_config?.batchSize,
+        verboseLogging: this.cfg.verboseLogging,
+      }));
     }
     // Core ingest rỗng → chỉ fan-out Snowplow. Giống FPT Life, log ra để không
     // ai tưởng SDK hỏng khi thấy Network trống.
@@ -142,7 +157,8 @@ class UniTrackImpl {
         apiKey:   file.apiKey || '',
         batchSize:       file.sdk_config?.batchSize,
         flushIntervalMs: file.sdk_config?.flushIntervalMs,
-      } as never));
+        verboseLogging:  this.cfg.verboseLogging,
+      }));
     } else {
       this.log('core ingest endpoint rỗng — fan-out provider only');
     }
@@ -172,17 +188,33 @@ class UniTrackImpl {
     // hoặc rotateSession(). iOS chỉ bắn khi timeout, web bắn cả hai vì logout
     // trên web thường xuyên hơn và phiên đó vẫn cần đóng sổ.
     this.session.onRotate = (closed) => {
+      // `session_id` của event này là phiên VỪA ĐÓNG, không phải phiên mới.
+      // Parity mobile (đo trên portal project 8): session_ended bên đó đặt
+      // thẳng phiên đã đóng vào `session_id`, vì event này nói VỀ phiên đó —
+      // để nó mang phiên mới thì mọi phép group-by session lại đếm nhầm
+      // event kết thúc vào phiên kế tiếp.
+      //
+      // `ended_session_id` giữ lại cho consumer cũ của web; `previous_session_id`
+      // là tên mobile dùng. Cả ba cùng một giá trị — trùng lặp có chủ đích,
+      // giống cách core C++ gửi `from`/`from_screen`/`previous_screen_name`.
       this.track('session_ended', {
-        // KHÔNG để track() tự gắn session_id: enriched sẽ ghi đè bằng phiên
-        // MỚI. Field này phải là phiên vừa đóng nên đặt tên riêng, và
-        // `session_id` mặc định vẫn trỏ phiên mới — đúng ngữ cảnh "event này
-        // thuộc phiên nào".
+        session_id:           closed.id,
         ended_session_id:     closed.id,
+        previous_session_id:  closed.id,
         session_duration_sec: closed.durationSec,
         screen_count:         closed.screenCount,
         had_error:            closed.hadError,
         had_crash:            closed.hadCrash,
         reason:               closed.reason,
+      });
+      // Đóng sổ phiên cũ xong thì mở sổ phiên mới. Mobile bắn cặp
+      // session_started/session_ended (28/1 trên project 8); web trước đây chỉ
+      // có vế đóng, nên không đếm được số phiên bắt đầu và không nối được
+      // phiên mới với phiên trước nó.
+      this.track('session_started', {
+        previous_session_id: closed.id,
+        session_index:       this.session?.sessionIndex(),
+        entry_source:        closed.reason === 'timeout' ? 'timeout_resume' : 'app_open',
       });
     };
 
@@ -216,7 +248,6 @@ class UniTrackImpl {
           trackLifecycle: this.cfg.trackLifecycle,
           clickEvent: this.cfg.clickEvent,
           screenStartEvent: this.cfg.screenStartEvent,
-          screenLoadEvent: this.cfg.screenLoadEvent,
           screenEndEvent: this.cfg.screenEndEvent,
         },
         (name, props) => this.track(name, props as EventProperties),
@@ -264,6 +295,19 @@ class UniTrackImpl {
 
     // Replay queue do provider tự lo (HttpProvider.drainPersisted) — nó giữ
     // nguyên event_id + timestamp gốc, thay vì dựng lại event mới.
+
+    // Phiên mở đầu được SessionManager dựng thẳng trong constructor, không đi
+    // qua rotate() nên onRotate ở trên không chạy. Bắn bù ở đây để mọi phiên
+    // đều có vế mở, không riêng phiên thứ 2 trở đi.
+    if (this.session.freshlyStarted) {
+      this.session.freshlyStarted = false;
+      const prev = this.session.previousSessionId();
+      this.track('session_started', {
+        ...(prev ? { previous_session_id: prev } : {}),
+        session_index: this.session.sessionIndex(),
+        entry_source: prev ? 'timeout_resume' : 'app_open',
+      });
+    }
 
     this.log(`initialized — apiKey=${apiKey.slice(0, 8)}… session=${this.session.currentSessionId()}`);
   }
@@ -315,9 +359,18 @@ class UniTrackImpl {
     this.session.touch();
     const enriched: EventProperties = {
       ...properties,
-      session_id: this.session.currentSessionId(),
-      session_index: this.session.sessionIndex(),
+      // `??` chứ không gán đè: session_ended phải mang phiên VỪA ĐÓNG, mà nó
+      // được bắn ngay sau khi rotate xong nên currentSessionId() đã là phiên
+      // mới. Caller nào tự biết session của mình thì được quyền quyết.
+      session_id: properties.session_id ?? this.session.currentSessionId(),
+      session_index: properties.session_index ?? this.session.sessionIndex(),
       screen: properties.screen || currentScreen(),
+      // Tên nghiệp vụ — thứ đội Data pivot theo, và portal hiển thị ở cột
+      // "Event action". Gắn ở ĐÂY chứ không riêng trong SnowplowProvider:
+      // đường portal-ingest trước đây không có field này nên 109/112 hàng
+      // `provider=unitrack` để trống, trong khi bản mirror Snowplow của cùng
+      // event thì có. Cùng một lần track() mà hai đường lệch nhau.
+      event_action: properties.event_action ?? name,
       ts: Date.now(),
     };
     // Chốt chặn cuối: app có thể tự nhét user_id vào properties (customTrack,
@@ -333,9 +386,16 @@ class UniTrackImpl {
     // Chuẩn hoá kiểu NGAY TRƯỚC fan-out: verboseLogging ở trên vẫn in giá trị
     // gốc để debug, còn thứ đi lên mạng luôn là String.
     const wire = stringifyProps(enriched);
+    // `_kind` là chỉ dẫn định tuyến schema, chỉ SnowplowProvider hiểu — nó tự
+    // xoá trước khi đóng payload. Các provider khác không biết field này và sẽ
+    // đẩy nguyên nó đi (đo thật: `"_kind":"result"` nằm trong properties trên
+    // portal), nên chỉ Snowplow được nhận.
+    const wireNoKind = { ...wire };
+    delete (wireNoKind as Record<string, unknown>)._kind;
     // Fan-out tới mọi provider (Snowplow, HTTP, …). Isolate failure.
     for (const p of this.providers) {
-      try { p.track(name, wire); } catch (e) { this.log('provider track err:', e); }
+      const payload = p.name === 'SnowplowProvider' ? wire : wireNoKind;
+      try { p.track(name, payload); } catch (e) { this.log('provider track err:', e); }
     }
   }
 
@@ -354,6 +414,40 @@ class UniTrackImpl {
     this.track(eventName, payload);
   }
 
+  // ── Helper theo convention — parity iOS/Android ────────────────────────
+  //
+  // Mobile không cần khai kind trong config vì app gọi thẳng
+  // `trackingResultEvent(action:status:)` / `trackingClickEvent(elementKey:)`
+  // ngay tại chỗ gắn tracking. Kind nằm trong CODE, cạnh hành vi nó mô tả.
+  //
+  // Bốn hàm dưới đem đúng cách đó sang web. Dùng chúng thay cho `track()`
+  // generic thì không phải khai `business_event_kinds` cho từng event nữa.
+
+  /** Kết quả một thao tác — thêm giỏ, thanh toán, gửi form, xin quyền.
+   *  → `ev_result`, kèm `action` + `status` như mobile. */
+  trackResult(action: string, status: string, data: EventProperties = {}): void {
+    this.track(action, { ...data, _kind: 'result', action, status });
+  }
+
+  /** Hành vi bấm / chọn của người dùng. → `ev_click`. */
+  trackClick(action: string, data: EventProperties = {}): void {
+    this.track(action, { ...data, _kind: 'click' });
+  }
+
+  /** Gọi API. → `ev_api`, `status` là HTTP status. */
+  trackApi(url: string, method: string, status: number, durationMs: number,
+           data: EventProperties = {}): void {
+    this.track('network_request', {
+      ...data, _kind: 'api', url, method, status, status_code: status,
+      duration_ms: durationMs,
+    });
+  }
+
+  /** Lỗi / crash. → `ev_crash`. */
+  trackCrash(message: string, data: EventProperties = {}): void {
+    this.track('crash', { ...data, _kind: 'crash', message });
+  }
+
   async identify(userId: string, traits: EventProperties = {}): Promise<void> {
     // Ẩn danh ở mức nào cũng không được gắn định danh người dùng. Bỏ qua im
     // lặng thay vì ném lỗi: app bật cờ ẩn danh theo consent, code identify()
@@ -369,12 +463,24 @@ class UniTrackImpl {
     // traits đi vào user_context của Snowplow → cũng phải String như payload
     // event, nếu không cùng một schema lại có hai kiểu.
     const wireTraits = stringifyProps(traits);
+    // Hash luôn các trait là PII. FPT Life gửi user_id/user_name/phone_number
+    // đều SHA-256 (đo trên project 8), nên web để lọt tên thật hay số điện
+    // thoại thô là vừa lệch schema vừa rò dữ liệu cá nhân. Chỉ hash khi có
+    // salt — không salt thì hash cũng không dedup được với native.
+    if (this.cfg.piiSalt) {
+      for (const k of PII_TRAITS) {
+        const v = wireTraits[k];
+        if (v) wireTraits[k] = await sha256(v);
+      }
+    }
     for (const p of this.providers) {
       try { p.setUser?.(hashedId, wireTraits); } catch (e) { this.log('provider setUser err:', e); }
     }
   }
 
   reset(): void {
+    // App thôi quản tên màn → URL lại là nguồn sự thật cho phiên mới.
+    resetScreenOwnership();
     this.identifiedUserId = null;
     this.identifiedTraits = {};
     for (const p of this.providers) {
@@ -414,6 +520,12 @@ class UniTrackImpl {
     return this.sessionSampled;
   }
 
+  /** Định danh đang gắn (đã hash) + traits. Rỗng khi chưa login.
+   *  Dùng để UI kiểm chứng đúng thứ SDK sẽ gửi trong user_context. */
+  currentUser(): { userId: string; traits: EventProperties } {
+    return { userId: this.identifiedUserId || '', traits: { ...this.identifiedTraits } };
+  }
+
   currentSessionId(): string { return this.session?.currentSessionId() || ''; }
   sessionIndex(): number { return this.session?.sessionIndex() || 0; }
   previousSessionId(): string { return this.session?.previousSessionId() || ''; }
@@ -432,16 +544,24 @@ class UniTrackImpl {
     return Queue.pendingCount();
   }
 
+  /** Host mà network-interceptor KHÔNG được track. Thiếu một host ở đây là
+   *  vòng lặp vô hạn: flush → fetch → interceptor emit network_request →
+   *  vào buffer → flush tiếp. Với FPT Life `endpoint` rỗng (chỉ fan-out
+   *  Snowplow) nên trước đây danh sách này rỗng và collector Snowplow tự
+   *  nuôi chính nó mỗi `flushIntervalMs`. */
   private computeExcludes(): string[] {
     const excludes: string[] = [];
-    if (this.cfg.endpoint) {
+    for (const url of [this.cfg.endpoint, ...this.providerEndpoints]) {
+      if (!url) continue;
       try {
-        const u = new URL(this.cfg.endpoint, window.location.href);
-        excludes.push(u.host);
+        excludes.push(new URL(url, window.location.href).host);
       } catch { /* ignore */ }
     }
     return excludes;
   }
+
+  /** Endpoint của mọi provider đã gắn — nguồn cho computeExcludes(). */
+  private providerEndpoints: string[] = [];
 
   private log(...args: unknown[]): void {
     if (this.cfg.verboseLogging) console.log('[UniTrack]', ...args);
@@ -479,7 +599,6 @@ function defaultCfg(): Required<UniTrackConfig> {
     tracingAllowlistHosts: [],
     screenStartEvent: 'screen_viewed',
     screenEndEvent: 'screen_exited',
-    screenLoadEvent: 'screen_load_completed',
     clickEvent: 'click',
     verboseLogging: true,
   };

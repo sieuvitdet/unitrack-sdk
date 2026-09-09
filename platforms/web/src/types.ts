@@ -66,7 +66,6 @@ export interface UniTrackConfig {
    * rebuild app code. Match pattern Flutter `sdk_config.screen_*_event`. */
   screenStartEvent?: string;       // default 'screen_viewed'
   screenEndEvent?: string;         // default 'screen_exited'
-  screenLoadEvent?: string;        // default 'screen_load_completed'
   clickEvent?: string;             // default 'click'
 
   /** Verbose console.log mỗi event. Default true ở dev — bật/tắt qua flag. */

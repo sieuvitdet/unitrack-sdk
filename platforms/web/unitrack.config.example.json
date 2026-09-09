@@ -1,29 +1,29 @@
 {
   "version": 1,
-  "apiKey": "utk_khoa_cua_ban",
   "endpoint": "",
-  "pii_salt": "",
+  "pii_salt": "doi_chuoi_nay_thanh_salt_rieng",
   "sdk_config": {
-    "batchSize": 10,
-    "flushIntervalMs": 3000,
-    "logLevel": "warn",
     "autoCapture": true,
     "trackScreens": true,
     "trackTaps": true,
     "trackNetwork": true,
     "trackLifecycle": true,
+    "batchSize": 10,
+    "flushIntervalMs": 3000,
     "sessionTimeoutMs": 1800000,
+    "sampling_rate": 1.0,
+    "require_consent": false,
     "screen_start_event": "screen_viewed",
     "screen_end_event": "screen_exited",
-    "screen_load_event": "screen_load_completed"
+    "logLevel": "warn",
+    "verboseLogging": false
   },
   "snowplow": {
     "enabled": true,
-    "endpoint": "https://sp.example.com",
-    "appId": "my-web-app",
-    "iglu_vendor": "com.mycompany",
+    "endpoint": "https://collector.example.com",
+    "appId": "ma_app_cua_ban",
+    "iglu_vendor": "vn.fpt.ftel.snowplow",
     "default_version": "1-0-0",
-    "hybrid_screen_view": true,
     "event_names": {
       "click": "ev_click",
       "result": "ev_result",
@@ -38,47 +38,35 @@
       "core_action": "core_action",
       "application_context": "application_context"
     },
-    "drop_events": [
-      "app_foreground",
-      "app_background"
+    "own_schema_events": [
+      "app_background",
+      "app_foreground"
     ],
-    "options": {
-      "base64Encoding": true,
-      "platformContext": true,
-      "applicationContext": true,
-      "sessionContext": true,
-      "screenContext": true,
-      "lifecycleAutotracking": false,
-      "screenEngagementAutotracking": true,
-      "exceptionAutotracking": false
-    },
+    "drop_events": [
+      "app_start"
+    ],
+    "business_kind": "click",
+    "business_event_kinds": {},
     "web": {
-      "endpoint": "https://sp.example.com",
-      "appId": "my-web-app"
+      "endpoint": "",
+      "appId": ""
     }
   },
   "tracing": {
     "enabled": false,
-    "header_name": "traceparent",
-    "allowlist_hosts": [],
-    "sampled": true
+    "allowlist_hosts": []
   },
-  "http_providers": [],
   "flavors": {
-    "beta": {
-      "sdk_config": {
-        "logLevel": "error"
-      },
-      "snowplow": {}
-    },
     "dev": {
       "sdk_config": {
-        "logLevel": "debug"
-      },
+        "logLevel": "debug",
+        "verboseLogging": true
+      }
+    },
+    "staging": {
       "snowplow": {
-        "enabled": false
+        "endpoint": "https://collector-staging.example.com"
       }
     }
-  },
-  "updated_at": 1787000000000
+  }
 }

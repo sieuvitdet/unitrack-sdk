@@ -16,13 +16,18 @@ export interface RemoteConfig {
     batchSize?: number;
     flushIntervalMs?: number;
     logLevel?: 'debug' | 'info' | 'warn' | 'error';
+    sessionTimeoutMs?: number;
+    session_timeout_ms?: number;
+    crossDomainSession?: boolean;
+    cross_domain_session?: boolean;
+    trackLifecycle?: boolean;
+    verboseLogging?: boolean;
     autoCapture?: boolean;
     trackScreens?: boolean;
     trackTaps?: boolean;
     trackNetwork?: boolean;
     screen_start_event?: string;
     screen_end_event?: string;
-    screen_load_event?: string;
     sampling_rate?: number;
     require_consent?: boolean;
   };
@@ -33,7 +38,14 @@ export interface RemoteConfig {
     iglu_vendor?: string;
     default_version?: string;
     event_names?: Record<string, string>;
+    entities?: Record<string, string>;
     drop_events?: string[];
+    /** Kind cho event nghiệp vụ không có trong bảng map. Default 'click'. */
+    business_kind?: string;
+    /** Kind riêng cho từng event nghiệp vụ, vd {"purchase": "result"}. */
+    business_event_kinds?: Record<string, string>;
+    /** Event có schema iglu riêng đã publish (vd app_background). */
+    own_schema_events?: string[];
     /** Override riêng từng nền. Native dùng `ios`/`android`, web dùng `web`. */
     web?: { endpoint?: string; appId?: string };
   };
@@ -111,13 +123,23 @@ export function toSDKConfig(cfg: RemoteConfig): UniTrackConfig {
     piiSalt: cfg.pii_salt,
     batchSize: s.batchSize,
     flushIntervalMs: s.flushIntervalMs,
+    // Đọc cả hai tên: file mẫu dùng `sessionTimeoutMs`, còn các khoá khác
+    // trong sdk_config theo snake_case. Thiếu dòng này thì đặt trong config
+    // hoàn toàn vô tác dụng — SDK luôn chạy mặc định 30 phút.
+    sessionTimeoutMs: s.sessionTimeoutMs ?? s.session_timeout_ms,
+    // Nhận session từ domain khác qua tham số `_sp`. Mặc định bật; đặt false
+    // để tắt hẳn. Thiếu dòng map này thì khoá trong config vô tác dụng.
+    crossDomainSession: s.crossDomainSession ?? s.cross_domain_session,
     autoCapture: s.autoCapture,
     trackScreens: s.trackScreens,
     trackTaps: s.trackTaps,
     trackNetwork: s.trackNetwork,
+    trackLifecycle: s.trackLifecycle,
+    // logLevel 'debug' → bật log chi tiết. `verboseLogging` cho phép bật
+    // thẳng, không phải suy từ logLevel.
+    verboseLogging: s.verboseLogging ?? (s.logLevel ? s.logLevel === 'debug' : undefined),
     screenStartEvent: s.screen_start_event,
     screenEndEvent: s.screen_end_event,
-    screenLoadEvent: s.screen_load_event,
     samplingRate: s.sampling_rate,
     requireConsent: s.require_consent,
     tracingAllowlistHosts: cfg.tracing?.enabled ? (cfg.tracing.allowlist_hosts || []) : [],

@@ -15,6 +15,8 @@ export interface HttpProviderConfig {
   batchSize?: number;
   /** Flush interval ms khi queue chưa đầy batch. */
   flushIntervalMs?: number;
+  /** In payload + response portal ra console để debug bằng F12. */
+  verboseLogging?: boolean;
 }
 
 /** Row shape portal `ingest.js` chờ. `isValid()` reject nếu thiếu event_id /
@@ -116,6 +118,10 @@ export class HttpProvider implements AnalyticsProvider {
         },
         body: JSON.stringify(body),
       });
+      // Portal reject im lặng: payload sai vẫn trả HTTP 200 kèm
+      // {received, inserted, rejected}. Nhìn status code là không đủ, phải
+      // đọc body — nên log ra đây thay vì để người debug tự mò Network tab.
+      if (this.cfg.verboseLogging) await this.logResult(res, batch);
       // 5xx là lỗi tạm của server → giữ lại để gửi sau. 4xx thì gửi lại cũng
       // hỏng y hệt (sai key, payload xấu) nên bỏ, tránh kẹt queue vĩnh viễn.
       if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
@@ -126,6 +132,23 @@ export class HttpProvider implements AnalyticsProvider {
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /** In batch vừa POST + kết quả portal trả về. `rejected > 0` hoặc
+   *  `project_id: null` mới là dấu hiệu hỏng thật, không phải status code. */
+  private async logResult(res: Response, batch: PendingEvent[]): Promise<void> {
+    let out: Record<string, unknown> = {};
+    try { out = await res.clone().json(); } catch { /* body không phải JSON */ }
+    const bad = res.status >= 400 || Number(out.rejected) > 0 || out.project_id == null;
+    console.groupCollapsed(
+      `%c[UniTrack→Portal]%c POST ${batch.length} event · ${res.status}` +
+      (out.inserted != null ? ` · +${out.inserted}/${out.received}` : ''),
+      `color:${bad ? '#dc2626' : '#059669'};font-weight:bold`, 'color:inherit');
+    console.log('endpoint:', this.cfg.endpoint);
+    console.log('response:', out);
+    console.log('sent    :', batch.map((e) => e.event_name));
+    console.log('body    :', batch);
+    console.groupEnd();
   }
 
   /** Cất batch xuống IndexedDB thay vì giữ trong RAM. */

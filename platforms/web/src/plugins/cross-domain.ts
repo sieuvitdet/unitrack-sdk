@@ -35,7 +35,16 @@ export function readCrossDomainSession(): {
   try {
     const raw = new URLSearchParams(location.search).get('_sp');
     if (!raw) return null;
-    const [domainUserId, ts, sessionId, subjectUserId, sourceId] = raw.split('.');
+    // Format Snowplow dùng '.' làm phân tách nên sourceId KHÔNG được chứa dấu
+    // chấm. Nhưng mặc định cũ lấy `location.hostname` ('shop.vn') làm sourceId,
+    // và những link đã phát tán ngoài kia vẫn mang dạng đó — split thường sẽ
+    // cắt 'shop.vn' thành 'shop'. Tách 4 phần đầu, phần cuối là platform, còn
+    // lại gộp về sourceId.
+    const seg = raw.split('.');
+    const [domainUserId, ts, sessionId, subjectUserId] = seg;
+    const sourceId = seg.length > 5
+      ? seg.slice(4, -1).join('.')   // sourceId có dấu chấm (link cũ)
+      : seg[4];
     const age = ts ? Date.now() - Number(ts) : undefined;
     // Link cũ quá thì bỏ: người ta có thể chia sẻ URL đã trang trí lên chat,
     // người khác bấm vào sẽ thừa hưởng nhầm session của người gửi.
@@ -67,7 +76,9 @@ export function crossDomainPlugin(opts: CrossDomainOptions): CapturePlugin {
             String(Date.now()),
             opts.getSessionId() || '',            // sessionId
             opts.getUserId?.() || '',
-            opts.sourceId || location.hostname,
+            // '.' là ký tự phân tách của format — sourceId chứa nó sẽ làm
+            // trang đích parse sai. Đổi sang '-' khi rơi về hostname.
+            (opts.sourceId || location.hostname).replace(/\./g, '-'),
             'web',
           ];
           url.searchParams.set('_sp', parts.join('.'));

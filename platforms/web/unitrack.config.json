@@ -15,11 +15,11 @@
     "sessionTimeoutMs": 1800000,
     "screen_start_event": "screen_viewed",
     "screen_end_event": "screen_exited",
-    "screen_load_event": "screen_load_completed"
+    "verboseLogging": false
   },
   "snowplow": {
     "enabled": true,
-    "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+    "endpoint": "",
     "appId": "567",
     "iglu_vendor": "vn.fpt.ftel.snowplow",
     "default_version": "1-0-0",
@@ -39,8 +39,7 @@
       "application_context": "application_context"
     },
     "drop_events": [
-      "app_foreground",
-      "app_background"
+      "app_start"
     ],
     "options": {
       "base64Encoding": true,
@@ -53,9 +52,15 @@
       "exceptionAutotracking": false
     },
     "web": {
-      "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+      "endpoint": "",
       "appId": "567"
-    }
+    },
+    "own_schema_events": [
+      "app_background",
+      "app_foreground"
+    ],
+    "business_kind": "click",
+    "business_event_kinds": {}
   },
   "tracing": {
     "enabled": false,
@@ -70,10 +75,10 @@
         "logLevel": "error"
       },
       "snowplow": {
-        "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
-        "appId": "567",
+        "enabled": false,
+        "endpoint": "",
         "web": {
-          "endpoint": "https://55d0-171-253-46-35.ngrok-free.app",
+          "endpoint": "",
           "appId": "567"
         }
       }
