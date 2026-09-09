@@ -45,8 +45,8 @@ object UniTrack {
     private val screenLock = Any()
     private var lastScreen: String? = null
     private var lastScreenAtMs: Long = 0L
-    private var screenStartEventName: String = "screen_view"
-    private var screenEndEventName:   String = "screen_view"
+    private var screenStartEventName: String = "screen_viewed"
+    private var screenEndEventName:   String = "screen_exited"
     private var screenLifecycleEnabled: Boolean = true
 
     /** Device/app metadata bag captured at init (platform, app_version,
@@ -295,7 +295,7 @@ object UniTrack {
      *  values — fully resetting the core mid-flight risks dropping events.
      *
      *  Pass null for any field to keep its current value. Empty string ""
-     *  resets to the default ("screen_view" / "screen_load_completed").
+     *  resets to the default ("screen_viewed" / "screen_exited" / "screen_load_completed").
      *  Mirrors iOS UniTrack.applyHotConfig(...). */
     @JvmStatic
     @JvmOverloads
@@ -303,10 +303,10 @@ object UniTrack {
                        screenEndEvent:   String? = null,
                        screenLoadEvent:  String? = null) {
         screenStartEvent?.let {
-            screenStartEventName = it.ifEmpty { "screen_view" }
+            screenStartEventName = it.ifEmpty { "screen_viewed" }
         }
         screenEndEvent?.let {
-            screenEndEventName = it.ifEmpty { "screen_view" }
+            screenEndEventName = it.ifEmpty { "screen_exited" }
         }
         screenLoadEvent?.let {
             screenLoadEventName = it.ifEmpty { "screen_load_completed" }
@@ -469,8 +469,8 @@ object UniTrack {
         // under whatever taxonomy the portal set — matching what the core
         // fires into the HTTP queue. journeyCapture=false disables both
         // arms (core skips lifecycle events; binding skips provider fan-out).
-        screenStartEventName = config.screenStartEvent.ifEmpty { "screen_view" }
-        screenEndEventName   = config.screenEndEvent.ifEmpty   { "screen_view" }
+        screenStartEventName = config.screenStartEvent.ifEmpty { "screen_viewed" }
+        screenEndEventName   = config.screenEndEvent.ifEmpty   { "screen_exited" }
         screenLifecycleEnabled = config.journeyCapture
 
         // Load native lib + open core context.
