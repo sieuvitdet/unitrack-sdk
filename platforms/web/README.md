@@ -1,38 +1,7 @@
 # unitrack-web
 
-SDK analytics cho web — auto-capture screen / tap / network / crash / lifecycle,
-offline queue bền qua reload, W3C trace context, fan-out sang Snowplow, GA4,
-Mixpanel, Amplitude, Segment hoặc bất kỳ hệ nào khác.
-
-API parity với bản Flutter / iOS / Android.
-
-## Cài đặt
-
-```bash
-npm install unitrack-web
-```
-
-Rồi khởi tạo bằng file config JSON:
-
-```bash
-# Copy file mẫu ra thư mục tĩnh, sửa apiKey + endpoint
-cp node_modules/unitrack-web/unitrack.config.example.json public/unitrack.config.json
-```
-
-```js
-import UniTrack from 'unitrack-web';
-
-await UniTrack.initializeFromConfig('/unitrack.config.json');
-```
-
-Không dùng bundler thì nhúng thẳng file IIFE:
-
-```html
-<script src="node_modules/unitrack-web/dist/unitrack.iife.js"></script>
-<script>UniTrack.initializeFromConfig('/unitrack.config.json');</script>
-```
-
-Hướng dẫn đầy đủ: https://mobix.asia/event-tracking-mobile/web-sdk-integration-guide.html
+SDK thu thập hành vi người dùng trên web, gửi lên Snowplow collector. Toàn bộ
+cấu hình nằm trong một file JSON.
 
 ## Cài đặt
 
@@ -40,287 +9,182 @@ Hướng dẫn đầy đủ: https://mobix.asia/event-tracking-mobile/web-sdk-in
 npm install unitrack-web
 ```
 
-Hoặc thẻ script, không cần build:
+Hoặc tự host file dựng sẵn:
 
-```html
-<script src="https://mobix.asia/event-tracking-mobile/unitrack-web-demo/dist/unitrack.iife.js"></script>
+```sh
+npm pack unitrack-web
+tar -xzf unitrack-web-*.tgz
+cp package/dist/unitrack.iife.js public/js/
 ```
 
-## Chạy được trong 3 bước
+```html
+<script src="/js/unitrack.iife.js"></script>
+```
 
-```ts
-import UniTrack, { HttpProvider } from 'unitrack-web';
+Ba file trong `dist`: `unitrack.iife.js` cho thẻ `<script>` (gắn biến toàn cục
+`UniTrack`), `unitrack.esm.js` cho `import`, `unitrack.cjs.js` cho `require`.
 
-// 1. Khởi tạo — một lần, càng sớm càng tốt
-UniTrack.initialize('utk_khoa_cua_ban', {
-  endpoint: 'https://mobix.asia/event-tracking-mobile/v1/events',
-  autoCapture: true,
-  trackScreens: true,
-  trackTaps: true,
-  trackNetwork: true,
-  trackLifecycle: true,
-  piiSalt: 'chuoi_salt_rieng',
+## Cấu hình
+
+Đặt `unitrack.config.json` ở thư mục public. Xem
+[`unitrack.config.example.json`](./unitrack.config.example.json) để lấy bản đầy
+đủ; bốn giá trị cần sửa:
+
+```json
+{
+  "pii_salt": "chuoi_bi_mat_rieng_cua_ban",
+  "snowplow": {
+    "enabled": true,
+    "endpoint": "https://collector.congty.vn",
+    "appId": "ma_app_cua_ban"
+  }
+}
+```
+
+## Khởi tạo
+
+```js
+const READY = UniTrack.initializeFromConfig('/unitrack.config.json');
+
+// Chờ xong mới render, nếu không event đầu tiên bị bỏ
+READY.then(() => render());
+```
+
+Chọn flavor theo môi trường bằng tham số thứ hai:
+
+```js
+UniTrack.initializeFromConfig('/unitrack.config.json', 'staging');
+```
+
+## Bắn event
+
+Bốn hàm, chọn theo bản chất hành vi:
+
+```js
+// Người dùng bấm, chọn, mở
+UniTrack.trackClick('product_viewed', { product_id: 'SP-01' });
+
+// Thao tác hoàn tất, có kết quả
+UniTrack.trackResult('add_to_cart', 'success', { price: 250000 });
+UniTrack.trackResult('purchase', 'error', { reason: 'the_bi_tu_choi' });
+
+// Gọi API thủ công (SDK đã tự bắt fetch và XHR)
+UniTrack.trackApi('https://api.congty.vn/v1/cart', 'POST', 200, 143);
+
+// Lỗi tự bắt được
+UniTrack.trackCrash('Không tải được giỏ hàng');
+```
+
+Tên truyền vào đi lên trong field `event_action`, không cần khai báo trước.
+
+| Hàm | Schema |
+|---|---|
+| `trackClick` | `ev_click` |
+| `trackResult` | `ev_result` |
+| `trackApi` | `ev_api` |
+| `trackCrash` | `ev_crash` |
+
+## Event tự bắt
+
+Chín event dưới đây không cần gọi hàm:
+
+`screen_viewed` · `screen_exited` · `click` · `network_request` · `crash` ·
+`app_start` · `app_background` · `app_foreground` · `session_started` ·
+`session_ended`
+
+Bắt click tự động bằng thuộc tính:
+
+```html
+<button data-track-id="btn_them_gio">Thêm vào giỏ</button>
+```
+
+## Tên màn hình
+
+Ứng dụng SPA gọi `setScreen()` ở mỗi lần đổi route để có tên gọn hơn đường dẫn
+URL:
+
+```js
+UniTrack.setScreen('/san-pham');
+```
+
+SDK tự đóng màn cũ và mở màn mới trong cùng lời gọi.
+
+## Đăng nhập
+
+```js
+await UniTrack.identify('user@example.com', {
+  user_name: 'Nguyễn An',
+  tier: 'gold',
 });
 
-// 2. Nơi gửi event
-UniTrack.addProvider(new HttpProvider({
-  endpoint: 'https://mobix.asia/event-tracking-mobile/v1/events',
-  apiKey:   'utk_khoa_cua_ban',
-  batchSize: 20,
-  flushIntervalMs: 3000,
-}));
+// Đăng xuất — bắn event trước, reset sau
+UniTrack.trackClick('logout');
+UniTrack.reset();
 ```
 
-```html
-<!-- 3. Đánh dấu nút quan trọng -->
-<button data-track-id="cam_fullscreen">Toàn màn hình</button>
+`identify()` băm SHA-256 kèm `pii_salt` cho email, tên và số điện thoại trước
+khi gửi. `reset()` xoá định danh và xoay session.
+
+## Consent
+
+```json
+{ "sdk_config": { "require_consent": true } }
 ```
 
-> **`endpoint` khai hai lần là có chủ đích.** Ở `initialize` nó dùng để SDK tự
-> loại host đó khỏi network capture — không có thì SDK track chính request của
-> mình, thành vòng lặp. Ở `HttpProvider` mới là nơi thật sự gửi.
+```js
+UniTrack.setConsent(true);
+```
 
-## Event tự bắn từ đây
-
-| Event | Khi nào | Field đáng chú ý |
-|---|---|---|
-| `app_start` | Trang tải xong | `nav_type` (vào mới / F5 / back-forward), `start_ms` |
-| `screen_viewed` | Đổi route | `screen`, `title` |
-| `screen_load_completed` | Ngay sau đó | `load_ms` |
-| `screen_exited` | Rời màn | `dwell_ms`, `reason` (`screen_change` / `app_background` / `page_hide`) |
-| `click` | Bấm phần tử tương tác | `element_key`, `tag` |
-| `network_request` / `network_error` | fetch/XHR xong | `status_code`, `duration_ms`, `url` (đã cắt query) |
-| `app_background` / `app_foreground` | Ẩn/hiện tab | `background_sec` |
-| `crash` | Lỗi runtime + promise rejection | `message`, `stack`, `type` |
-
-Bấm vào **vùng trống** (nền `<section>`, `<nav>`, `<body>`) bị bỏ qua — không
-sinh event rác.
+Khi bật mà chưa có đồng ý, event bị chặn ngay tại `track()` — không vào buffer,
+không lưu xuống IndexedDB.
 
 ## Plugin
 
-Plugin nằm ngoài phần lõi, chỉ tải khi `import`. Trang không có video thì không
-tải code media.
+```js
+import UniTrack, { webVitalsPlugin, engagementPlugin } from 'unitrack-web';
 
-```ts
-import {
-  webVitalsPlugin, formTrackingPlugin, engagementPlugin,
-  mediaPlugin, streamingPlugin, crossDomainPlugin,
-} from 'unitrack-web';
-
-UniTrack.use(webVitalsPlugin());     // LCP / CLS / INP / FCP / TTFB + xếp hạng
-UniTrack.use(formTrackingPlugin());  // bỏ dở form ở ô nào
-UniTrack.use(engagementPlugin());    // scroll depth, rage click, dead click
-UniTrack.use(mediaPlugin());         // video/audio: play, seek, % xem
-UniTrack.use(streamingPlugin());     // chất lượng luồng live (xem bên dưới)
+UniTrack.use(webVitalsPlugin());
+UniTrack.use(engagementPlugin());
 ```
 
 | Plugin | Event |
 |---|---|
-| `webVitalsPlugin` | `web_vital` — `metric`, `value`, `rating` |
-| `formTrackingPlugin` | `form_field_focus` / `form_field_blur` / `form_submit` |
-| `engagementPlugin` | `scroll_depth`, `rage_click`, `dead_click` (mặc định tắt) |
-| `mediaPlugin` | `media_play/pause/seek/ended/progress/error` |
-| `streamingPlugin` | `stream_*` — xem mục riêng bên dưới |
-| `crossDomainPlugin` | `cross_domain_link` + nối session qua domain |
+| `webVitalsPlugin` | LCP, CLS, INP, TTFB |
+| `engagementPlugin` | `scroll_depth`, `rage_click`, `dead_click` |
+| `formTrackingPlugin` | `form_field_focus`, `form_field_blur`, `form_submit` |
+| `mediaPlugin` | `media_play`, `media_pause`, `media_progress`, `media_ended` |
+| `streamingPlugin` | `stream_first_frame`, `stream_stalled`, `stream_stats` |
+| `crossDomainPlugin` | `cross_domain_link` — giữ session qua nhiều tên miền |
 
-**Form tracking không bao giờ ghi giá trị người dùng nhập** — chỉ có điền hay
-không và độ dài. Field `password` / `cvv` / `card` / `otp`… bị bỏ qua hoàn toàn.
+Plugin sinh event tên riêng, không thuộc bảy nhóm chuẩn. Khai chúng trong
+`business_event_kinds` hoặc `own_schema_events` trước khi bật.
 
-## Streaming — cho web camera / video trực tiếp
+## Debug
 
-Khác `mediaPlugin` (đo hành vi người dùng), plugin này đo **chất lượng đường
-truyền** — thứ quyết định người dùng có xem được hay không.
-
-```ts
-UniTrack.use(streamingPlugin({
-  statsIntervalMs: 30000,   // nhịp lấy mẫu bitrate/khung rớt. 0 = tắt
-  minStallMs: 500,          // khựng ngắn hơn thì bỏ qua, tránh nhiễu
-  trackMjpeg: true,         // theo dõi cả <img> MJPEG (camera đời cũ)
-  mjpegSelector: 'img[data-stream]',
-}));
+```json
+{ "sdk_config": { "verboseLogging": true } }
 ```
 
-| Event | Ý nghĩa |
+Console hiện từng event kèm schema, entity và payload. Tắt trước khi lên
+production.
+
+## API
+
+| Hàm | Mô tả |
 |---|---|
-| `stream_connecting` | Bắt đầu kết nối |
-| `stream_first_frame` | **Khung hình đầu hiện ra** — kèm `ttff_ms` |
-| `stream_stalled` | Đang xem thì khựng — kèm `stall_ms` |
-| `stream_resumed` | Chạy lại sau khi khựng |
-| `stream_reconnecting` | WebRTC rớt, đang thử nối lại |
-| `stream_failed` | Bỏ cuộc — kèm `error_code` |
-| `stream_ended` | Kết thúc — kèm `watched_ms` |
-| `stream_stats` | Mẫu định kỳ: `dropped_frames`, `buffer_ahead_sec`, `width`/`height` |
+| `initializeFromConfig(url, flavor?)` | Khởi tạo từ file config |
+| `trackClick(action, data?)` | Event hành vi bấm |
+| `trackResult(action, status, data?)` | Event có kết quả |
+| `trackApi(url, method, status, ms, data?)` | Event gọi API |
+| `trackCrash(message, data?)` | Event lỗi |
+| `track(name, props?)` | Event thô, tự chọn nhóm |
+| `setScreen(name)` | Đặt tên màn hình |
+| `identify(userId, traits?)` | Định danh, async |
+| `reset()` | Đăng xuất, xoay session |
+| `setConsent(granted)` | Bật/tắt thu thập |
+| `currentSessionId()` | Id phiên hiện tại |
+| `flush()` | Gửi ngay, không đợi chu kỳ |
 
-Nguồn tín hiệu:
+## Giấy phép
 
-| Công nghệ | Cách bắt |
-|---|---|
-| `<video>` (HLS, DASH, MP4) | `loadstart` / `loadeddata` / `waiting` / `playing` / `error` |
-| WebRTC | Vá `RTCPeerConnection`, nghe `connectionstatechange` |
-| MJPEG qua `<img>` | `load` / `error` (bật `trackMjpeg`) |
-
-`stream_id` lấy từ `data-track-id` hoặc `id`, **không bao giờ lấy `src`** — URL
-stream thường chứa token phiên hoặc IP camera nội bộ.
-
-> WebRTC `disconnected` được báo là `stream_reconnecting`, không phải
-> `stream_failed`: trạng thái này thường tự hồi, gộp vào lỗi sẽ thổi phồng tỉ lệ
-> hỏng.
-
-## Fan-out sang nơi khác
-
-Bắt event một lần, gửi đi nhiều nơi. Không phải nhúng 4 SDK và gọi 4 lần cho
-cùng một hành động.
-
-```ts
-import { SnowplowProvider, GA4Provider, SdkBridgeProvider } from 'unitrack-web';
-
-// Snowplow
-UniTrack.addProvider(new SnowplowProvider({
-  endpoint: 'https://collector.cong-ty.vn',
-  appId: 'web_camera',
-  igluVendor: 'vn.congty.tracker',
-}));
-
-// Google Analytics 4 — trang tự nạp gtag, provider chỉ đẩy event vào
-UniTrack.addProvider(new GA4Provider({
-  eventNames: { click: 'select_content' },
-}));
-
-// Mixpanel / Amplitude / Segment / PostHog / Firebase / hệ nội bộ
-UniTrack.addProvider(new SdkBridgeProvider({
-  name: 'Mixpanel',
-  track: (n, p) => mixpanel.track(n, p),
-  identify: (id) => id && mixpanel.identify(id),
-  filter: (n) => n !== 'network_request',   // chặn loại ồn khỏi bên tính tiền
-}));
-```
-
-| Nơi nhận | Provider | Ghi chú |
-|---|---|---|
-| Portal UniTrack | `HttpProvider` | Đường mặc định |
-| Snowplow | `SnowplowProvider` | Iglu schema, endpoint tp2 |
-| Google Analytics 4 | `GA4Provider` | Tự làm sạch tên cho hợp luật GA4 |
-| Mixpanel / Amplitude / Segment / PostHog / Firebase | `SdkBridgeProvider` | 3 dòng mỗi cái |
-| Hệ nội bộ | `SdkBridgeProvider` | Hoặc `HttpProvider` trỏ endpoint riêng |
-
-`filter` đáng dùng: Mixpanel và Amplitude tính tiền theo lượng event, mà
-auto-capture sinh nhiều `network_request`.
-
-### Tự viết provider
-
-Interface chỉ có 4 hàm:
-
-```ts
-class ProviderCuaToi {
-  name = 'CuaToi';
-  init()              { /* tuỳ chọn — gọi 1 lần sau initialize */ }
-  track(name, props)  { /* BẮT BUỘC */ }
-  setUser(id, traits) { /* tuỳ chọn */ }
-  setScreen(name)     { /* tuỳ chọn */ }
-}
-UniTrack.addProvider(new ProviderCuaToi());
-```
-
-## API dùng tay
-
-| API | Dùng khi |
-|---|---|
-| `track(name, props)` | Sự kiện nghiệp vụ tự định nghĩa |
-| `customTrack(name, {action, data, includeUser})` | Như trên, có stamp `event_action` |
-| `identify(userId, traits)` | Sau đăng nhập — tự hash nếu có `piiSalt` |
-| `reset()` | Đăng xuất — xoá danh tính **và xoay session** |
-| `setScreen(name)` | Tự đặt tên màn (modal, tab trong trang) |
-| `setConsent(true/false)` / `hasConsent()` | Người dùng trả lời banner cookie |
-| `currentSessionId()` / `sessionIndex()` / `previousSessionId()` | Nối log frontend ↔ backend |
-| `rotateSession()` | Ép mở phiên mới |
-| `flush()` | Ép gửi ngay |
-| `pendingEventCount()` | Số event còn nằm trong offline queue |
-
-## Cấu hình
-
-| Cờ | Mặc định | Ý nghĩa |
-|---|---|---|
-| `endpoint` | `''` | Dùng để loại host khỏi network capture |
-| `autoCapture` | `true` | Công tắc tổng |
-| `trackScreens` / `trackTaps` / `trackNetwork` / `trackLifecycle` | `true` | Bật từng loại |
-| `sessionTimeoutMs` | 30 phút | Idle quá ngưỡng → phiên mới |
-| `samplingRate` | `1` | 0.0–1.0. Quyết định một lần cho cả phiên; `crash` luôn gửi |
-| `requireConsent` | `false` | `true` → im lặng tới khi `setConsent(true)` |
-| `anonymousTracking` | tắt | `'session'` (bỏ định danh, giữ phiên) hoặc `'full'` (không ghi localStorage) |
-| `crossDomainSession` | `true` | Đọc `_sp` trong URL để nối phiên |
-| `piiSalt` | `''` | Hash SHA-256 user_id trước khi rời máy |
-| `tracingAllowlistHosts` | `[]` | Host được inject `traceparent`. Rỗng = không inject |
-| `screenStartEvent` / `screenEndEvent` / `screenLoadEvent` / `clickEvent` | tên chuẩn | Đổi tên event mà không sửa code |
-
-## Offline queue
-
-Event gửi hỏng được cất vào **IndexedDB**, không phải bộ nhớ — đóng tab hay
-reload vẫn còn. Mở lại trang thì tự gửi tiếp, giữ nguyên `event_id` và
-`timestamp` gốc nên không sinh bản trùng và mốc thời gian không nhảy.
-
-- Trần 1000 event, vượt thì bỏ cái cũ nhất
-- Retry giãn gấp đôi mỗi lần hỏng, trần 60 giây
-- HTTP 5xx thì giữ lại; 4xx thì bỏ (gửi lại cũng hỏng, tránh kẹt queue)
-- `sendBeacon` lúc đóng tab; thất bại thì cất xuống queue
-
-## Ẩn danh
-
-```ts
-UniTrack.initialize('utk_...', { anonymousTracking: 'session' });
-```
-
-| Mức | Định danh | Session | localStorage |
-|---|---|---|---|
-| `'session'` | bỏ | giữ | có ghi |
-| `'full'` | bỏ | mỗi lần tải trang là phiên mới | **không ghi gì** |
-
-Chặn ở 3 tầng: `identify()` bỏ qua, `customTrack({includeUser})` vô hiệu, và
-`track()` lọc `user_id` / `email` / `user_name` kể cả khi app tự nhét vào.
-
-## Cấu hình gợi ý cho web camera
-
-```ts
-UniTrack.initialize('utk_...', {
-  endpoint: '...',
-  sessionTimeoutMs: 4 * 60 * 60 * 1000,   // 4 giờ: người xem camera để tab hàng giờ
-  samplingRate: 1,                         // giảm nếu lượng thiết bị lớn
-});
-UniTrack.use(streamingPlugin({ trackMjpeg: true }));
-```
-
-Gắn `data-track-id` cho ô camera và nút điều khiển. Không gắn thì SDK rơi xuống
-nhánh đọc chữ trên nút, và tên event sẽ thành “Camera phòng ngủ” — dữ liệu nói
-lên bố cục nhà khách hàng.
-
-## Self-check
-
-Bộ kiểm chạy trên bundle thật, mở thẳng trong trình duyệt:
-
-| Trang | Kiểm |
-|---|---|
-| `demo/click-gate-check.html` | Lọc click rác, Shadow DOM, `cursor:pointer` |
-| `demo/queue-check.html` | Offline queue, trần, backoff |
-| `demo/session-check.html` | `reset()` xoay phiên, tính duy nhất của `session_id` |
-| `demo/dwell-consent-check.html` | `dwell_ms`, consent, sampling |
-| `demo/plugins-check.html` | 4 plugin, rò rỉ giá trị form |
-| `demo/streaming-check.html` | Vòng đời stream, TTFF, khựng |
-| `demo/privacy-check.html` | Cross-domain, chống rò session |
-| `demo/anon-check.html` | Hai mức ẩn danh |
-| `demo/torture.html` | 21 tình huống web hiện đại hay làm vỡ tracking |
-
-## Build
-
-```sh
-npm run build       # → dist/ (esm + cjs + iife)
-npm run type-check
-```
-
-Bundle IIFE ~115KB (gộp tất cả). Bản ESM tree-shake được — đo bằng esbuild:
-
-| Dùng gì | Kích thước |
-|---|---|
-| Chỉ lõi | 14.7 KB |
-| Lõi + streaming | 17.6 KB (+2.9 KB) |
-| Lõi + media | 16.0 KB (+1.3 KB) |
-
-Plugin không `import` thì không vào bundle.
+MIT
