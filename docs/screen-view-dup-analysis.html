@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniTrack SDK — Screen View Duplicate Analysis</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #010409;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.3px; }
+  .subtitle { color: var(--text-dim); margin: 0; font-size: 14px; }
+  .meta { color: var(--text-dim); font-size: 13px; margin-top: 12px; }
+  .meta span { margin-right: 16px; }
+  .meta code { background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+
+  h2 {
+    font-size: 20px;
+    margin: 40px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+
+  .severity {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .sev-high { background: rgba(248, 81, 73, 0.15); color: var(--bad); border: 1px solid rgba(248, 81, 73, 0.4); }
+  .sev-med  { background: rgba(210, 153, 34, 0.15); color: var(--warn); border: 1px solid rgba(210, 153, 34, 0.4); }
+  .sev-low  { background: rgba(63, 185, 80, 0.15); color: var(--ok); border: 1px solid rgba(63, 185, 80, 0.4); }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  .card.bad { border-left: 3px solid var(--bad); }
+  .card.warn { border-left: 3px solid var(--warn); }
+  .card.ok { border-left: 3px solid var(--ok); }
+
+  pre, code {
+    font-family: "SF Mono", Menlo, Monaco, "Courier New", monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  code {
+    background: var(--panel-2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #ffa657;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    color: var(--text);
+  }
+  .file {
+    color: var(--accent);
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--panel-2);
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+  tr:hover td { background: var(--panel-2); }
+
+  .flow {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    margin: 12px 0;
+    overflow-x: auto;
+  }
+  .flow .t { color: var(--warn); }
+  .flow .ok { color: var(--ok); }
+  .flow .bad { color: var(--bad); }
+  .flow .arrow { color: var(--accent); }
+  .flow .dim { color: var(--text-dim); }
+
+  .kv { display: grid; grid-template-columns: 200px 1fr; gap: 8px 20px; margin: 12px 0; }
+  .kv dt { color: var(--text-dim); }
+  .kv dd { margin: 0; }
+
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--panel-2);
+    color: var(--text-dim);
+    margin-right: 4px;
+  }
+  .tag-ios { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+  .tag-and { background: rgba(63, 185, 80, 0.15); color: var(--ok); }
+
+  .diff-add { background: rgba(63, 185, 80, 0.15); color: var(--ok); }
+  .diff-del { background: rgba(248, 81, 73, 0.15); color: var(--bad); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>Screen View Duplicate — Root Cause &amp; Fix</h1>
+  <p class="subtitle">UniTrack SDK auto-capture <code>screen_view</code> / <code>screen_viewed</code> bị bắn nhiều lần khi ViewController rerender</p>
+  <div class="meta">
+    <span><strong>Ngày:</strong> 2026-08-11</span>
+    <span><strong>App impacted:</strong> FPT Life (FLI)</span>
+    <span><strong>SDK version:</strong> iOS 0.3.60 / Android 0.3.56</span>
+    <span><strong>Severity:</strong> <span class="severity sev-high">High</span></span>
+  </div>
+</header>
+
+<h2>1. Tóm tắt</h2>
+<div class="card bad">
+  <p style="margin:0"><strong>Bug:</strong> Event <code>screen_viewed</code> (fan-out từ <code>UniTrack.setScreen</code>) fire <strong>2 lần cho cùng 1 màn hình</strong> mỗi khi <code>viewDidAppear</code> chạy lại trên cùng 1 <code>UIViewController</code> instance — dismiss modal/sheet/alert, resume từ background, scene reactivation. Dedup hiện tại chỉ chặn payload <code>screen_exited</code> nhưng KHÔNG chặn <code>screen_viewed</code> khi <code>previous == name</code>.</p>
+</div>
+
+<div class="kv">
+  <dt>Impact</dt>
+  <dd>Inflated page-view counts, sai session engagement, sai funnel dropoff, sai unique-screen count trong Snowplow.</dd>
+  <dt>Trigger phổ biến ở FLI</dt>
+  <dd>Live camera view (present modal calling, permission sheet, error alert → dismiss về Live), bg→fg trên bất kỳ screen nào.</dd>
+  <dt>Files affected</dt>
+  <dd class="file">platforms/ios/Sources/UniTrack/UniTrack.swift:709-800<br>platforms/android/unitrack/src/main/java/com/unitrack/sdk/UniTrack.kt:787-843</dd>
+  <dt>Fix</dt>
+  <dd>1 dòng guard trước <code>dispatchToProviders(screenStartEventName)</code>. Áp dụng 2 platforms + SPM mirror.</dd>
+</div>
+
+<h2>2. Kiến trúc hiện tại — 2 nguồn fire screen_view</h2>
+
+<h3>Nguồn 1 · Swizzler <code>viewDidAppear</code> <span class="tag tag-ios">iOS</span></h3>
+<p class="file">platforms/ios/Sources/UniTrack/Swizzling/ViewControllerSwizzler.swift:111</p>
+<pre><code>@objc func ut_viewDidAppear(_ animated: Bool) {
+    self.ut_viewDidAppear(animated)
+    if ut_yieldToCrossPlatformLayer() { return }
+    if ut_isSkippedContainer { return }
+
+    let screen = ut_screenName    // = String(describing: type(of: self))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        if ManualTrackSignal.shouldSkip(.screen) { return }
+        UniTrack.setScreen(screen, layer: .iOSNative)   // ← FIRE
+    }
+    ...
+}</code></pre>
+<p><em>Mọi VC <code>viewDidAppear</code> đều dẫn tới <code>setScreen</code>.</em></p>
+
+<h3>Nguồn 2 · AppLifecycle resume re-fire <span class="tag tag-ios">iOS</span> <span class="tag tag-and">Android</span></h3>
+<p class="file">platforms/ios/Sources/UniTrack/Swizzling/AppLifecycleObserver.swift:85</p>
+<pre><code>if isResume, let current = UniTrack.previousScreenName(), !current.isEmpty {
+    UniTrack.setScreen(current)    // ← FIRE re-view khi bg→fg
+}</code></pre>
+<p><em>Product spec: "Màn hình trở thành foreground" cũng đếm là <code>screen_viewed</code>.</em></p>
+
+<h3>Dedup point duy nhất · <code>UniTrack.setScreen</code></h3>
+<p class="file">platforms/ios/Sources/UniTrack/UniTrack.swift:735-799</p>
+<pre><code>shared.lastScreenLock.lock()
+previous = shared.lastScreen
+if previous == name { previous = nil }   // dedup: xoá previous nếu trùng
+...
+shared.lastScreen = name
+shared.lastScreenLock.unlock()
+
+// ── screen_exited fan-out — CÓ guard ──────────────────────────
+if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+    dispatchToProviders(shared.screenEndEventName, endPayload)
+}
+
+// ── screen_viewed fan-out — KHÔNG có guard ❌ ─────────────────
+var startPayload: [String: Any] = ["screen": name, "screen_name": name]
+if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+    startPayload["from"] = prev
+    ...
+}
+dispatchToProviders(shared.screenStartEventName, startPayload)   // ← FIRE VÔ ĐIỀU KIỆN
+</code></pre>
+
+<div class="card bad">
+  <strong>⚠ Bug ở đây:</strong> dedup chỉ set <code>previous = nil</code> để không kèm field <code>from_screen</code> vào payload — nhưng dòng cuối <code>dispatchToProviders(screenStartEventName, startPayload)</code> vẫn chạy. Mỗi lần <code>setScreen("Foo")</code> gọi khi <code>lastScreen</code> đã là <code>"Foo"</code> → thêm 1 <code>screen_viewed</code>.
+</div>
+
+<h2>3. Các kịch bản trigger dup</h2>
+
+<table>
+  <thead>
+    <tr><th style="width:40px">#</th><th>Kịch bản</th><th style="width:120px">Xác suất ở FLI</th><th style="width:120px">Dup?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Dismiss modal → VC bên dưới <code>viewDidAppear</code> lại (cùng class)</td>
+      <td><span class="severity sev-high">Cao</span></td>
+      <td><span class="severity sev-high">Có</span></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Dismiss <code>UISheetPresentationController</code> / bottom sheet</td>
+      <td><span class="severity sev-high">Cao</span></td>
+      <td><span class="severity sev-high">Có</span></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Dismiss <code>UIAlertController</code> / permission dialog</td>
+      <td><span class="severity sev-med">Trung</span></td>
+      <td><span class="severity sev-high">Có</span></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Bg → Fg (resume) trên cùng screen</td>
+      <td><span class="severity sev-high">Cao</span></td>
+      <td><span class="severity sev-high">Có (2 nguồn cùng fire)</span></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Scene activation → UIKit re-call <code>viewDidAppear</code></td>
+      <td><span class="severity sev-med">Trung</span></td>
+      <td><span class="severity sev-high">Có</span></td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>Split view / iPad multitasking rotate</td>
+      <td><span class="severity sev-low">Thấp</span></td>
+      <td><span class="severity sev-med">Có thể</span></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Navigate sang screen KHÁC class (Home → Live)</td>
+      <td>—</td>
+      <td><span class="severity sev-low">Không</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>4. Reproduce timeline · dismiss modal</h2>
+<div class="flow">
+<span class="t">t=0.00</span>   User mở Live → <code>LiveVC.viewDidAppear</code>
+        <span class="arrow">→</span> swizzler defer 50ms <span class="arrow">→</span> <code>setScreen("LiveViewController")</code>
+        <span class="arrow">→</span> lastScreen = nil, previous = nil <span class="arrow">→</span> <span class="ok">screen_viewed FIRE ✓</span>
+        <span class="dim">lastScreen := "LiveViewController"</span>
+
+<span class="t">t=1.20</span>   User tap camera device → present <code>DeviceCallingViewController</code>
+        <span class="dim">LiveVC.viewDidDisappear (no event fires)</span>
+
+<span class="t">t=3.50</span>   User dismiss modal → <code>LiveVC.viewDidAppear LẦN 2</code>
+        <span class="arrow">→</span> swizzler defer 50ms <span class="arrow">→</span> <code>setScreen("LiveViewController")</code>
+        <span class="arrow">→</span> previous == "LiveViewController" == name <span class="arrow">→</span> <span class="dim">previous = nil</span>
+        <span class="arrow">→</span> screen_exited guard: <code>if let prev</code> <span class="arrow">→</span> <span class="ok">skip ✓</span>
+        <span class="arrow">→</span> screen_viewed: <span class="bad">dispatchToProviders(...) — FIRE ❌ DUP</span>
+
+<span class="t">t=3.55</span>   Snowplow collector nhận:
+        <span class="dim">event_action=screen_viewed, screen=LiveViewController  ← lần 2 cho cùng session</span>
+</div>
+
+<h2>5. Reproduce timeline · bg→fg race</h2>
+<div class="flow">
+<span class="t">t=0.00</span>   Currently on <code>HomeViewController</code>. App bg
+        <span class="arrow">→</span> <code>didEnterBackground</code> <span class="arrow">→</span> <code>screen_exited(HomeVC)</code> FIRE
+        <span class="arrow">→</span> lastScreen vẫn = "HomeViewController"
+
+<span class="t">t=5.00</span>   App fg
+        <span class="arrow">→</span> <code>didBecomeActive</code> <span class="arrow">→</span> isResume=true
+        <span class="arrow">→</span> <code>setScreen("HomeViewController")</code> <span class="arrow">→</span> previous == name <span class="arrow">→</span> <span class="bad">screen_viewed FIRE (dup #1)</span>
+
+<span class="t">t=5.03</span>   iOS scene activation trigger <code>HomeVC.viewDidAppear</code> lại (iOS 13+ với 1 số scene config)
+        <span class="arrow">→</span> swizzler defer 50ms
+<span class="t">t=5.08</span>   <span class="arrow">→</span> <code>setScreen("HomeViewController")</code> <span class="arrow">→</span> previous == name <span class="arrow">→</span> <span class="bad">screen_viewed FIRE (dup #2)</span>
+
+<span class="dim">Total: 1 screen entry vật lý → 3 event screen_viewed (1 legit + 2 dup)</span>
+</div>
+
+<h2>6. Root cause</h2>
+<div class="card bad">
+  <strong>File:</strong> <span class="file">platforms/ios/Sources/UniTrack/UniTrack.swift:790-799</span><br>
+  <strong>File:</strong> <span class="file">platforms/android/unitrack/src/main/java/com/unitrack/sdk/UniTrack.kt:836-843</span>
+  <p style="margin-top:12px"><code>dispatchToProviders(screenStartEventName, startPayload)</code> chạy vô điều kiện ở cuối <code>setScreen</code>, không check trường hợp <code>lastScreen == name</code> (cùng screen gọi lại). Dedup hiện chỉ áp vào <code>screen_exited</code> fan-out — bất đối xứng.</p>
+</div>
+
+<h2>7. Fix đề xuất — 1 dòng guard</h2>
+
+<h3>iOS · <span class="file">UniTrack.swift</span></h3>
+<pre><code>shared.lastScreenLock.lock()
+previous = shared.lastScreen
+<span class="diff-add">let isSameName = (previous == name)</span>
+if isSameName { previous = nil }
+if let prev = previous, !prev.isEmpty, let lastAt = shared.lastScreenAt {
+    dwellMs = Int(now.timeIntervalSince(lastAt) * 1000.0)
+}
+shared.lastScreen   = name
+shared.lastScreenAt = now
+shared.lastScreenLock.unlock()
+
+...
+
+// screen_exited fan-out (giữ nguyên)
+if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+    ...
+    dispatchToProviders(shared.screenEndEventName, endPayload)
+    AppLifecycleObserver.rollScreenCounters()
+}
+
+// screen_viewed fan-out — NEW guard
+var startPayload: [String: Any] = ["screen": name, "screen_name": name]
+if shared.screenLifecycleEnabled, let prev = previous, !prev.isEmpty {
+    startPayload["from"] = prev
+    startPayload["from_screen"] = prev
+    startPayload["previous_screen_name"] = prev
+}
+<span class="diff-add">if !isSameName {</span>
+    dispatchToProviders(shared.screenStartEventName, startPayload)
+<span class="diff-add">}</span></code></pre>
+
+<h3>Android · <span class="file">UniTrack.kt</span> — parity</h3>
+<pre><code>val previousBefore = shared.lastScreen
+<span class="diff-add">val isSameName = (previousBefore == name)</span>
+...
+<span class="diff-add">if (!isSameName) {</span>
+    dispatchToProviders(shared.screenStartEventName, startPayload)
+<span class="diff-add">}</span></code></pre>
+
+<h3>Mirror SPM · <span class="file">/Volumes/DucsM1/unitrack-sdk/UniTrackSwiftPackage/</span></h3>
+<p>Copy sau khi patch iOS xong.</p>
+
+<h2>8. Behavior sau fix</h2>
+
+<table>
+  <thead>
+    <tr><th>Kịch bản</th><th>Before</th><th>After</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Dismiss modal về same VC</td>
+      <td class="diff-del">2× screen_viewed</td>
+      <td class="diff-add">1× screen_viewed</td>
+    </tr>
+    <tr>
+      <td>Bg→Fg trên cùng screen</td>
+      <td class="diff-del">2-3× screen_viewed</td>
+      <td class="diff-add">1× screen_viewed (nguồn Lifecycle giữ, swizzler race bị dedup)</td>
+    </tr>
+    <tr>
+      <td>Navigate sang screen mới</td>
+      <td>1× screen_exited + 1× screen_viewed</td>
+      <td>1× screen_exited + 1× screen_viewed (không đổi)</td>
+    </tr>
+    <tr>
+      <td>Cold start</td>
+      <td>1× screen_viewed</td>
+      <td>1× screen_viewed (không đổi — previous=nil, isSameName=false)</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card ok">
+  <strong>Regression risk:</strong> Thấp. Guard chỉ chặn fire khi <code>lastScreen == name</code> — đây là 100% trường hợp "gọi lại cho cùng screen", không có case hợp lệ nào cần bắn <code>screen_viewed</code> lần 2 cho cùng screen trong cùng foreground window.
+</div>
+
+<h2>9. Verify plan</h2>
+<ul>
+  <li><strong>iOS FLI:</strong> Mở Live → tap camera → present modal → dismiss → check Xcode log: chỉ 1 <code>[UniTrack] setScreen → LiveViewController</code> fan-out event trên Snowplow.</li>
+  <li><strong>iOS FLI:</strong> Bg 10s → Fg → check chỉ 1 <code>screen_viewed</code> cho current screen (từ AppLifecycleObserver), không có dup từ swizzler.</li>
+  <li><strong>Android FLI:</strong> Tương tự — rotate device (recreate Activity) không dup, dismiss dialog không dup.</li>
+  <li><strong>Snowplow Mini:</strong> Filter <code>event_action=screen_viewed</code> theo <code>session_id</code>, count per <code>screen_name</code> — kỳ vọng = số navigation transitions thực tế.</li>
+  <li><strong>Regression:</strong> Navigate qua ≥3 screen khác nhau → mỗi transition đúng 1 pair <code>screen_exited</code> + <code>screen_viewed</code>.</li>
+</ul>
+
+<h2>10. Rollout</h2>
+<ol>
+  <li>Patch iOS <code>UniTrack.swift</code> + Android <code>UniTrack.kt</code>.</li>
+  <li>Copy sang SPM mirror. Build xcodebuild PASS bắt buộc (per rule <code>verify-before-push-spm</code>).</li>
+  <li>Bump: iOS SPM <code>0.3.61</code>, Android JitPack <code>0.3.57</code>.</li>
+  <li>FLI bump version reference + smoke test theo verify plan §9.</li>
+  <li>Announce data team: từ ngày X, count <code>screen_viewed</code> theo session sẽ drop ~30-50% (số dup thật) — không phải tracker chết mà là fix inflation.</li>
+</ol>
+
+<footer>
+  Generated for internal SDK review · UniTrack SDK team · 2026-08-11
+</footer>
+
+</div>
+</body>
+</html>

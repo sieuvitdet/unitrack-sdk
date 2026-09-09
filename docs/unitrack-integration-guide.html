@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniTrack — Hướng dẫn tích hợp SDK</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --line: #e4e7ec;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --danger: #dc2626;
+    --code-bg: #1f1f24;
+    --code-text: #ffffff;
+    --code-keyword: #ff7ab2;
+    --code-string:  #ff8170;
+    --code-comment: #6c7986;
+    --code-type:    #5dd8ff;
+    --code-fn:      #67b7a4;
+    --code-num:     #d0bf69;
+    --tag-ios: #007aff;
+    --tag-android: #34d399;
+    --tag-flutter: #02569b;
+    --tag-rn: #61dafb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); margin: 0; padding: 0;
+    line-height: 1.6;
+  }
+  .container { max-width: 1000px; margin: 0 auto; padding: 32px 24px 80px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 28px; }
+  h1 { font-size: 28px; margin: 0 0 8px; color: var(--accent); }
+  h2 { font-size: 22px; margin: 36px 0 12px; border-left: 4px solid var(--accent); padding-left: 12px; }
+  h3 { font-size: 17px; margin: 20px 0 8px; color: #374151; }
+  h4 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); font-size: 14px; }
+  code {
+    background: #eef2ff; color: #3730a3; padding: 2px 6px;
+    border-radius: 4px; font-size: 13px; font-family: "SF Mono", Menlo, monospace;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13px; line-height: 1.55;
+    font-family: "SF Mono", Menlo, monospace; margin: 12px 0;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  pre .kw { color: var(--code-keyword); }
+  pre .str { color: var(--code-string); }
+  pre .cm  { color: var(--code-comment); font-style: italic; }
+  pre .ty  { color: var(--code-type); }
+  pre .fn  { color: var(--code-fn); }
+  pre .num { color: var(--code-num); }
+  pre .key { color: #75b6c5; }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .4px;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .tag-ios     { background: rgba(0,122,255,.12); color: var(--tag-ios); }
+  .tag-android { background: rgba(52,211,153,.18); color: #047857; }
+  .tag-flutter { background: rgba(2,86,155,.12); color: var(--tag-flutter); }
+  .tag-rn      { background: rgba(97,218,251,.20); color: #0c5c78; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; }
+  th, td { padding: 10px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 18px; margin: 14px 0;
+  }
+  .note   { border-left: 4px solid var(--accent); background: #eef2ff; }
+  .warn   { border-left: 4px solid var(--warn);   background: #fffbeb; }
+  .danger { border-left: 4px solid var(--danger); background: #fef2f2; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .toc {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 22px; margin-bottom: 24px;
+  }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .anchor-pad { padding-top: 24px; margin-top: -24px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>UniTrack — Hướng dẫn tích hợp SDK</h1>
+  <p class="sub">Phân tích hành vi người dùng cho ứng dụng iOS / Android / Flutter. Auto-capture screens + taps + crashes, offline queue, fan-out tới Snowplow / Firebase / HTTP custom.</p>
+  <p class="sub">iOS SPM <strong>0.3.50</strong> · Android Maven <strong>0.3.43</strong> · Flutter pub.dev <strong>1.3.1</strong> · React Native npm <strong>1.2.0</strong></p>
+</header>
+
+<div class="toc">
+  <h3 style="margin-top:0">Mục lục</h3>
+  <ol>
+    <li><a href="#overview">Tổng quan kiến trúc</a></li>
+    <li><a href="#ios-setup">iOS — Setup SPM</a></li>
+    <li><a href="#android-setup">Android — Setup Maven</a></li>
+    <li><a href="#json-config">trackingConfig.json</a></li>
+    <li><a href="#events">Tracking events</a></li>
+    <li><a href="#custom">Custom event (Iglu schema riêng)</a></li>
+    <li><a href="#identity">Identify user</a></li>
+    <li><a href="#providers">Snowplow / Firebase / HTTP provider</a></li>
+    <li><a href="#flutter">Flutter add-to-app (cross-binary)</a></li>
+    <li><a href="#react-native">React Native add-to-app (cross-binary)</a></li>
+  </ol>
+</div>
+
+<!-- ============== OVERVIEW ============== -->
+<div class="anchor-pad" id="overview"></div>
+<h2>1. Tổng quan kiến trúc</h2>
+
+<p>UniTrack là SDK analytics dạng <strong>core + provider</strong>:</p>
+
+<ul>
+  <li><strong>Core (C++)</strong> — SQLite offline queue + exponential backoff retry. Mọi event qua đây trước khi flush mạng.</li>
+  <li><strong>Auto-capture</strong> — Swift / Kotlin swizzler bắt tap + screen + network + crash. App không cần code track thủ công.</li>
+  <li><strong>Provider fan-out</strong> — mỗi event sau khi vào core sẽ broadcast tới N provider đã register (Snowplow / Firebase / HTTP custom). Provider tự chuyển sang format của tracking platform.</li>
+</ul>
+
+<pre><code>App code (Swift / Kotlin / Dart)
+     ↓
+UniTrack singleton  ── auto-capture swizzler bắt event
+     ↓
+Core SQLite queue (offline-friendly, retry tự động)
+     ↓
+Fan-out tới N provider
+     ├─→ Snowplow Provider     → POST collector
+     ├─→ Firebase Provider     → logEvent()
+     └─→ HTTP Provider (custom) → POST endpoint của bạn</code></pre>
+
+<h3>1.1 Cấu hình bằng JSON local — không cần fetch portal</h3>
+<p>SDK đọc <code>trackingConfig.json</code> ở app bundle / assets ngay khi launch. App không cần gọi API config từ server — mọi setup (endpoint, batch size, provider toggle) đều khai báo file JSON. Đổi flavor → dùng deep-merge override.</p>
+
+<!-- ============== iOS SETUP ============== -->
+<div class="anchor-pad" id="ios-setup"></div>
+<h2>2. <span class="tag tag-ios">iOS</span> Setup SPM</h2>
+
+<h3>2.1 Dependency</h3>
+<p>Xcode → File → Add Package Dependencies → URL:</p>
+<pre><code>https://github.com/sieuvitdet/unitrack-ios-package.git</code></pre>
+<p>Version: <code>0.3.50</code>. Link target tùy provider bạn dùng:</p>
+<ul>
+  <li><code>UniTrack</code> — core SDK (bắt buộc).</li>
+  <li><code>UniTrackSnowplow</code> — Snowplow provider (chỉ link nếu dùng Snowplow).</li>
+</ul>
+
+<h3>2.2 Config JSON</h3>
+<p>Add file <code>trackingConfig.json</code> vào project + Xcode target <strong>Build Phases → Copy Bundle Resources</strong>.</p>
+
+<h3>2.3 Bootstrap trong AppDelegate</h3>
+<p>Code tối thiểu để init SDK:</p>
+
+<pre><code><span class="kw">import</span> <span class="ty">UniTrack</span>
+<span class="kw">import</span> <span class="ty">UniTrackSnowplow</span>  <span class="cm">// Chỉ cần nếu dùng Snowplow provider</span>
+
+<span class="kw">func</span> <span class="fn">application</span>(<span class="kw">_</span> application: <span class="ty">UIApplication</span>,
+                 didFinishLaunchingWithOptions launchOptions: ...) -&gt; <span class="ty">Bool</span> {
+    <span class="cm">// 1. Load config JSON</span>
+    <span class="kw">guard let</span> url = <span class="ty">Bundle</span>.main.<span class="fn">url</span>(forResource: <span class="str">"trackingConfig"</span>, withExtension: <span class="str">"json"</span>),
+          <span class="kw">let</span> data = <span class="kw">try?</span> <span class="ty">Data</span>(contentsOf: url),
+          <span class="kw">let</span> cfg = <span class="kw">try?</span> <span class="ty">JSONSerialization</span>.<span class="fn">jsonObject</span>(with: data) <span class="kw">as?</span> [<span class="ty">String</span>: <span class="ty">Any</span>]
+    <span class="kw">else</span> { <span class="kw">return true</span> }
+
+    <span class="cm">// 2. Build UniTrack.Config từ cfg["sdk_config"]</span>
+    <span class="kw">let</span> sdkCfg = cfg[<span class="str">"sdk_config"</span>] <span class="kw">as?</span> [<span class="ty">String</span>: <span class="ty">Any</span>] ?? [:]
+    <span class="kw">var</span> config = <span class="ty">UniTrack</span>.<span class="ty">Config</span>()
+    config.batchSize       = sdkCfg[<span class="str">"batchSize"</span>]       <span class="kw">as?</span> <span class="ty">Int</span>  ?? <span class="num">10</span>
+    config.flushIntervalMs = sdkCfg[<span class="str">"flushIntervalMs"</span>] <span class="kw">as?</span> <span class="ty">Int</span>  ?? <span class="num">3000</span>
+    config.autoCapture     = sdkCfg[<span class="str">"autoCapture"</span>]     <span class="kw">as?</span> <span class="ty">Bool</span> ?? <span class="kw">true</span>
+    config.trackScreens    = sdkCfg[<span class="str">"trackScreens"</span>]    <span class="kw">as?</span> <span class="ty">Bool</span> ?? <span class="kw">true</span>
+    config.trackTaps       = sdkCfg[<span class="str">"trackTaps"</span>]       <span class="kw">as?</span> <span class="ty">Bool</span> ?? <span class="kw">true</span>
+
+    <span class="ty">UniTrack</span>.<span class="fn">initialize</span>(apiKey: <span class="str">"YOUR_API_KEY"</span>, config: config)
+
+    <span class="cm">// 3. (Optional) Add Snowplow provider</span>
+    <span class="kw">if let</span> sp = cfg[<span class="str">"snowplow"</span>] <span class="kw">as?</span> [<span class="ty">String</span>: <span class="ty">Any</span>],
+       (sp[<span class="str">"enabled"</span>] <span class="kw">as?</span> <span class="ty">Bool</span>) == <span class="kw">true</span> {
+        <span class="kw">let</span> provider = <span class="ty">SnowplowProvider</span>(
+            endpoint:       sp[<span class="str">"endpoint"</span>] <span class="kw">as?</span> <span class="ty">String</span> ?? <span class="str">""</span>,
+            appId:          sp[<span class="str">"appId"</span>] <span class="kw">as?</span> <span class="ty">String</span> ?? <span class="str">"app"</span>,
+            igluVendor:     sp[<span class="str">"iglu_vendor"</span>] <span class="kw">as?</span> <span class="ty">String</span>,
+            defaultVersion: sp[<span class="str">"default_version"</span>] <span class="kw">as?</span> <span class="ty">String</span> ?? <span class="str">"1-0-0"</span>
+        )
+        <span class="ty">UniTrack</span>.<span class="fn">addProvider</span>(provider)
+    }
+
+    <span class="kw">return true</span>
+}</code></pre>
+
+<p>Đề nghị tách phần load JSON + init vào 1 file riêng (vd <code>AnalyticsBootstrap.swift</code>) để AppDelegate gọn.</p>
+
+<!-- ============== Android SETUP ============== -->
+<div class="anchor-pad" id="android-setup"></div>
+<h2>3. <span class="tag tag-android">Android</span> Setup Maven</h2>
+
+<h3>3.1 Dependency</h3>
+<p><code>gradle/libs.versions.toml</code>:</p>
+<pre><code>[versions]
+unitrack = "0.3.43"
+
+[libraries]
+unitrack          = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack",          version.ref = "unitrack" }
+unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-snowplow", version.ref = "unitrack" }</code></pre>
+
+<p><code>settings.gradle</code> repo:</p>
+<pre><code>repositories {
+    google()
+    mavenCentral()
+    maven { url <span class="str">'https://jitpack.io'</span> }
+}</code></pre>
+
+<p><code>app/build.gradle</code>:</p>
+<pre><code>dependencies {
+    implementation libs.unitrack
+    implementation libs.unitrack.snowplow   <span class="cm">// chỉ nếu dùng Snowplow</span>
+}</code></pre>
+
+<h3>3.2 Config JSON</h3>
+<p>Add file <code>tracking_config.json</code> vào <code>app/src/main/assets/</code>. Android pick từ assets tự động.</p>
+
+<h3>3.3 Bootstrap trong Application</h3>
+<pre><code><span class="kw">class</span> <span class="ty">MyApp</span> : <span class="ty">Application</span>() {
+    <span class="kw">override fun</span> <span class="fn">onCreate</span>() {
+        <span class="kw">super</span>.<span class="fn">onCreate</span>()
+
+        <span class="cm">// 1. Load config JSON từ assets</span>
+        <span class="kw">val</span> raw = assets.<span class="fn">open</span>(<span class="str">"tracking_config.json"</span>).<span class="fn">bufferedReader</span>().<span class="fn">use</span> { it.<span class="fn">readText</span>() }
+        <span class="kw">val</span> cfg = <span class="ty">JSONObject</span>(raw)
+        <span class="kw">val</span> sdkCfg = cfg.<span class="fn">optJSONObject</span>(<span class="str">"sdk_config"</span>) ?: <span class="ty">JSONObject</span>()
+
+        <span class="cm">// 2. Build UniTrackConfig</span>
+        <span class="kw">val</span> config = <span class="ty">UniTrackConfig</span>(
+            batchSize       = sdkCfg.<span class="fn">optInt</span>(<span class="str">"batchSize"</span>, <span class="num">10</span>),
+            flushIntervalMs = sdkCfg.<span class="fn">optInt</span>(<span class="str">"flushIntervalMs"</span>, <span class="num">3000</span>),
+            autoCapture     = sdkCfg.<span class="fn">optBoolean</span>(<span class="str">"autoCapture"</span>, <span class="kw">true</span>),
+            trackScreens    = sdkCfg.<span class="fn">optBoolean</span>(<span class="str">"trackScreens"</span>, <span class="kw">true</span>),
+            trackTaps       = sdkCfg.<span class="fn">optBoolean</span>(<span class="str">"trackTaps"</span>, <span class="kw">true</span>),
+        )
+        <span class="ty">UniTrack</span>.<span class="fn">initialize</span>(<span class="kw">this</span>, apiKey = <span class="str">"YOUR_API_KEY"</span>, config = config)
+
+        <span class="cm">// 3. (Optional) Add Snowplow provider</span>
+        <span class="kw">val</span> sp = cfg.<span class="fn">optJSONObject</span>(<span class="str">"snowplow"</span>)
+        <span class="kw">if</span> (sp?.<span class="fn">optBoolean</span>(<span class="str">"enabled"</span>) == <span class="kw">true</span>) {
+            <span class="kw">val</span> provider = <span class="ty">SnowplowProvider</span>(
+                context        = <span class="kw">this</span>,
+                endpoint       = sp.<span class="fn">getString</span>(<span class="str">"endpoint"</span>),
+                appId          = sp.<span class="fn">getString</span>(<span class="str">"appId"</span>),
+                igluVendor     = sp.<span class="fn">optString</span>(<span class="str">"iglu_vendor"</span>),
+                defaultVersion = sp.<span class="fn">optString</span>(<span class="str">"default_version"</span>, <span class="str">"1-0-0"</span>)
+            )
+            <span class="ty">UniTrack</span>.<span class="fn">addProvider</span>(provider)
+        }
+    }
+}</code></pre>
+
+<p>Đăng ký <code>MyApp</code> trong <code>AndroidManifest.xml</code>:</p>
+<pre><code>&lt;application
+    android:name=<span class="str">".MyApp"</span>
+    ... /&gt;</code></pre>
+
+<!-- ============== JSON CONFIG ============== -->
+<div class="anchor-pad" id="json-config"></div>
+<h2>4. trackingConfig.json</h2>
+
+<p>File JSON chung iOS + Android. Khuyến nghị giữ <strong>2 file identical</strong> (vd dùng symlink hoặc CI step copy).</p>
+
+<pre><code>{
+  <span class="key">"version"</span>: <span class="num">1</span>,
+  <span class="key">"endpoint"</span>: <span class="str">""</span>,
+  <span class="key">"pii_salt"</span>: <span class="str">"&lt;32-byte-hex-random&gt;"</span>,
+
+  <span class="key">"sdk_config"</span>: {
+    <span class="key">"batchSize"</span>: <span class="num">10</span>,
+    <span class="key">"flushIntervalMs"</span>: <span class="num">3000</span>,
+    <span class="key">"logLevel"</span>: <span class="str">"warn"</span>,
+    <span class="key">"autoCapture"</span>: <span class="kw">true</span>,
+    <span class="key">"trackScreens"</span>: <span class="kw">true</span>,
+    <span class="key">"trackTaps"</span>: <span class="kw">true</span>,
+    <span class="key">"trackNetwork"</span>: <span class="kw">false</span>,
+    <span class="key">"screen_start_event"</span>: <span class="str">"screen_viewed"</span>,
+    <span class="key">"screen_end_event"</span>: <span class="str">"screen_exited"</span>,
+    <span class="key">"screen_load_event"</span>: <span class="str">"screen_load_completed"</span>
+  },
+
+  <span class="key">"snowplow"</span>: {
+    <span class="key">"enabled"</span>: <span class="kw">true</span>,
+    <span class="key">"endpoint"</span>: <span class="str">"https://collector.yourapp.com"</span>,
+    <span class="key">"appId"</span>: <span class="str">"your_app"</span>,
+    <span class="key">"iglu_vendor"</span>: <span class="str">"com.yourcompany.tracker"</span>,
+    <span class="key">"default_version"</span>: <span class="str">"1-0-0"</span>,
+    <span class="key">"options"</span>: {
+      <span class="key">"sessionContext"</span>: <span class="kw">false</span>,
+      <span class="key">"lifecycleAutotracking"</span>: <span class="kw">false</span>,
+      <span class="key">"screenEngagementAutotracking"</span>: <span class="kw">true</span>
+    }
+  },
+
+  <span class="key">"firebase"</span>: { <span class="key">"enabled"</span>: <span class="kw">false</span> },
+
+  <span class="key">"tracing"</span>: {
+    <span class="key">"enabled"</span>: <span class="kw">false</span>,
+    <span class="key">"header_name"</span>: <span class="str">"traceparent"</span>,
+    <span class="key">"allowlist_hosts"</span>: [],
+    <span class="key">"sampled"</span>: <span class="kw">false</span>
+  },
+
+  <span class="key">"http_providers"</span>: [],
+
+  <span class="key">"flavors"</span>: {
+    <span class="key">"dev"</span>: {
+      <span class="key">"sdk_config"</span>: { <span class="key">"logLevel"</span>: <span class="str">"debug"</span> }
+    },
+    <span class="key">"staging"</span>: {
+      <span class="key">"snowplow"</span>: { <span class="key">"endpoint"</span>: <span class="str">"https://collector-staging.yourapp.com"</span> }
+    }
+  }
+}</code></pre>
+
+<h3>4.1 Các trường chính</h3>
+<table>
+  <thead><tr><th>Field</th><th>Ý nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>endpoint</code></td><td>Core HTTP queue URL. Rỗng → SDK chỉ fan-out qua provider (Snowplow / Firebase). Đặt URL để có ingest backup riêng.</td></tr>
+    <tr><td><code>pii_salt</code></td><td>32-byte hex random, dùng cho SHA-256 hash PII fields. <strong>Sinh 1 lần, giữ identical 2 platform</strong>.</td></tr>
+    <tr><td><code>sdk_config.batchSize</code></td><td>Số event mỗi lần flush HTTP. Default 10.</td></tr>
+    <tr><td><code>sdk_config.flushIntervalMs</code></td><td>Interval flush khi queue chưa đầy batch. Default 3000ms.</td></tr>
+    <tr><td><code>sdk_config.autoCapture</code></td><td>Master toggle. False = SDK chỉ chạy event app gọi thủ công.</td></tr>
+    <tr><td><code>sdk_config.trackScreens</code></td><td>Tự bắt UIViewController appear / Activity resume.</td></tr>
+    <tr><td><code>sdk_config.trackTaps</code></td><td>Tự bắt button tap.</td></tr>
+    <tr><td><code>sdk_config.trackNetwork</code></td><td>Tự bắt URLSession / OkHttp request (cẩn thận PII trong URL).</td></tr>
+    <tr><td><code>snowplow.*</code></td><td>Snowplow provider config. Để <code>enabled: false</code> nếu không dùng.</td></tr>
+    <tr><td><code>firebase.enabled</code></td><td>True → SDK gọi <code>FirebaseAnalytics.logEvent(...)</code> qua reflection. Phải có Firebase SDK trong app.</td></tr>
+    <tr><td><code>tracing.allowlist_hosts</code></td><td>Inject <code>traceparent</code> W3C header vào outgoing request. <strong>Fail-closed</strong>: list rỗng = không inject.</td></tr>
+    <tr><td><code>flavors.&lt;name&gt;.*</code></td><td>Deep-merge override. Build flavor = tên này → load merged config.</td></tr>
+  </tbody>
+</table>
+
+<div class="panel warn">
+  <strong>2 file JSON iOS + Android phải identical.</strong> Nên dùng symlink (UNIX) hoặc CI step copy 1 → 2.
+</div>
+
+<!-- ============== EVENTS ============== -->
+<div class="anchor-pad" id="events"></div>
+<h2>5. Tracking events</h2>
+
+<p>SDK auto-bắt tap + screen + crash → app KHÔNG phải code thêm cho event chuẩn. App chỉ cần:</p>
+<ul>
+  <li>Đặt <strong>accessibility identifier</strong> / <strong>tag</strong> để event tap có element_key meaningful.</li>
+  <li>Đặt <strong>view controller title</strong> / Activity name để screen_view có name đẹp.</li>
+  <li>Gọi <code>UniTrack.track(...)</code> thủ công cho business event chưa có swizzler bắt.</li>
+</ul>
+
+<h3>5.1 Track event thủ công</h3>
+<div class="panel">
+  <h4>iOS</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">track</span>(<span class="str">"purchase_completed"</span>, properties: [
+    <span class="str">"order_id"</span>: orderId,
+    <span class="str">"amount"</span>: <span class="num">99000</span>,
+    <span class="str">"currency"</span>: <span class="str">"VND"</span>
+])</code></pre>
+
+  <h4>Android</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">track</span>(<span class="str">"purchase_completed"</span>, mapOf(
+    <span class="str">"order_id"</span> to orderId,
+    <span class="str">"amount"</span>   to <span class="num">99000</span>,
+    <span class="str">"currency"</span> to <span class="str">"VND"</span>
+))</code></pre>
+</div>
+
+<p><code>track</code> không gắn schema cụ thể — event name = key downstream filter. Phù hợp khi BE dùng schema-less store (vd Elasticsearch, BigQuery raw JSON).</p>
+
+<h3>5.2 Helper sẵn</h3>
+<table>
+  <thead><tr><th>Helper</th><th>Event name</th><th>Khi nào gọi</th></tr></thead>
+  <tbody>
+    <tr><td><code>UniTrack.setScreen(name)</code></td><td>screen_viewed</td><td>Khi bạn muốn override name tự bắt</td></tr>
+    <tr><td><code>UniTrack.trackDeeplink(url:source:)</code></td><td>deeplink</td><td>App resume từ deeplink</td></tr>
+    <tr><td><code>UniTrack.trackNotification(state:action:...)</code></td><td>notification</td><td>Push notification received/opened</td></tr>
+    <tr><td><code>UniTrack.trackUrlLaunch(url)</code></td><td>third_party_open</td><td>Mở app/URL bên ngoài</td></tr>
+  </tbody>
+</table>
+
+<h3>5.3 Auto-capture event reference</h3>
+<p>SDK tự fire 6 event sau (không cần app làm gì):</p>
+<table>
+  <thead><tr><th>Event</th><th>Trigger</th></tr></thead>
+  <tbody>
+    <tr><td><code>click</code></td><td>User tap button / cell</td></tr>
+    <tr><td><code>screen_viewed</code></td><td>Screen appear</td></tr>
+    <tr><td><code>screen_exited</code></td><td>Screen dismiss</td></tr>
+    <tr><td><code>screen_load_completed</code></td><td>Screen render xong (với load_ms)</td></tr>
+    <tr><td><code>network_request</code> / <code>network_error</code></td><td>HTTP call complete (nếu <code>trackNetwork: true</code>)</td></tr>
+    <tr><td><code>crash</code></td><td>Uncaught exception / SIGSEGV / OOM</td></tr>
+  </tbody>
+</table>
+
+<!-- ============== CUSTOM EVENT ============== -->
+<div class="anchor-pad" id="custom"></div>
+<h2>6. Custom event với Iglu schema</h2>
+
+<p>Khác <code>track()</code> ở chỗ <strong>schema name</strong> được map ra Iglu URI ở Snowplow Provider. Dùng khi:</p>
+<ul>
+  <li>BE Snowplow yêu cầu event tuân theo Iglu schema đã register.</li>
+  <li>Cần stamp <code>event_action</code> field để phân biệt action trong cùng schema.</li>
+  <li>Cần kèm <code>user_id</code> hashed từ <code>identify()</code> cache.</li>
+</ul>
+
+<h3>6.1 API signature</h3>
+<pre><code><span class="cm">// iOS</span>
+<span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(
+    <span class="kw">_</span> eventName: <span class="ty">String</span>,
+    action: <span class="ty">String?</span> = <span class="kw">nil</span>,
+    data: [<span class="ty">String</span>: <span class="ty">Any</span>] = [:],
+    includeUser: <span class="ty">Bool</span> = <span class="kw">false</span>
+)
+
+<span class="cm">// Android</span>
+<span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(
+    eventName: <span class="ty">String</span>,
+    action: <span class="ty">String?</span> = <span class="kw">null</span>,
+    data: <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="ty">Any?</span>&gt; = emptyMap(),
+    includeUser: <span class="ty">Boolean</span> = <span class="kw">false</span>
+)</code></pre>
+
+<table>
+  <thead><tr><th>Param</th><th>Mô tả</th></tr></thead>
+  <tbody>
+    <tr><td><code>eventName</code></td><td>Iglu schema name (snake_case). Phải khớp schema đã register ở Iglu registry.</td></tr>
+    <tr><td><code>action</code></td><td>Giá trị field <code>event_action</code> trong payload. Nil → SDK dùng <code>eventName</code>.</td></tr>
+    <tr><td><code>data</code></td><td>Field payload tự do.</td></tr>
+    <tr><td><code>includeUser</code></td><td><code>true</code> → kèm <code>user_id</code> (hashed) từ <code>identify()</code> cache.</td></tr>
+  </tbody>
+</table>
+
+<h3>6.2 Pattern 1: 1 schema = 1 action</h3>
+<div class="panel">
+  <h4>iOS</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(<span class="str">"banner_clicked"</span>, data: [
+    <span class="str">"banner_id"</span>: <span class="str">"home_top"</span>,
+    <span class="str">"position"</span>: <span class="num">0</span>
+])
+<span class="cm">// → schema: iglu:com.yourcompany.tracker/banner_clicked/jsonschema/1-0-0</span>
+<span class="cm">// → event_action: "banner_clicked"</span></code></pre>
+
+  <h4>Android</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(<span class="str">"banner_clicked"</span>, data = mapOf(
+    <span class="str">"banner_id"</span> to <span class="str">"home_top"</span>,
+    <span class="str">"position"</span>  to <span class="num">0</span>
+))</code></pre>
+</div>
+
+<h3>6.3 Pattern 2: 1 schema = nhiều action</h3>
+<p>Gom event domain cùng shape dưới 1 schema, phân biệt bằng <code>action</code>:</p>
+
+<div class="panel">
+  <h4>iOS</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>, action: <span class="str">"payment_completed"</span>, data: [
+    <span class="str">"order_id"</span>: orderId,
+    <span class="str">"amount"</span>: <span class="num">99000</span>
+], includeUser: <span class="kw">true</span>)
+
+<span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>, action: <span class="str">"payment_failed"</span>, data: [
+    <span class="str">"order_id"</span>: orderId,
+    <span class="str">"error_code"</span>: <span class="str">"INSUFFICIENT_BALANCE"</span>
+])
+<span class="cm">// → cả 2 chung schema: iglu:com.yourcompany.tracker/payment_event/jsonschema/1-0-0</span></code></pre>
+
+  <h4>Android</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(
+    eventName = <span class="str">"payment_event"</span>,
+    action = <span class="str">"payment_completed"</span>,
+    data = mapOf(<span class="str">"order_id"</span> to orderId, <span class="str">"amount"</span> to <span class="num">99000</span>),
+    includeUser = <span class="kw">true</span>
+)</code></pre>
+</div>
+
+<div class="panel warn">
+  <strong>Iglu schema phải register trước</strong> ở Iglu registry. Snowplow Tracker silently drop event nếu schema không tồn tại. Schema dùng cho Pattern 2 phải có field <code>event_action</code> kiểu enum để accept mọi action.
+</div>
+
+<!-- ============== IDENTITY ============== -->
+<div class="anchor-pad" id="identity"></div>
+<h2>7. Identify user</h2>
+
+<p>Gọi <code>identify</code> sau khi user login thành công. Sau đó mọi event có <code>includeUser: true</code> sẽ kèm <code>user_id</code> này.</p>
+
+<h3>7.1 Identify / Reset</h3>
+<div class="panel">
+  <h4>iOS</h4>
+<pre><code><span class="cm">// Login success</span>
+<span class="ty">UniTrack</span>.<span class="fn">identify</span>(userId: hashedUserId, traits: [
+    <span class="str">"plan"</span>: <span class="str">"premium"</span>,
+    <span class="str">"signup_date"</span>: signupDate
+])
+
+<span class="cm">// Logout</span>
+<span class="ty">UniTrack</span>.<span class="fn">reset</span>()</code></pre>
+
+  <h4>Android</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">identify</span>(userId = hashedUserId, traits = mapOf(
+    <span class="str">"plan"</span> to <span class="str">"premium"</span>
+))
+
+<span class="ty">UniTrack</span>.<span class="fn">reset</span>()</code></pre>
+</div>
+
+<h3>7.2 PII hashing (SHA-256 + salt) — khuyến nghị</h3>
+
+<div class="panel warn">
+  Nếu BE / data team yêu cầu KHÔNG nhận raw <code>user_id</code> / <code>phone_number</code> / <code>email</code> (rất phổ biến vì lý do GDPR / data residency) → bắt buộc hash trước khi truyền vào <code>identify</code>.
+</div>
+
+<p>Công thức:</p>
+<pre><code>hashedValue = SHA-256(pii_salt + rawValue)</code></pre>
+
+<p>Salt lấy từ <code>pii_salt</code> trong <code>trackingConfig.json</code>. Cùng salt → cùng hash → BE dedup user.</p>
+
+<div class="panel">
+  <h4>iOS — helper SHA-256</h4>
+<pre><code><span class="kw">import</span> <span class="ty">CryptoKit</span>
+
+<span class="kw">func</span> <span class="fn">hashPII</span>(<span class="kw">_</span> raw: <span class="ty">String</span>, salt: <span class="ty">String</span>) -&gt; <span class="ty">String</span> {
+    <span class="kw">let</span> input = (salt + raw).<span class="fn">data</span>(using: .utf8)!
+    <span class="kw">let</span> digest = <span class="ty">SHA256</span>.<span class="fn">hash</span>(data: input)
+    <span class="kw">return</span> digest.<span class="fn">map</span> { <span class="ty">String</span>(format: <span class="str">"%02x"</span>, $0) }.<span class="fn">joined</span>()
+}
+
+<span class="cm">// Sau khi login:</span>
+<span class="kw">let</span> hashedId = <span class="fn">hashPII</span>(rawUserId, salt: piiSalt)
+<span class="ty">UniTrack</span>.<span class="fn">identify</span>(userId: hashedId)</code></pre>
+
+  <h4>Android — helper SHA-256</h4>
+<pre><code><span class="kw">import</span> java.security.<span class="ty">MessageDigest</span>
+
+<span class="kw">fun</span> <span class="fn">hashPII</span>(raw: <span class="ty">String</span>, salt: <span class="ty">String</span>): <span class="ty">String</span> {
+    <span class="kw">val</span> digest = <span class="ty">MessageDigest</span>.<span class="fn">getInstance</span>(<span class="str">"SHA-256"</span>)
+    <span class="kw">val</span> bytes = digest.<span class="fn">digest</span>((salt + raw).<span class="fn">toByteArray</span>(<span class="ty">Charsets</span>.UTF_8))
+    <span class="kw">return</span> bytes.<span class="fn">joinToString</span>(<span class="str">""</span>) { <span class="str">"%02x"</span>.<span class="fn">format</span>(it) }
+}
+
+<span class="cm">// Sau khi login:</span>
+<span class="kw">val</span> hashedId = <span class="fn">hashPII</span>(rawUserId, piiSalt)
+<span class="ty">UniTrack</span>.<span class="fn">identify</span>(userId = hashedId)</code></pre>
+</div>
+
+<h3>7.3 Test vector cho data team</h3>
+<p>Cung cấp cho data team để verify hash:</p>
+<table>
+  <tbody>
+    <tr><td>Raw</td><td><code>"+84812345678"</code></td></tr>
+    <tr><td>Salt</td><td><code>"&lt;pii_salt của bạn&gt;"</code></td></tr>
+    <tr><td>Hash kỳ vọng</td><td>Chạy <code>echo -n "&lt;salt&gt;+84812345678" | shasum -a 256</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ============== PROVIDERS ============== -->
+<div class="anchor-pad" id="providers"></div>
+<h2>8. Provider — Snowplow / Firebase / HTTP custom</h2>
+
+<p>Provider là adapter giữa UniTrack core và tracking platform cụ thể. App đăng ký N provider — mỗi event tự broadcast tới hết.</p>
+
+<h3>8.1 Snowplow Provider</h3>
+<p>Đã show ở Section 2.3 + 3.3. Provider tự đính kèm 3 entity:</p>
+<ul>
+  <li><code>user_context</code> — userId + traits từ <code>identify()</code>.</li>
+  <li><code>application_context</code> — app version, device, network type.</li>
+  <li><code>core_action</code> — session_id, event sequence.</li>
+</ul>
+
+<h3>8.2 Firebase Analytics Provider</h3>
+<p>SDK reflection-based — KHÔNG link Firebase symbol. App phải có <code>firebase-analytics</code> trong dependencies.</p>
+
+<div class="panel">
+  <h4>iOS</h4>
+<pre><code><span class="cm">// Sau khi UniTrack.initialize</span>
+<span class="kw">if</span> cfg[<span class="str">"firebase"</span>] <span class="kw">as?</span> [<span class="ty">String</span>: <span class="ty">Any</span>]?[<span class="str">"enabled"</span>] <span class="kw">as?</span> <span class="ty">Bool</span> == <span class="kw">true</span> {
+    <span class="ty">UniTrack</span>.<span class="fn">attachFirebaseAdapter</span>()
+}</code></pre>
+
+  <h4>Android</h4>
+<pre><code><span class="ty">UniTrack</span>.<span class="fn">attachFirebaseAdapter</span>(<span class="kw">this</span>)</code></pre>
+</div>
+
+<h3>8.3 HTTP Custom Provider</h3>
+<p>Khai báo trong JSON <code>http_providers[]</code> để dump event sang Kibana / ELK / nội bộ:</p>
+
+<pre><code><span class="key">"http_providers"</span>: [
+    {
+        <span class="key">"name"</span>: <span class="str">"internal_kibana"</span>,
+        <span class="key">"url"</span>: <span class="str">"https://kibana.yourcompany.com/_bulk"</span>,
+        <span class="key">"format"</span>: <span class="str">"ndjson"</span>,
+        <span class="key">"headers"</span>: { <span class="key">"Authorization"</span>: <span class="str">"Bearer ${KIBANA_TOKEN}"</span> },
+        <span class="key">"event_filter"</span>: [<span class="str">"crash"</span>, <span class="str">"network_error"</span>]
+    }
+]</code></pre>
+
+<p>SDK đọc list này lúc bootstrap, init <code>HttpProvider</code> cho từng entry, đăng ký vào fan-out. App KHÔNG cần code thêm.</p>
+
+<!-- ============== FLUTTER ============== -->
+<div class="anchor-pad" id="flutter"></div>
+<h2>9. Flutter add-to-app (cross-binary)</h2>
+
+<p>Nếu app native iOS / Android nhúng Flutter module → 2 binary cùng link UniTrack SDK. Mặc định mỗi binary tạo 1 singleton riêng → session_id khác nhau, user journey bị cắt khi user chuyển native ↔ Flutter screen.</p>
+
+<p>SDK đã wire <strong>HostProxy auto-detect</strong>: Flutter plugin tự forward call qua singleton native. App KHÔNG cần code thêm.</p>
+
+<h3>9.1 Setup Flutter module</h3>
+
+<h4>Bước 1: Add dependency</h4>
+<p>Trong <code>pubspec.yaml</code>:</p>
+<pre><code>dependencies:
+  unitrack: ^1.3.1</code></pre>
+
+<h4>Bước 2: Bật cờ skipVendor (chỉ Android)</h4>
+<p>Plugin Android mặc định vendor native binary. Nếu native host đã link <code>unitrack</code> qua Maven → duplicate class. Set flag để plugin skip vendor:</p>
+
+<p>Trong <code>android/gradle.properties</code> của Flutter module:</p>
+<pre><code>unitrack.skipVendor=true</code></pre>
+
+<p>iOS: Không cần làm gì — Swift module isolation tự handle.</p>
+
+<h4>Bước 3: Init bình thường ở Dart side</h4>
+<pre><code><span class="kw">import</span> <span class="str">'package:unitrack/unitrack.dart'</span>;
+
+<span class="kw">void</span> main() <span class="kw">async</span> {
+    WidgetsFlutterBinding.ensureInitialized();
+    <span class="kw">await</span> UniTrack.instance.initialize(
+        apiKey: <span class="str">'utk_xxx'</span>,
+        config: UniTrackConfig(autoCapture: <span class="kw">true</span>, trackTaps: <span class="kw">true</span>),
+    );
+    runApp(MyApp());
+}
+
+<span class="cm">// Wrap MaterialApp với observer auto-capture</span>
+<span class="ty">MaterialApp</span>(
+    navigatorObservers: [UniTrackRouteObserver()],
+    builder: (ctx, child) =&gt; <span class="ty">UniTrackTapObserver</span>(child: child!),
+    ...
+);
+
+<span class="cm">// Track event thủ công ở Flutter screen</span>
+UniTrack.instance.<span class="fn">track</span>(<span class="str">'my_event'</span>, properties: {...});
+UniTrack.instance.<span class="fn">customTrack</span>(<span class="str">'payment_event'</span>, action: <span class="str">'completed'</span>, data: {...});</code></pre>
+
+<h3>9.2 Verify HostProxy active</h3>
+<p>Cold start app, log expected:</p>
+<pre><code><span class="cm">// iOS Xcode console + Android logcat</span>
+[UniTrackPlugin] co-resident: skip Flutter init, piggyback native UniTrack singleton</code></pre>
+
+<p>Nếu thấy → Flutter event chung session_id với native. Nếu KHÔNG → plugin chạy standalone → 2 singleton song song.</p>
+
+<h3>9.3 Cách hoạt động (tóm tắt)</h3>
+<p>Plugin Swift dùng <code>NSClassFromString("UniTrack.UniTrack")</code> (iOS) hoặc <code>Class.forName("com.unitrack.sdk.UniTrack")</code> (Android) để detect native UniTrack class. Nếu thấy → mọi call (<code>track</code>, <code>customTrack</code>, <code>setScreen</code>...) forward qua ObjC runtime / Java reflection về singleton native. Plugin KHÔNG init module-local → zero duplicate SQLite, zero duplicate session_id.</p>
+
+<div class="panel note">
+  <strong>Lưu ý:</strong> Khi app standalone (Flutter app thuần, không có native host) → plugin tự fallback init full SDK của riêng nó. Cùng 1 code Dart chạy được cả 2 mode.
+</div>
+
+<!-- ============== REACT NATIVE ============== -->
+<div class="anchor-pad" id="react-native"></div>
+<h2>10. <span class="tag tag-rn">RN</span> React Native add-to-app (cross-binary)</h2>
+
+<p>Pattern giống Flutter: nếu app native embed RN bundle → 2 binary cùng link UniTrack SDK. SDK đã wire <strong>HostProxy auto-detect</strong> — mỗi call JS forward qua singleton native, không tạo singleton riêng.</p>
+
+<h3>10.1 Setup RN module</h3>
+
+<h4>Bước 1: Add dependency</h4>
+<pre><code>npm install unitrack-react-native
+<span class="cm"># hoặc</span>
+yarn add unitrack-react-native</code></pre>
+
+<h4>Bước 2: Bật cờ skipVendor (chỉ Android)</h4>
+<p>Plugin Android RN mặc định kéo <code>com.github.sieuvitdet:unitrack-sdk</code> qua Maven. Nếu native host đã link cùng artifact → Gradle báo duplicate class. Set flag để plugin đổi sang <code>compileOnly</code>:</p>
+
+<p>Trong <code>android/gradle.properties</code> của app RN:</p>
+<pre><code>unitrack.skipVendor=true</code></pre>
+
+<p>iOS: Không cần làm gì — Swift module isolation tự handle giống Flutter.</p>
+
+<h4>Bước 3: Init bình thường ở JS side</h4>
+<pre><code><span class="kw">import</span> UniTrack <span class="kw">from</span> <span class="str">'unitrack-react-native'</span>;
+
+<span class="kw">await</span> UniTrack.<span class="fn">initialize</span>(<span class="str">'utk_xxx'</span>, {
+    autoCapture: <span class="kw">true</span>,
+    trackTaps: <span class="kw">true</span>,
+});
+
+<span class="cm">// Track event thủ công ở component RN</span>
+UniTrack.<span class="fn">track</span>(<span class="str">'my_event'</span>, { key: <span class="str">'value'</span> });
+
+<span class="cm">// Custom event với Iglu schema (parity Flutter customTrack)</span>
+UniTrack.<span class="fn">customTrack</span>(<span class="str">'payment_event'</span>, {
+    action: <span class="str">'payment_completed'</span>,
+    data:   { order_id: orderId, amount: <span class="num">99000</span> },
+    includeUser: <span class="kw">true</span>,
+});</code></pre>
+
+<h3>10.2 Verify HostProxy active</h3>
+<p>Cold start app, log expected:</p>
+<pre><code><span class="cm">// iOS Xcode console</span>
+[UniTrack/RN] co-resident: skip RN init, piggyback native singleton
+
+<span class="cm">// Android logcat (khi skipVendor=true + host supply UniTrack Maven)</span>
+[UniTrack] initialized (singleton native host)</code></pre>
+
+<p>Nếu thấy log co-resident iOS → JS event chung session_id với native. Nếu KHÔNG → RN chạy standalone → 2 singleton song song trong process.</p>
+
+<h3>10.3 So sánh Flutter vs React Native</h3>
+
+<table>
+  <thead><tr><th>Aspect</th><th>Flutter</th><th>React Native</th></tr></thead>
+  <tbody>
+    <tr><td>Package</td><td><code>unitrack</code> (pub.dev)</td><td><code>unitrack-react-native</code> (npm)</td></tr>
+    <tr><td>iOS HostProxy</td><td>NSClassFromString + ObjC bridge</td><td>Y hệt (dùng cùng <code>UniTrackHostProxy.swift</code>)</td></tr>
+    <tr><td>Android skipVendor flag</td><td><code>unitrack.skipVendor=true</code></td><td>Y hệt</td></tr>
+    <tr><td>Init API</td><td><code>UniTrack.instance.initialize(...)</code></td><td><code>UniTrack.initialize(...)</code></td></tr>
+    <tr><td>Track</td><td><code>.track(name, properties: {...})</code></td><td><code>.track(name, {...})</code></td></tr>
+    <tr><td>Custom track</td><td><code>.customTrack(name, action:, data:, includeUser:)</code></td><td><code>.customTrack(name, {action, data, includeUser})</code></td></tr>
+    <tr><td>Verify log iOS</td><td><code>[UniTrackPlugin] co-resident: ...</code></td><td><code>[UniTrack/RN] co-resident: ...</code></td></tr>
+  </tbody>
+</table>
+
+<div class="panel note">
+  <strong>Cách hoạt động:</strong> RN bridge Swift dùng <code>NSClassFromString("UniTrack.UniTrack")</code> để detect native UniTrack SPM. Nếu thấy → mọi <code>track</code> / <code>customTrack</code> / <code>setScreen</code> ... forward qua ObjC runtime về singleton SPM. Bridge KHÔNG init module-local → zero duplicate SQLite, zero duplicate session_id. Android dùng cùng Kotlin class <code>com.unitrack.sdk.UniTrack</code> — <code>skipVendor</code> flag đảm bảo chỉ 1 bản binary tồn tại trong app.
+</div>
+
+<hr style="margin: 40px 0; border: none; border-top: 1px solid var(--line)">
+
+<p class="sub" style="text-align:center">
+  iOS SPM: <code>github.com/sieuvitdet/unitrack-ios-package</code> ·
+  Android Maven: <code>com.github.sieuvitdet/unitrack-sdk</code> ·
+  Flutter: <code>pub.dev/packages/unitrack</code> ·
+  React Native: <code>npm/unitrack-react-native</code>
+</p>
+
+</div>
+</body>
+</html>

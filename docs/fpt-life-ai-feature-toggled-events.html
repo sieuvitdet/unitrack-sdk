@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>FPT Life · AI Feature Toggle Events — Mapping cho đội Data</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --panel-2: #23272f;
+    --border: #2b3038;
+    --text: #e6e9ef;
+    --muted: #9ba3b0;
+    --accent: #6ab7ff;
+    --accent-2: #86e5b8;
+    --warn: #f5c46b;
+    --danger: #ff8a8a;
+    --code-bg: #10131a;
+    --code-fg: #dbe5ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 32px 24px 80px; }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+  }
+  header .sub {
+    color: var(--muted);
+    font-size: 14px;
+  }
+  header .meta {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  header .meta b { color: var(--text); font-weight: 600; }
+  h2 {
+    margin: 40px 0 14px;
+    font-size: 19px;
+    letter-spacing: -0.005em;
+    border-left: 3px solid var(--accent);
+    padding-left: 10px;
+  }
+  h3 {
+    margin: 28px 0 10px;
+    font-size: 15px;
+    color: var(--accent-2);
+  }
+  p, li { font-size: 14px; }
+  code, pre {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  code {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    border: 0;
+    color: inherit;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    min-width: 900px;
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    background: var(--panel-2);
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:hover { background: rgba(106, 183, 255, 0.04); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td code { white-space: nowrap; font-size: 12px; }
+  .method {
+    display: inline-block;
+    padding: 1px 6px;
+    background: #2e5c8a;
+    color: #cfe6ff;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 12px 0;
+  }
+  .note-warn {
+    background: rgba(245, 196, 107, 0.08);
+    border-left: 3px solid var(--warn);
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin: 14px 0;
+    font-size: 13.5px;
+  }
+  .note-info {
+    background: rgba(106, 183, 255, 0.06);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin: 14px 0;
+    font-size: 13.5px;
+  }
+  .kv {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 8px 16px;
+    font-size: 13.5px;
+    margin: 10px 0;
+  }
+  .kv b { color: var(--muted); font-weight: 500; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(134, 229, 184, 0.15);
+    color: var(--accent-2);
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .badge.warn { background: rgba(245, 196, 107, 0.15); color: var(--warn); }
+  .badge.danger { background: rgba(255, 138, 138, 0.15); color: var(--danger); }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>FPT Life — AI Feature Toggle Events</h1>
+  <div class="sub">Mapping event tracking ↔ API path ↔ định nghĩa nghiệp vụ. Tài liệu chia sẻ cho đội Data.</div>
+  <div class="meta">
+    <span><b>App:</b> FPT Life Android</span>
+    <span><b>SDK:</b> UniTrack 0.3.49 · FSDKTracking</span>
+    <span><b>Vendor Snowplow:</b> vn.fpt.ftel.snowplow</span>
+    <span><b>Event name:</b> camera_ai_feature_toggled</span>
+    <span><b>Ngày cập nhật:</b> 2026-08-04</span>
+  </div>
+</header>
+
+<h2>1. Tổng quan</h2>
+
+<p>FPT Life theo dõi việc user bật/tắt các tính năng AI trên camera qua 1 event thống nhất: <code>camera_ai_feature_toggled</code>. Tất cả toggle (đèn LED, xoay hình, chế độ đêm, phát hiện chuyển động…) đều fire event này với <code>ai_feature_code</code> khác nhau để phân biệt.</p>
+
+<div class="card">
+  <div class="kv">
+    <b>Nơi track</b>            <span>ViewModel / Composable của từng màn hình setting camera</span>
+    <b>SDK API</b>              <span><code>FSDKTracking.aiFeatureToggled(cameraSerial, aiFeatureCode, action, previousState, toggleSource)</code></span>
+    <b>Iglu schema</b>          <span><code>iglu:vn.fpt.ftel.snowplow/camera_ai_feature_toggled/jsonschema/1-0-0</code></span>
+    <b>Trigger point</b>        <span>SAU khi API cập nhật cài đặt trả về thành công (trong <code>completionHandler</code> / block sau khi <code>executeSuspend</code>)</span>
+    <b>Không track khi</b>      <span>API fail (đi vào <code>errorHandler</code>) — nên số event = số lần đổi thành công</span>
+  </div>
+</div>
+
+<h2>2. Bảng ánh xạ 8 event AI feature</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Class chứa event</th>
+      <th>ai_feature_code</th>
+      <th>API path</th>
+      <th>Định nghĩa nghiệp vụ</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code>LedStatusViewModel:157</code></td>
+      <td><code>led_indicator</code></td>
+      <td><span class="method">POST</span><code>camera/setting/led-indicator/update/</code></td>
+      <td><b>Đèn LED báo hiệu camera</b> — bật/tắt đèn LED trên thân camera cho biết camera đang hoạt động.</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code>RotateCameraViewModel:135</code></td>
+      <td><code>rotate_image</code></td>
+      <td><span class="method">POST</span><code>camera/setting/rotate/update-v2/</code></td>
+      <td><b>Xoay hình ảnh camera 180°</b> — dùng khi camera lắp úp trần, cần xoay ảnh cho đúng chiều.</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code>NightVisionViewModel:156</code></td>
+      <td><code>night_vision</code></td>
+      <td><span class="method">POST</span><code>camera/setting/night-vision/update-v2/</code></td>
+      <td><b>Chế độ nhìn đêm</b> — chuyển giữa các mode: <code>ir</code> (hồng ngoại) / <code>full_color</code> (màu đầy đủ) / <code>auto</code> ban đêm.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><code>AlertMethodViewModel:148</code></td>
+      <td><code>alert_method_mpn</code></td>
+      <td><span class="method">POST</span><code>camera/setting/alert/change/</code></td>
+      <td><b>Nhận cảnh báo qua push notification (MPN)</b> — bật/tắt kênh notification cho các cảnh báo từ camera. Suffix <code>_mpn</code> để phân biệt với alarm bằng đèn/âm thanh.</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><code>SmartAlertViewModel:176</code></td>
+      <td><code>smart_alarm_light</code></td>
+      <td><span class="method">POST</span><code>camera/setting/alarm/update/</code></td>
+      <td><b>Cảnh báo bằng đèn (còi hình ảnh)</b> — camera chớp đèn khi phát hiện chuyển động lạ.</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><code>SmartAlertViewModel:213</code></td>
+      <td><code>smart_alarm_sound</code></td>
+      <td><span class="method">POST</span><code>camera/setting/alarm/update/</code></td>
+      <td><b>Cảnh báo bằng âm thanh</b> — camera phát tiếng còi khi phát hiện chuyển động lạ.</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><code>AutoAlertScreen:196</code><br><span class="badge">→ AutoAlertViewModel:243</span></td>
+      <td><code>motion_detect</code></td>
+      <td><span class="method">POST</span><code>camera/setting/motion/change/</code></td>
+      <td><b>Phát hiện chuyển động</b> — trigger cảnh báo khi có motion bất kỳ trong khung hình (lá cây, xe, người, thú…).</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><code>AutoAlertScreen:225</code><br><span class="badge">→ AutoAlertViewModel:177</span></td>
+      <td><code>human_detect</code></td>
+      <td><span class="method">POST</span><code>camera/setting/human-detect/change/</code></td>
+      <td><b>Phát hiện người</b> — AI filter chỉ trigger cảnh báo khi thấy dáng người (loại nhiễu lá cây, thú nuôi). Bật <code>human_detect</code> tự bật kèm <code>motion_detect</code>.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note-info">
+  <b>Convention đặt tên <code>ai_feature_code</code>:</b> bám theo segment <code>setting/</code> của API path, viết <code>snake_case</code> ngắn gọn. Ví dụ <code>camera/setting/led-indicator/update/</code> → <code>led_indicator</code>. Không prefix vendor. Riêng <code>rotate_image</code> đặt semantic (thay vì <code>rotate</code>) để đọc tự nhiên. <code>alert_method_mpn</code> có suffix <code>_mpn</code> để không trùng với <code>smart_alarm_*</code>.
+</div>
+
+<h2>3. Payload gửi lên</h2>
+
+<h3>3.1 Event structure</h3>
+
+<pre><code>{
+  "schema": "iglu:vn.fpt.ftel.snowplow/camera_ai_feature_toggled/jsonschema/1-0-0",
+  "data": {
+    "camera_serial":  "CAM-XYZ-12345",       // Serial thiết bị
+    "ai_feature_code": "human_detect",       // 1 trong 8 code trong bảng trên
+    "action":          "enable",             // Trạng thái mới sau toggle
+    "previous_state":  "disabled",           // Trạng thái trước khi toggle
+    "toggle_source":   "app_settings"        // Nguồn thao tác — hiện chỉ có "app_settings"
+  }
+}</code></pre>
+
+<h3>3.2 Ví dụ event thực tế (bật human_detect)</h3>
+
+<pre><code>FSDKTracking.aiFeatureToggled(
+    cameraSerial  = "CAM-FLI-A1B2C3",
+    aiFeatureCode = "human_detect",
+    action        = "enable",
+    previousState = "disabled",
+    toggleSource  = "app_settings"
+)</code></pre>
+
+<h2>4. Lưu ý cho đội Data khi phân tích</h2>
+
+<div class="note-warn">
+  <b>⚠ Value của <code>action</code> hiện chưa đồng nhất</b> — do implement từng feature bởi các dev khác nhau, hiện tại có 3 style trong DB:
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>ai_feature_code</th>
+      <th>Value <code>action</code> đang gửi</th>
+      <th>Ghi chú</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>led_indicator</code></td>
+      <td><code>enable</code> / <code>disable</code></td>
+      <td rowspan="2">Đúng chuẩn khuyến nghị (Snowplow doc)</td>
+    </tr>
+    <tr>
+      <td><code>motion_detect</code>, <code>human_detect</code></td>
+      <td><code>enable</code> / <code>disable</code></td>
+    </tr>
+    <tr>
+      <td><code>rotate_image</code></td>
+      <td><code>on</code> / <code>off</code></td>
+      <td rowspan="3">Cần thống nhất về <code>enable</code>/<code>disable</code> (chưa sửa)</td>
+    </tr>
+    <tr>
+      <td><code>alert_method_mpn</code></td>
+      <td><code>on</code> / <code>off</code></td>
+    </tr>
+    <tr>
+      <td><code>smart_alarm_light</code>, <code>smart_alarm_sound</code></td>
+      <td><code>on</code> / <code>off</code></td>
+    </tr>
+    <tr>
+      <td><code>night_vision</code></td>
+      <td><code>ir</code> / <code>full_color</code> / <code>auto</code> (raw mode)</td>
+      <td>Đây là <b>enum 3+ giá trị</b>, không phải toggle boolean. Xử lý riêng khi query.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note-info">
+  <b>Khi query DB, đội Data cần normalize <code>action</code> về boolean:</b>
+  <pre style="margin-top: 8px;"><code>CASE
+  WHEN action IN ('enable', 'on', 'ir', 'full_color', 'auto') THEN 'enabled'
+  WHEN action IN ('disable', 'off') THEN 'disabled'
+  ELSE action
+END AS state</code></pre>
+  Sau khi SDK đồng bộ về <code>enable</code>/<code>disable</code> cho toàn bộ code (sắp làm) thì có thể bỏ CASE này.
+</div>
+
+<h2>5. Trường hợp đặc biệt</h2>
+
+<div class="card">
+  <h3 style="margin-top: 0;">SmartAlert — 2 event share 1 API</h3>
+  <p>Cả <code>smart_alarm_light</code> và <code>smart_alarm_sound</code> đều gọi cùng API <code>camera/setting/alarm/update/</code>. Mỗi lần user toggle 1 trong 2 → gọi API 1 lần → fire 1 event tương ứng. <b>Không double-count</b>: nếu user bật light xong bật sound → có 2 event riêng biệt, 2 lần gọi API.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top: 0;">AutoAlert — cascade human ↔ motion</h3>
+  <p>Trong <code>AutoAlertViewModel</code>, việc bật <code>human_detect</code> sẽ <b>tự động bật kèm <code>motion_detect</code></b> nếu chưa bật. Ngược lại, tắt <code>motion_detect</code> sẽ tự tắt <code>human_detect</code>. Tuy nhiên chỉ event <b>được user click trực tiếp</b> mới fire tracking — event bị cascade KHÔNG track. Nếu cần phân tích cascade, join với timestamp gần nhau (&lt;1s).</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top: 0;">NightVision không phải toggle nhị phân</h3>
+  <p><code>night_vision</code> là <b>enum mode</b>, không phải on/off. Query cần group theo giá trị cụ thể của <code>action</code> để tính distribution: bao nhiêu % user chọn IR, bao nhiêu % chọn full color, bao nhiêu chọn auto.</p>
+</div>
+
+<h2>6. Không track (chưa gắn event)</h2>
+
+<ul>
+  <li><b>Alarm duration</b> (thời lượng còi báo động) — mới chỉ track light/sound on-off, chưa track thay đổi số giây.</li>
+  <li><b>Offline detect</b> — có API <code>camera/setting/offline-detect/update/</code> nhưng chưa gọi <code>aiFeatureToggled</code>.</li>
+  <li><b>Watermark, Wifi change, Reboot</b> — không thuộc phạm vi AI feature, không track qua event này.</li>
+</ul>
+
+<hr>
+
+<h2>7. Contact</h2>
+
+<div class="card">
+  <div class="kv">
+    <b>SDK owner</b>            <span>Team UniTrack SDK</span>
+    <b>App owner</b>            <span>Team FPT Life Mobile</span>
+    <b>Schema Iglu registry</b> <span>Team Snowplow Platform FPT — cần confirm schema đã publish</span>
+    <b>Repo Android</b>         <span><code>/Volumes/DucsM1/android-fptlife-fli</code></span>
+    <b>Repo SDK</b>             <span><code>/Volumes/DucsM1/unitrack-sdk/unitrack-sdk</code></span>
+  </div>
+</div>
+
+<footer>
+  Tài liệu tự sinh từ mã nguồn tại thời điểm 2026-08-04. Nếu code thay đổi, refresh file này.
+</footer>
+
+</div>
+</body>
+</html>

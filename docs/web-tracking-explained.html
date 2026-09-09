@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Tracking — Giải thích từ đầu</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --line: #e4e7ec;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --accent-soft: #eef2ff;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --danger: #dc2626;
+    --code-bg: #1f1f24;
+    --code-text: #ffffff;
+    --code-keyword: #ff7ab2;
+    --code-string:  #ff8170;
+    --code-comment: #6c7986;
+    --code-fn:      #67b7a4;
+    --code-num:     #d0bf69;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); margin: 0; padding: 0;
+    line-height: 1.65;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px 100px; }
+
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 24px; margin-bottom: 40px; }
+  h1 { font-size: 32px; margin: 0 0 8px; color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 15px; }
+
+  h2 {
+    font-size: 24px; margin: 48px 0 16px;
+    padding: 12px 16px; background: var(--accent);
+    color: white; border-radius: 8px;
+  }
+  h3 { font-size: 19px; margin: 32px 0 12px; color: #111827; }
+  h4 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  p { margin: 10px 0; }
+
+  .toc {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px 28px; margin-bottom: 40px;
+  }
+  .toc h3 { margin-top: 0; color: var(--accent); }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a { color: var(--text); text-decoration: none; }
+  .toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  code {
+    background: #eef2ff; color: #3730a3; padding: 2px 6px;
+    border-radius: 4px; font-size: 13px; font-family: "SF Mono", Menlo, monospace;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text);
+    padding: 16px 20px; border-radius: 10px;
+    overflow-x: auto; font-size: 13px; line-height: 1.6;
+    font-family: "SF Mono", Menlo, monospace; margin: 14px 0;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  .kw { color: var(--code-keyword); }
+  .str { color: var(--code-string); }
+  .cm  { color: var(--code-comment); font-style: italic; }
+  .fn  { color: var(--code-fn); }
+  .num { color: var(--code-num); }
+  .key { color: #75b6c5; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 22px; margin: 18px 0;
+  }
+  .note    { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+  .warn    { border-left: 4px solid var(--warn);   background: #fffbeb; }
+  .danger  { border-left: 4px solid var(--danger); background: #fef2f2; }
+  .success { border-left: 4px solid var(--ok);     background: #f0fdf4; }
+
+  .case {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 24px 28px; margin: 24px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .case h4.case-title {
+    color: var(--accent); font-size: 16px; text-transform: none;
+    letter-spacing: 0; margin-top: 0;
+  }
+  .case .real {
+    background: #fff7ed; border-radius: 6px; padding: 12px 16px;
+    font-size: 14px; margin-top: 12px;
+    border-left: 3px solid var(--warn);
+  }
+  .case .real::before { content: "📖 Ví dụ thực tế: "; font-weight: 700; color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th, td { padding: 10px 14px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  /* SVG diagram box */
+  .diagram {
+    background: white; border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; margin: 16px 0; text-align: center; overflow-x: auto;
+  }
+  .diagram svg { max-width: 100%; height: auto; }
+  .diagram .caption { color: var(--muted); font-size: 12px; margin-top: 10px; font-style: italic; }
+
+  ul, ol { padding-left: 24px; }
+  li { margin: 6px 0; }
+
+  .tag {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; margin-left: 6px; vertical-align: middle;
+  }
+  .tag-danger { background: #fecaca; color: var(--danger); }
+  .tag-warn   { background: #fed7aa; color: var(--warn); }
+  .tag-ok     { background: #bbf7d0; color: var(--ok); }
+
+  .browser-mockup {
+    background: white; border: 1px solid var(--line); border-radius: 8px;
+    margin: 12px 0; overflow: hidden;
+  }
+  .browser-mockup .chrome {
+    background: #f3f4f6; padding: 8px 14px; display: flex; gap: 6px;
+    align-items: center; border-bottom: 1px solid var(--line);
+  }
+  .browser-mockup .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .browser-mockup .dot.r { background: #ef4444; }
+  .browser-mockup .dot.y { background: #f59e0b; }
+  .browser-mockup .dot.g { background: #10b981; }
+  .browser-mockup .url {
+    margin-left: 12px; flex: 1; font-size: 12px; color: var(--muted);
+    font-family: monospace;
+  }
+  .browser-mockup .body { padding: 14px 20px; font-size: 13px; }
+
+  .kbd {
+    display: inline-block; padding: 2px 8px; background: #f3f4f6;
+    border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 4px; font-size: 12px; font-family: monospace;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>Web Tracking — Giải thích từ đầu</h1>
+  <p class="sub">SDK UniTrack Web (0.1.0) · Session · Auto-capture · Trace · Ops. Có diagram + ví dụ thực tế cho mọi khái niệm.</p>
+</header>
+
+<div class="panel note">
+  <strong>File này dành cho ai?</strong>
+  Dev quen mobile (iOS/Android/Flutter) nhưng chưa làm web tracking nhiều. Sau khi đọc, bro hiểu:
+  <ul style="margin: 8px 0;">
+    <li>Vì sao web tracking khác mobile — 4 điểm cốt lõi</li>
+    <li>Session_id trong web sinh + persist thế nào, khi nào chết</li>
+    <li>Auto-capture click + screen hoạt động ra sao trên browser</li>
+    <li>Trace_id (W3C traceparent) — vì sao cần, tại sao lại có CORS trắc trở</li>
+    <li>15+ case ops thực tế: AdBlock, offline, GDPR, bot, Safari ITP...</li>
+  </ul>
+</div>
+
+<div class="toc">
+  <h3>Mục lục</h3>
+  <ol>
+    <li><a href="#basics">Cơ bản: Web tracking khác mobile ở đâu</a></li>
+    <li><a href="#session">Session — dễ sai nhất</a></li>
+    <li><a href="#click">Click auto-capture — cần biết delegate</a></li>
+    <li><a href="#screen">Screen (SPA route) — vấn đề #1 của React/Vue</a></li>
+    <li><a href="#network">Network + trace_id + CORS — landmine</a></li>
+    <li><a href="#ops">Ops production — 12 case dev hay bỏ sót</a></li>
+    <li><a href="#privacy">Privacy + PII + GDPR — pháp lý</a></li>
+    <li><a href="#test-checklist">Checklist test trước khi lên prod</a></li>
+  </ol>
+</div>
+
+<!-- ============ BASICS ============ -->
+<h2 id="basics">1. Cơ bản: Web tracking khác mobile ở đâu</h2>
+
+<p>Nếu bro đã làm iOS/Android/Flutter tracking, chuyển sang web sẽ ngạc nhiên vì <strong>4 điểm</strong>:</p>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Mobile (iOS/Android/Flutter)</th><th>Web</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Storage</strong></td>
+      <td>SQLite riêng, không giới hạn dung lượng (tính bằng GB)</td>
+      <td>localStorage: 5-10 MB. IndexedDB: có thể vài trăm MB, nhưng browser tự xóa nếu ít dùng</td>
+    </tr>
+    <tr>
+      <td><strong>Session</strong></td>
+      <td>Process sống suốt, singleton lâu bền</td>
+      <td>Mỗi reload = reload page, không có singleton. Session phải persist qua localStorage</td>
+    </tr>
+    <tr>
+      <td><strong>Screen change</strong></td>
+      <td>ViewController push/pop rõ ràng, framework hook được</td>
+      <td>SPA đổi URL không reload page → phải hook <code>history.pushState</code> monkey-patch</td>
+    </tr>
+    <tr>
+      <td><strong>Click</strong></td>
+      <td>UIGestureRecognizer / View.setOnClickListener — có API chuẩn</td>
+      <td>DOM event bubble. Bắt document-level, resolve element_key từ HTML attribute</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="diagram">
+  <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
+    <!-- Mobile side -->
+    <g>
+      <rect x="20" y="20" width="300" height="220" rx="12" fill="#eef2ff" stroke="#4f46e5"/>
+      <text x="170" y="45" text-anchor="middle" font-weight="700" fill="#4f46e5">📱 Mobile</text>
+      <rect x="50" y="65" width="240" height="30" rx="6" fill="white" stroke="#c7d2fe"/>
+      <text x="170" y="85" text-anchor="middle" font-size="12">App code (Swift/Kotlin)</text>
+      <line x1="170" y1="95" x2="170" y2="110" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+      <rect x="50" y="110" width="240" height="30" rx="6" fill="white" stroke="#c7d2fe"/>
+      <text x="170" y="130" text-anchor="middle" font-size="12">Singleton UniTrack (Process-life)</text>
+      <line x1="170" y1="140" x2="170" y2="155" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+      <rect x="50" y="155" width="240" height="30" rx="6" fill="white" stroke="#c7d2fe"/>
+      <text x="170" y="175" text-anchor="middle" font-size="12">SQLite (GB, không giới hạn)</text>
+      <line x1="170" y1="185" x2="170" y2="200" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+      <rect x="50" y="200" width="240" height="30" rx="6" fill="white" stroke="#c7d2fe"/>
+      <text x="170" y="220" text-anchor="middle" font-size="12">HTTP → Collector</text>
+    </g>
+    <!-- Web side -->
+    <g>
+      <rect x="380" y="20" width="300" height="220" rx="12" fill="#fef2f2" stroke="#dc2626"/>
+      <text x="530" y="45" text-anchor="middle" font-weight="700" fill="#dc2626">🌐 Web</text>
+      <rect x="410" y="65" width="240" height="30" rx="6" fill="white" stroke="#fecaca"/>
+      <text x="530" y="85" text-anchor="middle" font-size="12">JS bundle (mỗi reload load lại)</text>
+      <line x1="530" y1="95" x2="530" y2="110" stroke="#dc2626" stroke-width="2" marker-end="url(#arrow2)"/>
+      <rect x="410" y="110" width="240" height="30" rx="6" fill="white" stroke="#fecaca"/>
+      <text x="530" y="130" text-anchor="middle" font-size="12">Module singleton (chết khi reload)</text>
+      <line x1="530" y1="140" x2="530" y2="155" stroke="#dc2626" stroke-width="2" marker-end="url(#arrow2)"/>
+      <rect x="410" y="155" width="240" height="30" rx="6" fill="white" stroke="#fecaca"/>
+      <text x="530" y="175" text-anchor="middle" font-size="12">localStorage (5-10MB) + IndexedDB</text>
+      <line x1="530" y1="185" x2="530" y2="200" stroke="#dc2626" stroke-width="2" marker-end="url(#arrow2)"/>
+      <rect x="410" y="200" width="240" height="30" rx="6" fill="white" stroke="#fecaca"/>
+      <text x="530" y="220" text-anchor="middle" font-size="12">fetch/XHR → Collector (có CORS)</text>
+    </g>
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#4f46e5"/>
+      </marker>
+      <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/>
+      </marker>
+    </defs>
+  </svg>
+  <div class="caption">Kiến trúc mobile vs web — web dễ mất state hơn vì mỗi reload là 1 lần chết</div>
+</div>
+
+<!-- ============ SESSION ============ -->
+<h2 id="session">2. Session — dễ sai nhất</h2>
+
+<p><strong>Session_id</strong> là "1 chuỗi ID nối liền các event của cùng 1 lần user dùng app". Khác từng event `user_id` — user_id giữ nguyên qua nhiều ngày; session_id đổi khi user "quay lại sau 1 khoảng thời gian idle".</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Timeline -->
+    <line x1="30" y1="100" x2="670" y2="100" stroke="#6b7280" stroke-width="2"/>
+    <!-- Events -->
+    <circle cx="60"  cy="100" r="8" fill="#4f46e5"/>
+    <text x="60"  y="80"  text-anchor="middle" font-size="11">screen_view</text>
+    <text x="60"  y="125" text-anchor="middle" font-size="10" fill="#6b7280">09:00</text>
+    <circle cx="130" cy="100" r="8" fill="#4f46e5"/>
+    <text x="130" y="80"  text-anchor="middle" font-size="11">click Buy</text>
+    <text x="130" y="125" text-anchor="middle" font-size="10" fill="#6b7280">09:02</text>
+    <circle cx="200" cy="100" r="8" fill="#4f46e5"/>
+    <text x="200" y="80"  text-anchor="middle" font-size="11">purchase</text>
+    <text x="200" y="125" text-anchor="middle" font-size="10" fill="#6b7280">09:04</text>
+    <!-- Gap 31 min -->
+    <text x="280" y="95"  text-anchor="middle" font-size="11" fill="#dc2626">🕒 idle 31 phút</text>
+    <text x="280" y="115" text-anchor="middle" font-size="10" fill="#dc2626">→ Rotate!</text>
+    <!-- New session -->
+    <circle cx="360" cy="100" r="8" fill="#16a34a"/>
+    <text x="360" y="80"  text-anchor="middle" font-size="11">screen_view</text>
+    <text x="360" y="125" text-anchor="middle" font-size="10" fill="#6b7280">09:35</text>
+    <circle cx="440" cy="100" r="8" fill="#16a34a"/>
+    <text x="440" y="80"  text-anchor="middle" font-size="11">click Cart</text>
+    <text x="440" y="125" text-anchor="middle" font-size="10" fill="#6b7280">09:37</text>
+    <!-- Labels -->
+    <rect x="30"  y="145" width="220" height="30" rx="6" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="140" y="164" text-anchor="middle" font-size="11" fill="#4f46e5">session_id=abc-123 · index=1</text>
+    <rect x="320" y="145" width="220" height="30" rx="6" fill="#f0fdf4" stroke="#16a34a"/>
+    <text x="430" y="164" text-anchor="middle" font-size="11" fill="#16a34a">session_id=xyz-789 · index=2</text>
+  </svg>
+  <div class="caption">Idle 30+ phút → session rotate, event mới stamp session_id mới</div>
+</div>
+
+<h3>2.1 Session lưu ở đâu? Ai xóa nó?</h3>
+
+<p>3 loại storage browser cho phép:</p>
+
+<table>
+  <thead><tr><th>Storage</th><th>Cross-tab?</th><th>Sống bao lâu?</th><th>Dung lượng</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>sessionStorage</code></td>
+      <td>❌ Chỉ trong 1 tab</td>
+      <td>Đóng tab = xóa</td>
+      <td>~5MB</td>
+    </tr>
+    <tr>
+      <td><code>localStorage</code> <span class="tag tag-ok">SDK dùng</span></td>
+      <td>✅ Share cross-tab</td>
+      <td>Đến khi user clear browser data</td>
+      <td>~5-10MB</td>
+    </tr>
+    <tr>
+      <td><code>Cookie</code></td>
+      <td>✅ Share cross-tab, cross-subdomain</td>
+      <td>Tuỳ expire flag</td>
+      <td>~4KB</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="case">
+  <h4 class="case-title">Case 1: User mở 5 tab shopping cùng lúc</h4>
+  <p>User đang so sánh giá — mở <code>/product/A</code>, <code>/product/B</code>, <code>/product/C</code>, <code>/cart</code>, <code>/checkout</code> ở 5 tab. Data team hỏi "user này có 1 hay 5 phiên?"</p>
+
+  <p><strong>Nếu SDK dùng <code>sessionStorage</code>:</strong> mỗi tab 1 session_id khác → analytics thấy 5 session giả → conversion rate sai (funnel bị chia 5).</p>
+  <p><strong>Nếu SDK dùng <code>localStorage</code> (đúng):</strong> 5 tab đọc cùng 1 key <code>unitrack.session_id</code> → cùng 1 session.</p>
+
+  <div class="real">
+    Amazon, Shopify, Booking.com đều dùng <code>localStorage</code> cho session vì user thường mở nhiều tab so sánh sản phẩm. Snowplow JS Tracker cũng thế.
+  </div>
+</div>
+
+<h3>2.2 Khi nào session rotate?</h3>
+
+<p>SDK check 3 điều kiện, cái nào xảy ra trước:</p>
+
+<ol>
+  <li><strong>Idle timeout:</strong> user không tap gì suốt 30 phút → rotate</li>
+  <li><strong>Manual rotate:</strong> app gọi <code>UniTrack.rotateSession()</code> khi login/logout</li>
+  <li><strong>Storage bị xóa:</strong> user clear cookies → cold start = session mới</li>
+</ol>
+
+<div class="diagram">
+<pre style="text-align:left; background:#1f1f24; color:#fff;">
+<span class="cm">// SDK logic (session.ts) — 25 dòng cốt lõi</span>
+<span class="kw">class</span> SessionManager {
+  touch() {
+    <span class="kw">const</span> now = Date.now();
+    <span class="kw">if</span> (now - <span class="kw">this</span>.lastActiveTs &gt;= <span class="kw">this</span>.timeoutMs) {
+      <span class="kw">this</span>.<span class="fn">rotate</span>();  <span class="cm">// Idle quá lâu → session mới</span>
+    }
+    <span class="kw">this</span>.lastActiveTs = now;
+    localStorage.<span class="fn">setItem</span>(<span class="str">'unitrack.session_last_active'</span>, <span class="fn">String</span>(now));
+  }
+}
+</pre>
+</div>
+
+<div class="case">
+  <h4 class="case-title">Case 2: User mở app buổi sáng, đi họp, quay lại buổi chiều</h4>
+  <p><strong>Hành vi user:</strong></p>
+  <ul>
+    <li>08:15 — Vào <code>/dashboard</code>, xem 3 báo cáo</li>
+    <li>09:00 — Đi họp, laptop khoá màn</li>
+    <li>14:20 — Mở lại tab, làm tiếp</li>
+  </ul>
+  <p><strong>Data team sẽ có 2 session:</strong> ID1 (08:15-08:something) và ID2 (14:20-…). Field <code>previous_session_id</code> ở session 2 stamp = ID1 → BE ghép được nếu cần "same-day journey".</p>
+  <div class="real">
+    Google Analytics gọi cái này là "returning session". Snowplow gọi là "session_index" (1, 2, 3, …). UniTrack track cả 2 field.
+  </div>
+</div>
+
+<h3>2.3 Case Safari ITP — landmine đặc biệt <span class="tag tag-danger">Nghiêm trọng</span></h3>
+
+<p>Apple từ iOS 14 áp dụng <strong>Intelligent Tracking Prevention (ITP)</strong>:</p>
+
+<div class="panel danger">
+  <strong>Safari xóa <code>localStorage</code> nếu user không truy cập domain trong 7 ngày.</strong>
+</div>
+
+<p>Hệ quả: user Safari mở app tuần trước, hôm nay quay lại → session_id đã bị xóa → SDK sinh session_id mới → BE thấy như "user mới hoàn toàn".</p>
+
+<p><strong>Cách mitigate:</strong></p>
+<ul>
+  <li>Server-side reconstruct session từ <code>user_id</code> nếu user đã login</li>
+  <li>Chấp nhận trade-off: session_id chỉ đảm bảo trong ngày dùng, không cross-day</li>
+  <li>KHÔNG dùng cookie 3rd-party (Safari block hoàn toàn)</li>
+</ul>
+
+<h3>2.4 Case Private/Incognito mode</h3>
+
+<div class="browser-mockup">
+  <div class="chrome">
+    <div class="dot r"></div>
+    <div class="dot y"></div>
+    <div class="dot g"></div>
+    <div class="url">🕶️ Chrome Incognito · unitrack-demo.com</div>
+  </div>
+  <div class="body">
+    <p><em>localStorage vẫn work trong incognito, nhưng bị xóa khi close tab.</em></p>
+  </div>
+</div>
+
+<p>User mở incognito → SDK vẫn tạo session_id → user tap 10 event trong 5 phút → OK, cùng 1 session.<br>
+Đóng tab → <code>localStorage</code> bị xóa → lần sau mở incognito = session mới.</p>
+
+<div class="panel note">
+  Đây là behavior đúng theo intent của user (họ muốn ẩn danh). Không phải bug SDK.
+</div>
+
+<!-- ============ CLICK ============ -->
+<h2 id="click">3. Click auto-capture — cần biết delegate</h2>
+
+<p>Trên mobile, mỗi Button có <code>OnClickListener</code> riêng. Web thì hàng trăm element có thể click được (button, a, div, span, li, ...). SDK không thể attach handler cho từng element — sẽ dùng <strong>event delegation</strong>: 1 handler duy nhất ở <code>document</code>, bắt mọi click nhờ event bubble.</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 700 320" xmlns="http://www.w3.org/2000/svg">
+    <!-- DOM tree -->
+    <rect x="280" y="20" width="140" height="40" rx="6" fill="#4f46e5" stroke="#3730a3"/>
+    <text x="350" y="45" text-anchor="middle" fill="white" font-weight="700">document</text>
+
+    <rect x="290" y="90" width="120" height="30" rx="6" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="350" y="110" text-anchor="middle" font-size="12">&lt;html&gt;</text>
+
+    <rect x="290" y="140" width="120" height="30" rx="6" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="350" y="160" text-anchor="middle" font-size="12">&lt;body&gt;</text>
+
+    <rect x="150" y="200" width="140" height="30" rx="6" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="220" y="220" text-anchor="middle" font-size="12">&lt;nav&gt;</text>
+
+    <rect x="410" y="200" width="140" height="30" rx="6" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="480" y="220" text-anchor="middle" font-size="12">&lt;main&gt;</text>
+
+    <rect x="410" y="260" width="140" height="30" rx="6" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="480" y="280" text-anchor="middle" font-size="12" fill="#dc2626">&lt;button&gt; ← tap ở đây</text>
+
+    <!-- Bubble arrows -->
+    <path d="M480,260 Q560,220 560,175 Q560,120 460,90 Q400,60 350,60" stroke="#dc2626" stroke-width="2" fill="none" marker-end="url(#arrowR)"/>
+
+    <defs>
+      <marker id="arrowR" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/>
+      </marker>
+    </defs>
+
+    <text x="600" y="200" font-size="13" fill="#dc2626" font-weight="700">Event</text>
+    <text x="600" y="216" font-size="13" fill="#dc2626" font-weight="700">bubble ↑</text>
+
+    <text x="120" y="290" font-size="12" fill="#6b7280">Handler ở document</text>
+    <text x="120" y="306" font-size="12" fill="#6b7280">bắt được mọi click</text>
+  </svg>
+  <div class="caption">Event bubbling — click ở button bubble lên document. SDK chỉ cần 1 listener duy nhất.</div>
+</div>
+
+<h3>3.1 SDK bắt click thế nào?</h3>
+
+<pre><code><span class="cm">// auto-capture.ts — chỉ 3 dòng cốt lõi</span>
+document.<span class="fn">addEventListener</span>(<span class="str">'click'</span>, (ev) =&gt; {
+    <span class="kw">const</span> target = ev.target;
+    <span class="kw">const</span> key = <span class="fn">resolveElementKey</span>(target);
+    <span class="ty">UniTrack</span>.<span class="fn">track</span>(<span class="str">'click'</span>, { element_key: key });
+}, <span class="kw">true</span>);  <span class="cm">// capture phase: bắt TRƯỚC handlers của app</span></code></pre>
+
+<div class="panel warn">
+  Tham số thứ 3 <code>true</code> = <strong>capture phase</strong>. Không có nó, nếu app code gọi <code>event.stopPropagation()</code> ở button handler thì SDK sẽ không bắt được nữa.
+</div>
+
+<h3>3.2 element_key resolve theo priority</h3>
+
+<p>Với mỗi tap, SDK cần đặt tên element để BE hiểu "user tap cái gì". 5 priority từ ổn nhất đến fallback:</p>
+
+<table>
+  <thead><tr><th>Priority</th><th>Nguồn</th><th>Ví dụ HTML</th><th>Kết quả</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code>data-track-id</code></td>
+      <td><code>&lt;button data-track-id="cta_buy_home"&gt;</code></td>
+      <td><code>cta_buy_home</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code>id</code></td>
+      <td><code>&lt;button id="submit-form"&gt;</code></td>
+      <td><code>#submit-form</code></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code>aria-label</code></td>
+      <td><code>&lt;button aria-label="Đóng modal"&gt;</code></td>
+      <td><code>Đóng modal</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Text content</td>
+      <td><code>&lt;button&gt;Mua ngay&lt;/button&gt;</code></td>
+      <td><code>Mua ngay</code></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Fallback tagName+class</td>
+      <td><code>&lt;button class="btn btn-primary"&gt;&lt;/button&gt;</code></td>
+      <td><code>button.btn.btn-primary</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="panel warn">
+  <strong>Đề xuất cho team dev:</strong> luôn đặt <code>data-track-id</code> cho mọi button quan trọng. Không dựa vào text (text đổi theo i18n Vi/En → analytics vỡ) hay class (class refactor liên tục).
+</div>
+
+<div class="case">
+  <h4 class="case-title">Case 3: User tap 1 card sản phẩm — SDK bắt nhầm span text bên trong</h4>
+  <p>HTML:</p>
+  <pre><code><span class="kw">&lt;div</span> data-track-id=<span class="str">"product_card_A123"</span> class=<span class="str">"card"</span><span class="kw">&gt;</span>
+    <span class="kw">&lt;h3&gt;</span>Camera FCAM Pro<span class="kw">&lt;/h3&gt;</span>
+    <span class="kw">&lt;span</span> class=<span class="str">"price"</span><span class="kw">&gt;</span>2.490.000₫<span class="kw">&lt;/span&gt;</span>
+<span class="kw">&lt;/div&gt;</span></code></pre>
+  <p>User tap ngay chữ "Camera FCAM Pro" (h3), không tap ra card. Nếu SDK ngu dại chỉ đọc <code>event.target</code> → element_key = "Camera FCAM Pro" (text content h3).</p>
+  <p><strong>Cách xử của UniTrack:</strong> đi ngược lên DOM tree tối đa 8 cấp, tìm ancestor có <code>data-track-id</code> / là <code>&lt;button&gt;</code> / <code>&lt;a&gt;</code> / <code>role="button"</code>. Nếu tìm thấy → dùng element_key của ancestor đó.</p>
+  <div class="real">
+    Hotjar và FullStory đều làm cách này. Không thì mỗi product card sẽ có 5-10 event_key khác nhau tùy user tap trúng phần nào — vô dụng cho analytics.
+  </div>
+</div>
+
+<h3>3.3 Rage click — signal đặc biệt</h3>
+
+<p>User bấm 5 lần liên tục "Buy" nhưng không có gì xảy ra (button lag/gãy) — hành vi này gọi là <strong>rage click</strong>, dấu hiệu bug UX. Analytics tool xịn sẽ:</p>
+
+<ol>
+  <li>Deduplicate: chỉ emit event đầu tiên trong 200ms cùng element_key</li>
+  <li>Đồng thời emit event <code>rage_click</code> riêng với <code>count: 5</code> cho product team biết fix</li>
+</ol>
+
+<div class="panel note">
+  UniTrack v0.1.0 <strong>chưa dedup rage click</strong> — sẽ thêm v0.2.
+</div>
+
+<!-- ============ SCREEN ============ -->
+<h2 id="screen">4. Screen (SPA route) — vấn đề #1 của React/Vue</h2>
+
+<p>Web tracker "cổ điển" (Google Analytics UA) chỉ bắt <strong>page load</strong> — mỗi lần user reload full page. Nhưng SPA (React/Vue/Next) đổi URL <em>không reload page</em> → GA UA mất trắng 90% navigation.</p>
+
+<div class="diagram">
+<pre style="text-align:left; background:#1f1f24; color:#fff;">
+<span class="cm">// Truyền thống — mỗi navigate = full page load</span>
+User click /products
+  → Browser gửi HTTP GET /products
+  → Server render HTML
+  → Browser load HTML mới → tracker fire "page_view"
+
+<span class="cm">// SPA (React Router, Vue Router, ...) — 1 lần load duy nhất</span>
+User click /products
+  → history.pushState('/products', ...)   ← URL đổi nhưng KHÔNG reload
+  → React re-render component
+  → Không có tracker event nào fire tự nhiên
+</pre>
+</div>
+
+<h3>4.1 Cách SDK bắt SPA navigation</h3>
+
+<p>Monkey-patch <code>history.pushState</code> — trick từ Google Analytics 4:</p>
+
+<pre><code><span class="cm">// auto-capture.ts</span>
+<span class="kw">const</span> origPush = history.pushState;
+history.pushState = <span class="kw">function</span> (...args) {
+    <span class="kw">const</span> ret = origPush.<span class="fn">apply</span>(<span class="kw">this</span>, args);
+    <span class="fn">onRouteChange</span>();  <span class="cm">// SDK bắt được đây</span>
+    <span class="kw">return</span> ret;
+};</code></pre>
+
+<p>Cộng thêm 2 event nữa:</p>
+<ul>
+  <li><code>popstate</code> — user bấm nút back</li>
+  <li><code>hashchange</code> — SPA cũ dùng hash routing (<code>/#/products</code>)</li>
+</ul>
+
+<h3>4.2 3 event screen SDK fire</h3>
+
+<table>
+  <thead><tr><th>Event</th><th>Khi nào fire</th><th>Payload chính</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>screen_viewed</code></td>
+      <td>Route mới → user thấy screen</td>
+      <td><code>screen, title</code></td>
+    </tr>
+    <tr>
+      <td><code>screen_load_completed</code></td>
+      <td>Ngay sau screen_viewed, đo render time</td>
+      <td><code>screen, load_ms</code></td>
+    </tr>
+    <tr>
+      <td><code>screen_exited</code> <span class="tag tag-warn">chưa impl v0.1</span></td>
+      <td>User rời screen (chuẩn bị sang route khác)</td>
+      <td><code>screen, duration_ms</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="case">
+  <h4 class="case-title">Case 4: Route redirect chain — 3 event khi user chỉ care 1</h4>
+  <p>User click "Đăng nhập" → app chain redirect:</p>
+  <pre><code>/login → /auth/verify → /dashboard</code></pre>
+  <p>Chỉ 200ms giữa mỗi bước. SDK sẽ fire 3 event <code>screen_viewed</code> — nhưng user chỉ thực sự "ở" <code>/dashboard</code>.</p>
+  <p><strong>Cách xử ngành:</strong> coalesce window 120ms — chỉ emit event cho route "settle" cuối cùng. Flutter UniTrack có, web v0.1.0 chưa có.</p>
+  <div class="real">
+    MobiX (Flutter camera app) từng gặp cái này — journey list bị inflate 3× khi user login. Fix bằng coalesce ở NavigatorObserver v1.1.0.
+  </div>
+</div>
+
+<h3>4.3 Screen name — làm sao đẹp?</h3>
+
+<p>Mặc định SDK dùng <code>window.location.pathname</code>:</p>
+
+<pre><code>/                           → "/"
+/products                   → "/products"
+/products/PROD-A123         → "/products/PROD-A123"    <span class="cm">← ⚠️ high cardinality</span></code></pre>
+
+<div class="panel warn">
+  <strong>Cardinality trap:</strong> URL có ID sản phẩm/user → mỗi ID là 1 "screen" khác → analytics database phồng nhanh. GA khuyến nghị max 500 unique screen name / property.
+</div>
+
+<p><strong>Best practice:</strong> app dùng <code>UniTrack.setScreen("product_detail")</code> thủ công để override, hoặc BE regex normalize:</p>
+
+<pre><code>/products/([A-Z0-9-]+)  → /products/:id</code></pre>
+
+<!-- ============ NETWORK ============ -->
+<h2 id="network">5. Network + trace_id + CORS — landmine</h2>
+
+<h3>5.1 SDK bắt fetch/XHR thế nào?</h3>
+
+<p>Monkey-patch <code>window.fetch</code> + <code>XMLHttpRequest.prototype.open/send</code>. Mỗi request → SDK ghi lại URL, method, status_code, duration_ms.</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg">
+    <rect x="30" y="30" width="180" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5"/>
+    <text x="120" y="55" text-anchor="middle" font-weight="700" font-size="13">App code</text>
+    <text x="120" y="75" text-anchor="middle" font-size="12">fetch('/api/orders')</text>
+
+    <line x1="210" y1="60" x2="260" y2="60" stroke="#4f46e5" stroke-width="2" marker-end="url(#a3)"/>
+
+    <rect x="260" y="30" width="180" height="60" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <text x="350" y="55" text-anchor="middle" font-weight="700" font-size="13">SDK monkey-patch</text>
+    <text x="350" y="75" text-anchor="middle" font-size="12">Inject traceparent</text>
+
+    <line x1="440" y1="60" x2="490" y2="60" stroke="#4f46e5" stroke-width="2" marker-end="url(#a3)"/>
+
+    <rect x="490" y="30" width="180" height="60" rx="8" fill="#f0fdf4" stroke="#16a34a"/>
+    <text x="580" y="55" text-anchor="middle" font-weight="700" font-size="13">Server /api/orders</text>
+    <text x="580" y="75" text-anchor="middle" font-size="11">nhận traceparent</text>
+
+    <line x1="580" y1="90" x2="580" y2="140" stroke="#16a34a" stroke-width="2" marker-end="url(#a3)"/>
+    <line x1="350" y1="90" x2="350" y2="140" stroke="#d97706" stroke-width="2" marker-end="url(#a3)"/>
+
+    <rect x="260" y="140" width="180" height="60" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <text x="350" y="165" text-anchor="middle" font-weight="700" font-size="13">SDK bắt response</text>
+    <text x="350" y="185" text-anchor="middle" font-size="12">Emit network_request</text>
+
+    <rect x="490" y="140" width="180" height="60" rx="8" fill="#f0fdf4" stroke="#16a34a"/>
+    <text x="580" y="165" text-anchor="middle" font-weight="700" font-size="13">Server log</text>
+    <text x="580" y="185" text-anchor="middle" font-size="11">trace_id=abc123</text>
+
+    <defs>
+      <marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#4f46e5"/>
+      </marker>
+    </defs>
+  </svg>
+  <div class="caption">Frontend event + Backend log cùng trace_id → dev grep log join 2 phía</div>
+</div>
+
+<h3>5.2 trace_id là gì? Vì sao cần?</h3>
+
+<p>Chuẩn <strong>W3C Trace Context</strong> — 1 header <code>traceparent</code> format:</p>
+
+<pre><code>traceparent: 00-<span class="str">a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6</span>-<span class="str">1122334455667788</span>-01
+             │  │                                │                 │
+             │  │                                │                 └─ flags (01 = sampled)
+             │  │                                └─ span_id (16 hex, 8 bytes)
+             │  └─ trace_id (32 hex, 16 bytes)
+             └─ version</code></pre>
+
+<p>Frontend sinh trace_id → gắn header → backend đọc header → backend log kèm trace_id → khi có bug, dev grep <code>trace_id=a1b2...</code> trên cả frontend event + backend log = ráp full journey.</p>
+
+<div class="case">
+  <h4 class="case-title">Case 5: User complain "Tôi bấm Mua nhưng lỗi" — dev debug thế nào</h4>
+  <p><strong>Không có trace_id:</strong></p>
+  <ul>
+    <li>Frontend log: user tap Buy lúc 14:23</li>
+    <li>Backend log: có 50 request /api/orders trong khoảng 14:20-14:25</li>
+    <li>Không biết request nào của user đó</li>
+  </ul>
+  <p><strong>Có trace_id:</strong></p>
+  <ul>
+    <li>Frontend event <code>click "Buy"</code> stamp <code>trace_id=abc</code></li>
+    <li>Frontend event <code>network_error</code> ngay sau đó cũng <code>trace_id=abc</code></li>
+    <li>Backend log request có <code>trace_id=abc</code> → thấy exception <code>InsufficientBalance</code></li>
+  </ul>
+  <div class="real">
+    Kubernetes/microservice environment gần như bắt buộc. Datadog, New Relic, Jaeger đều dùng W3C Trace Context.
+  </div>
+</div>
+
+<h3>5.3 CORS — vấn đề pain #1</h3>
+
+<div class="panel danger">
+  Browser <strong>không cho</strong> JS gắn header custom (như <code>traceparent</code>) vào request cross-origin, trừ khi server explicitly allow.
+</div>
+
+<p>Flow bị chặn:</p>
+
+<div class="diagram">
+<pre style="text-align:left; background:#1f1f24; color:#fff;">
+Browser (unitrack-demo.com) muốn gửi:
+  fetch(<span class="str">'https://api.other.com/orders'</span>, {
+    headers: { <span class="str">'traceparent'</span>: <span class="str">'00-abc-...'</span> }  <span class="cm">← Custom header!</span>
+  })
+
+Browser tự động gửi <span class="key">preflight OPTIONS</span> trước:
+  OPTIONS /orders
+  Origin: unitrack-demo.com
+  Access-Control-Request-Headers: <span class="key">traceparent</span>
+
+Server phải trả về:
+  HTTP 204
+  Access-Control-Allow-Origin: unitrack-demo.com
+  Access-Control-Allow-Headers: <span class="key">traceparent</span>    <span class="cm">← BẮT BUỘC có!</span>
+
+Nếu không:
+  ❌ Preflight fail → fetch không được gửi
+  ❌ Console error: "CORS policy: header 'traceparent' is not allowed"
+</pre>
+</div>
+
+<div class="panel warn">
+  <strong>Fail-closed allowlist:</strong> SDK <em>không</em> inject <code>traceparent</code> vào mọi request. App phải config <code>tracingAllowlistHosts: ['api.yourapp.com']</code> — chỉ inject cho host trong list. Empty = không inject → 0 CORS issue.
+</div>
+
+<h3>5.4 Case exclude ingest self — vô hạn recursion</h3>
+
+<div class="case">
+  <h4 class="case-title">Case 6: SDK track chính request lên SDK server</h4>
+  <p>Không có exclude → recursion:</p>
+  <ol>
+    <li>User tap Buy → SDK ghi event, gọi POST <code>/web-events</code></li>
+    <li>SDK network interceptor bắt request POST đó → ghi event "network_request POST /web-events"</li>
+    <li>Event mới cần gửi → POST <code>/web-events</code> lần nữa</li>
+    <li>SDK bắt → ghi lại → POST → ...</li>
+  </ol>
+  <p><strong>Cách xử:</strong> SDK auto exclude host của endpoint. Nếu <code>endpoint = "https://mobix.asia/api/web-events"</code> → mọi request đến <code>mobix.asia</code> KHÔNG track.</p>
+  <div class="real">
+    Segment, Mixpanel, Amplitude đều exclude self. Test case classic: nhìn console debugger có network event tăng exponential = quên exclude.
+  </div>
+</div>
+
+<h3>5.5 SSE và WebSocket — không bắt được</h3>
+
+<p><code>EventSource</code> (SSE) và <code>WebSocket</code> KHÔNG đi qua <code>fetch</code>/<code>XMLHttpRequest</code> — SDK không patch được. Điều này bình thường: SSE/WS thường sống lâu (kết nối 30 phút, 1 giờ), không phải "request" theo nghĩa REST.</p>
+
+<!-- ============ OPS ============ -->
+<h2 id="ops">6. Ops production — 12 case dev hay bỏ sót</h2>
+
+<h3>6.1 AdBlock chặn SDK <span class="tag tag-danger">Nghiêm trọng</span></h3>
+
+<div class="panel danger">
+  ~30% user desktop có AdBlock. uBlock Origin block domain "unitrack.io", "analytics.google.com", ...
+</div>
+
+<div class="case">
+  <h4 class="case-title">Case 7: uBlock chặn SDK bundle load</h4>
+  <p>Nếu bro serve SDK từ CDN thirdparty:</p>
+  <pre><code>&lt;script src=<span class="str">"https://cdn.unitrack.io/web.js"</span>&gt;&lt;/script&gt;</code></pre>
+  <p>uBlock check domain → chặn → SDK không load → 0 event.</p>
+
+  <p><strong>Cách xử:</strong> serve từ same-domain của app:</p>
+  <pre><code>&lt;script src=<span class="str">"/assets/js/unitrack.iife.js"</span>&gt;&lt;/script&gt;</code></pre>
+  <p>AdBlock chỉ block domain, không block path — same-domain thoát được ~90% adblock.</p>
+  <div class="real">
+    Google Analytics 4 vẫn bị block ~35% desktop. Cloudflare Web Analytics chạy same-domain qua reverse proxy → block rate 5%.
+  </div>
+</div>
+
+<h3>6.2 CSP (Content-Security-Policy)</h3>
+
+<p>Website có header CSP kiểu:</p>
+<pre><code>Content-Security-Policy: script-src <span class="str">'self'</span></code></pre>
+<p>Sẽ chặn mọi JS ngoài same-origin, kể cả eval, inline script.</p>
+
+<p><strong>SDK nhớ:</strong></p>
+<ul>
+  <li>KHÔNG dùng <code>eval()</code>, <code>new Function()</code></li>
+  <li>KHÔNG inject inline script vào DOM</li>
+  <li>Nếu bắt buộc từ CDN → CSP cần add domain: <code>script-src 'self' https://cdn.unitrack.io</code></li>
+</ul>
+
+<h3>6.3 Offline queue — user mất mạng khi tap Submit</h3>
+
+<div class="diagram">
+<pre style="text-align:left; background:#1f1f24; color:#fff;">
+<span class="cm">// Kịch bản</span>
+14:00  User tap Submit form
+14:00  SDK track event "form_submitted"
+14:00  fetch POST /web-events → ❌ Network error (offline)
+
+<span class="cm">// SDK behavior</span>
+14:00  Retain event trong IndexedDB
+14:00  Đợi event 'online' của browser
+
+<span class="cm">// User bật WiFi lại</span>
+14:05  Browser fire 'online' event
+14:05  SDK flush queue → POST 1 batch chứa event từ 14:00
+</pre>
+</div>
+
+<div class="panel warn">
+  IndexedDB có thể bị browser xóa khi disk full — không đảm bảo 100%. UniTrack cũng dùng <code>navigator.sendBeacon</code> lúc <code>pagehide</code> để force flush trước khi tab close.
+</div>
+
+<h3>6.4 Bot / crawler làm ô nhiễm data</h3>
+
+<div class="case">
+  <h4 class="case-title">Case 8: Googlebot index trang → analytics tăng vọt</h4>
+  <p>Googlebot mở trang, chạy JS, click link → SDK ghi 100 event/phút. Data team hoảng "traffic tăng đột biến!"</p>
+
+  <p><strong>Cách xử:</strong> filter server-side hoặc client-side:</p>
+  <pre><code><span class="cm">// Client-side check</span>
+<span class="kw">if</span> (navigator.webdriver || /bot|crawler|spider/i.<span class="fn">test</span>(navigator.userAgent)) {
+    <span class="kw">return</span>;  <span class="cm">// Không init SDK cho bot</span>
+}</code></pre>
+
+  <p>Hoặc BE reject request có <code>User-Agent</code> match bot pattern.</p>
+</div>
+
+<h3>6.5 Prerender preview (Chrome speculation)</h3>
+
+<p>Chrome 120+ hỗ trợ <code>speculationrules</code>: render sẵn trang link trước khi user click, để mở nhanh.</p>
+
+<pre><code>&lt;script type=<span class="str">"speculationrules"</span>&gt;
+  { <span class="key">"prerender"</span>: [{ <span class="key">"urls"</span>: [<span class="str">"/products"</span>] }] }
+&lt;/script&gt;</code></pre>
+
+<p>User chưa click nhưng browser đã render <code>/products</code> → SDK fire <code>screen_viewed</code> giả.</p>
+
+<pre><code><span class="cm">// Cách check</span>
+<span class="kw">if</span> (document.prerendering) {
+    <span class="cm">// Đừng track — đợi 'prerenderingchange' event</span>
+    document.<span class="fn">addEventListener</span>(<span class="str">'prerenderingchange'</span>, initTracking);
+} <span class="kw">else</span> {
+    <span class="fn">initTracking</span>();
+}</code></pre>
+
+<h3>6.6 Tab background 24 giờ</h3>
+
+<p>User mở tab, minimize browser, để 1 ngày. Khi visible lại:</p>
+<ul>
+  <li><code>document.visibilityState</code> đổi từ <code>hidden</code> → <code>visible</code></li>
+  <li>SDK check timeout → session_id đã idle > 30 phút → rotate → session mới</li>
+  <li>Event tiếp theo stamp session_id mới</li>
+</ul>
+
+<h3>6.7 Cross-tab session sync</h3>
+
+<div class="browser-mockup">
+  <div class="chrome">
+    <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+    <div class="url">Tab 1: app.com/products · Tab 2: app.com/cart</div>
+  </div>
+  <div class="body">
+    <p>User tap ở Tab 1 lúc 14:00 → Tab 1 update <code>last_active = 14:00</code> trong localStorage.<br>
+    Tab 2 idle. Lúc 14:29 user tap Tab 2 → Tab 2 đọc localStorage → thấy last_active = 14:00, mới 29 phút → chưa timeout → dùng session cũ. ✅</p>
+  </div>
+</div>
+
+<h3>6.8 Duplicate SDK load</h3>
+
+<p>App code import SDK 2 lần (accidentally, hoặc do bundle chain):</p>
+
+<pre><code><span class="cm">// index.html — 2 lần include, sai lầm phổ biến</span>
+&lt;script src=<span class="str">"unitrack.iife.js"</span>&gt;&lt;/script&gt;
+&lt;script src=<span class="str">"unitrack.iife.js"</span>&gt;&lt;/script&gt;  <span class="cm">← Duplicate!</span></code></pre>
+
+<p>SDK sẽ 2 lần patch <code>history.pushState</code> → mỗi navigation fire 2 event. UniTrack có <code>initialize()</code> idempotent guard (biến <code>installed = true</code>) nên chỉ install 1 lần.</p>
+
+<h3>6.9 Time skew user machine</h3>
+
+<p>User set giờ máy sai (offset 3 tiếng). SDK dùng <code>Date.now()</code> stamp event timestamp → BE nhận thấy event từ 3 tiếng trước.</p>
+
+<p><strong>Cách xử:</strong> BE stamp <code>received_at</code> khi nhận request (như endpoint <code>/web-events</code> đã làm).</p>
+
+<h3>6.10 Server bị spike bởi analytics</h3>
+
+<p>Peak time: 10.000 user online × 100 event/user = 1M event/phút. Nếu SDK POST mỗi event riêng → 1M request/phút → BE chết.</p>
+
+<p><strong>Cách xử:</strong> batch. SDK gom 10 event thành 1 POST → chỉ 100k req/phút.</p>
+
+<h3>6.11 Localhost development bắn lên prod</h3>
+
+<div class="panel danger">
+  Dev quên đổi <code>endpoint</code> khi build → data test bơm vào prod database.
+</div>
+
+<pre><code><span class="cm">// Config theo NODE_ENV</span>
+<span class="ty">UniTrack</span>.<span class="fn">initialize</span>(apiKey, {
+  endpoint: process.env.NODE_ENV === <span class="str">'production'</span>
+    ? <span class="str">'https://prod.com/events'</span>
+    : <span class="str">'http://localhost:9090/events'</span>,
+});</code></pre>
+
+<h3>6.12 Version pin & cache stale</h3>
+
+<p>User giữ tab mở suốt 3 tuần. SDK bundle được cache. BE endpoint đổi shape v2 → SDK cũ vẫn gửi v1 shape → BE reject.</p>
+
+<p><strong>Cách xử:</strong> version trong URL:</p>
+<pre><code>&lt;script src=<span class="str">"/assets/js/unitrack.iife.v0.1.0.js"</span>&gt;&lt;/script&gt;</code></pre>
+
+<!-- ============ PRIVACY ============ -->
+<h2 id="privacy">7. Privacy + PII + GDPR — pháp lý</h2>
+
+<h3>7.1 PII vô tình lọt qua auto-capture</h3>
+
+<div class="case">
+  <h4 class="case-title">Case 9: URL query chứa email</h4>
+  <p>Trang login sau redirect có URL:</p>
+  <pre><code>https://app.com/dashboard?user=abc@example.com&token=xyz</code></pre>
+  <p>SDK auto-capture screen_viewed → props chứa full URL → email lên analytics!</p>
+  <p><strong>Cách xử:</strong> SDK dùng <code>stripQuery()</code> — chỉ giữ path, drop query string:</p>
+  <pre><code>screen_viewed { screen: <span class="str">"/dashboard"</span> }  <span class="cm">← ✅ đã strip query</span></code></pre>
+  <div class="real">
+    Google từng bị FTC phạt vì log query string chứa credit card. GDPR fine cho leak email lên analytics: €20 million hoặc 4% revenue.
+  </div>
+</div>
+
+<h3>7.2 GDPR — Consent banner</h3>
+
+<p>EU yêu cầu website phải xin consent trước khi tracking. Flow:</p>
+
+<div class="diagram">
+<pre style="text-align:left; background:#1f1f24; color:#fff;">
+User vào trang lần đầu
+    ↓
+Show banner: <span class="str">"Cho phép cookies để cải thiện trải nghiệm?"</span>
+    ↓
+    ├─ [Accept] → localStorage.<span class="fn">setItem</span>(<span class="str">'consent'</span>, <span class="str">'accepted'</span>)
+    │             UniTrack.<span class="fn">initialize</span>(...)
+    │
+    └─ [Decline] → localStorage.<span class="fn">setItem</span>(<span class="str">'consent'</span>, <span class="str">'denied'</span>)
+                   SDK KHÔNG init, không track
+</pre>
+</div>
+
+<div class="panel warn">
+  <strong>UniTrack không tự xử consent</strong> — vì mỗi app có yêu cầu compliance khác nhau. App phải:
+  <ul>
+    <li>Show banner riêng</li>
+    <li>Chỉ gọi <code>UniTrack.initialize()</code> khi user accept</li>
+    <li>Provide button "Withdraw consent" — khi user click → gọi <code>UniTrack.reset()</code> + clear localStorage</li>
+  </ul>
+</div>
+
+<h3>7.3 PII hashing — best practice</h3>
+
+<p>Nếu bắt buộc track user_id/phone/email → hash trước khi gửi:</p>
+
+<pre><code><span class="cm">// SDK tự làm khi bro identify()</span>
+<span class="kw">await</span> <span class="ty">UniTrack</span>.<span class="fn">identify</span>(<span class="str">"user@example.com"</span>);
+<span class="cm">// Backend nhận: user_id = "a3f5e2..." (SHA-256 hash)</span></code></pre>
+
+<p>Server không thể reverse hash → GDPR chấp nhận vì email raw không rời client.</p>
+
+<h3>7.4 form input value — KHÔNG bao giờ capture</h3>
+
+<div class="panel danger">
+  UniTrack (và mọi tracker tử tế) <strong>KHÔNG</strong> capture <code>&lt;input&gt;</code> value. Chỉ ghi element_key (id/label). Nếu bro cần track "user điền form" → chỉ ghi <code>form_submitted</code> event, không ghi giá trị.
+</div>
+
+<pre><code><span class="cm">// ✅ Đúng</span>
+<span class="ty">UniTrack</span>.<span class="fn">track</span>(<span class="str">'form_submitted'</span>, {
+  form_id: <span class="str">'signup'</span>,
+  fields_filled: <span class="num">5</span>  <span class="cm">← chỉ số lượng, không giá trị</span>
+});
+
+<span class="cm">// ❌ Sai — nghiêm cấm</span>
+<span class="ty">UniTrack</span>.<span class="fn">track</span>(<span class="str">'form_submitted'</span>, {
+  email: form.email.value,
+  password: form.password.value  <span class="cm">← password lên analytics = GDPR breach + đuổi việc</span>
+});</code></pre>
+
+<!-- ============ CHECKLIST ============ -->
+<h2 id="test-checklist">8. Checklist test trước khi lên prod</h2>
+
+<p>Trước khi cho website nào tracking thật, chạy đủ checklist sau:</p>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Browser matrix</h4>
+  <ul>
+    <li>✅ Chrome (95% user desktop)</li>
+    <li>✅ Firefox</li>
+    <li>✅ Safari desktop</li>
+    <li>✅ Edge</li>
+    <li>✅ iOS Safari (WebKit khác, ITP)</li>
+    <li>✅ Chrome Android</li>
+  </ul>
+</div>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Session behavior</h4>
+  <ul>
+    <li>✅ Reload page → session_id giữ nguyên</li>
+    <li>✅ Mở 2 tab cùng URL → cùng session_id (localStorage cross-tab)</li>
+    <li>✅ Đợi 31 phút idle → tap → session_id rotate, index +1</li>
+    <li>✅ Click <code>UniTrack.rotateSession()</code> → manual rotate</li>
+    <li>✅ Incognito mode → session sinh mới mỗi lần</li>
+  </ul>
+</div>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Auto-capture</h4>
+  <ul>
+    <li>✅ Tap button có <code>data-track-id</code> → event_key = data-track-id</li>
+    <li>✅ Tap span text bên trong card → SDK resolve lên card ancestor</li>
+    <li>✅ Right-click / Cmd+click không fire click event</li>
+    <li>✅ SPA route change (React Router push) → screen_viewed fire</li>
+    <li>✅ Hash routing (<code>/#/page</code>) → screen_viewed fire</li>
+    <li>✅ Back button → screen_viewed fire</li>
+  </ul>
+</div>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Network</h4>
+  <ul>
+    <li>✅ fetch với host in allowlist → có header <code>traceparent</code></li>
+    <li>✅ fetch với host ngoài allowlist → KHÔNG có header</li>
+    <li>✅ POST đến endpoint SDK → KHÔNG bị track (exclude self)</li>
+    <li>✅ Request 404 → fire <code>network_error</code></li>
+    <li>✅ Request cancel qua AbortController → không crash SDK</li>
+  </ul>
+</div>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Ops</h4>
+  <ul>
+    <li>✅ AdBlock (uBlock Origin) enabled → SDK vẫn hoạt động (same-domain)</li>
+    <li>✅ Offline → tap → back online → queue flush</li>
+    <li>✅ Page unload (close tab) → sendBeacon flush</li>
+    <li>✅ Bot user-agent → SDK skip (nếu có filter)</li>
+    <li>✅ Duplicate script load → 1 event/tap, không 2</li>
+  </ul>
+</div>
+
+<div class="panel success">
+  <h4 style="margin-top:0">Privacy</h4>
+  <ul>
+    <li>✅ URL có <code>?email=…</code> → screen_viewed chỉ có path, không query</li>
+    <li>✅ input value không xuất hiện trong bất kỳ event nào</li>
+    <li>✅ Consent banner block SDK init đến khi accept</li>
+    <li>✅ identify() → user_id ở BE là hashed, không raw</li>
+  </ul>
+</div>
+
+<hr style="margin: 60px 0; border: none; border-top: 1px solid var(--line)">
+
+<p style="text-align:center; color:var(--muted); font-size: 13px;">
+  UniTrack Web SDK · v0.1.0 · Demo: <a href="https://mobix.asia/event-tracking-mobile/unitrack-web-demo/">mobix.asia/event-tracking-mobile/unitrack-web-demo/</a>
+</p>
+
+</div>
+</body>
+</html>

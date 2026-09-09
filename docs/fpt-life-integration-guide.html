@@ -103,10 +103,8 @@
     <li><a href="#ios-setup">iOS — Setup SPM</a></li>
     <li><a href="#android-setup">Android — Setup Maven</a></li>
     <li><a href="#json-config">trackingConfig.json</a></li>
-    <li><a href="#events">Tracking events</a></li>
-    <li><a href="#custom">Custom event mới</a></li>
+    <li><a href="#events">Tracking events + Custom event</a></li>
     <li><a href="#identity">Identify user (JWT + PII hash)</a></li>
-    <li><a href="#cross-binary">Cross-binary — Flutter trong native app</a></li>
   </ol>
 </div>
 
@@ -146,47 +144,91 @@
 <h2>2. <span class="tag tag-android">Android</span> Setup Maven</h2>
 
 <h3>2.1 Dependency</h3>
+<p>FPT Life dùng Kotlin DSL (<code>.kts</code>) + module riêng <code>fpt-tracker/</code> đóng gói wrapper UniTrack. App chỉ depend module này, không trực tiếp link <code>unitrack</code>.</p>
+
 <p><code>gradle/libs.versions.toml</code>:</p>
 <pre><code>[versions]
-unitrack = "0.3.43"
+unitrack = <span class="str">"0.3.43"</span>
 
 [libraries]
-unitrack          = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack",          version.ref = "unitrack" }
-unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unitrack-snowplow", version.ref = "unitrack" }</code></pre>
+unitrack          = { group = <span class="str">"com.github.sieuvitdet.unitrack-sdk"</span>, name = <span class="str">"unitrack"</span>,          version.ref = <span class="str">"unitrack"</span> }
+unitrack-snowplow = { group = <span class="str">"com.github.sieuvitdet.unitrack-sdk"</span>, name = <span class="str">"unitrack-snowplow"</span>, version.ref = <span class="str">"unitrack"</span> }</code></pre>
 
-<p><code>settings.gradle</code> repo:</p>
-<pre><code>repositories {
-    google()
-    mavenCentral()
-    maven { url <span class="str">'https://jitpack.io'</span> }
+<p><code>settings.gradle.kts</code> — Jitpack repo + include module <code>fpt-tracker</code>:</p>
+<pre><code>dependencyResolutionManagement {
+    repositoriesMode.<span class="fn">set</span>(<span class="ty">RepositoriesMode</span>.PREFER_SETTINGS)
+    repositories {
+        <span class="fn">google</span>()
+        <span class="fn">mavenCentral</span>()
+        <span class="fn">maven</span> { url = <span class="fn">uri</span>(<span class="str">"https://www.jitpack.io"</span>) }
+    }
+}
+
+<span class="fn">include</span>(<span class="str">":app"</span>)
+<span class="fn">include</span>(<span class="str">":fpt-tracker"</span>)   <span class="cm">// module wrapper UniTrack</span></code></pre>
+
+<p><code>fpt-tracker/build.gradle.kts</code> — module declare UniTrack:</p>
+<pre><code>plugins {
+    alias(libs.plugins.fpt.fli.android.library)
+}
+
+android {
+    namespace = <span class="str">"com.fpt.tracker"</span>
+}
+
+dependencies {
+    api(libs.unitrack)
+    api(libs.unitrack.snowplow)
+    api(libs.snowplow.android.tracker)
+    api(libs.google.code.gson)
 }</code></pre>
 
-<p><code>app/build.gradle</code>:</p>
+<p><code>app/build.gradle.kts</code> — chỉ depend project ref:</p>
 <pre><code>dependencies {
-    implementation libs.unitrack
-    implementation libs.unitrack.snowplow
+    implementation(projects.fptTracker)
+    <span class="cm">// ... các dependency khác</span>
 }</code></pre>
+
+<div class="panel note">
+  <strong>Tại sao tách module:</strong> <code>fpt-tracker</code> đóng gói <code>FSDKTracking</code> + <code>PIIHash</code> + 18 helper camera để app code chỉ <code>import com.fpt.tracker.fsdk.FSDKTracking</code> là dùng được. Sub-module khác trong project (vd <code>fpt-tracker-firebase</code>) có thể reuse cùng module này mà không phải re-declare UniTrack.
+</div>
 
 <h3>2.2 Config JSON</h3>
 <p>Add file <code>tracking_config.json</code> vào <code>app/src/main/assets/</code>. Android pick từ assets tự động.</p>
 
 <h3>2.3 Bootstrap trong Application</h3>
-<pre><code><span class="kw">class</span> <span class="ty">FPTLifeApp</span> : <span class="ty">Application</span>() {
+<p>Class <code>Application</code> của FPT Life Android là <code>FLifeApp</code> (đã đăng ký sẵn trong AndroidManifest). Gọi <code>FSDKTracking.bootstrap</code> trong <code>onCreate</code>:</p>
+
+<pre><code><span class="kw">import</span> com.fpt.tracker.fsdk.<span class="ty">FSDKTracking</span>
+<span class="kw">import</span> com.unitrack.sdk.<span class="ty">UniTrack</span>
+
+<span class="kw">class</span> <span class="ty">FLifeApp</span> : <span class="ty">Application</span>() {
     <span class="kw">override fun</span> <span class="fn">onCreate</span>() {
         <span class="kw">super</span>.<span class="fn">onCreate</span>()
+
         <span class="ty">FSDKTracking</span>.<span class="fn">bootstrap</span>(
             app    = <span class="kw">this</span>,
-            flavor = <span class="ty">BuildConfig</span>.FLAVOR
+            flavor = <span class="ty">BuildConfig</span>.FCAM_ENV,
         ) {
             <span class="ty">FSDKTracking</span>.<span class="fn">sessionStarted</span>()
+            <span class="fn">checkNotificationPermission</span>()
+        }
+
+        <span class="cm">// Wire foreground/background lifecycle để session rotate đúng</span>
+        <span class="ty">UniTrack</span>.<span class="fn">addLifecycleListener</span> { toForeground -&gt;
+            <span class="kw">if</span> (toForeground) {
+                <span class="ty">FSDKTracking</span>.<span class="fn">sessionStarted</span>()
+            } <span class="kw">else</span> {
+                <span class="ty">FSDKTracking</span>.<span class="fn">sessionEnded</span>(reason = <span class="str">"backgrounded"</span>)
+                <span class="ty">UniTrack</span>.<span class="fn">flush</span>()
+            }
         }
     }
 }</code></pre>
 
-<p>Đăng ký <code>FPTLifeApp</code> trong <code>AndroidManifest.xml</code>:</p>
-<pre><code>&lt;application
-    android:name=<span class="str">".FPTLifeApp"</span>
-    ... /&gt;</code></pre>
+<div class="panel note">
+  Field <code>BuildConfig.FCAM_ENV</code> = build flavor hiện tại (vd <code>"dev"</code>, <code>"beta"</code>, <code>"uat"</code>) — dùng để chọn override trong block <code>flavors</code> của <code>tracking_config.json</code>.
+</div>
 
 <!-- ============== JSON CONFIG ============== -->
 <div class="anchor-pad" id="json-config"></div>
@@ -196,8 +238,8 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 
 <pre><code>{
   <span class="key">"version"</span>: <span class="num">56</span>,
-  <span class="key">"endpoint"</span>: <span class="str">""</span>,                           <span class="cm">// rỗng — FPT Life chỉ fan-out Snowplow</span>
-  <span class="key">"pii_salt"</span>: <span class="str">"fe04...3886"</span>,                  <span class="cm">// 32-byte hex, identical 2 platform</span>
+  <span class="key">"endpoint"</span>: <span class="str">""</span>,
+  <span class="key">"pii_salt"</span>: <span class="str">"fe04...3886"</span>,
 
   <span class="key">"sdk_config"</span>: {
     <span class="key">"batchSize"</span>: <span class="num">10</span>,
@@ -216,8 +258,8 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
     <span class="key">"iglu_vendor"</span>: <span class="str">"vn.fpt.ftel.snowplow"</span>,
     <span class="key">"default_version"</span>: <span class="str">"1-0-0"</span>,
     <span class="key">"options"</span>: {
-      <span class="key">"sessionContext"</span>: <span class="kw">false</span>,           <span class="cm">// UniTrack đã stamp session_id, tắt để tránh duplicate</span>
-      <span class="key">"lifecycleAutotracking"</span>: <span class="kw">false</span>,    <span class="cm">// FSDKTracking đã wire sessionStarted/Ended thủ công</span>
+      <span class="key">"sessionContext"</span>: <span class="kw">false</span>,
+      <span class="key">"lifecycleAutotracking"</span>: <span class="kw">false</span>,
       <span class="key">"screenEngagementAutotracking"</span>: <span class="kw">true</span>
     },
     <span class="key">"ios"</span>:     { <span class="key">"endpoint"</span>: <span class="str">"https://ftracking.fpt.vn"</span>, <span class="key">"appId"</span>: <span class="str">"505"</span> },
@@ -241,15 +283,14 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 <table>
   <thead><tr><th>Field</th><th>Ý nghĩa</th></tr></thead>
   <tbody>
-    <tr><td><code>endpoint</code></td><td>Core HTTP queue URL. <strong>Rỗng = chỉ gửi qua Snowplow provider</strong> (FPT Life dùng cấu hình này).</td></tr>
-    <tr><td><code>pii_salt</code></td><td>32-byte hex random, dùng chung cho SHA-256 hash <code>user_id</code> / <code>phone_number</code> / <code>user_name</code>.</td></tr>
-    <tr><td><code>sdk_config.autoCapture</code></td><td>Master toggle auto-capture (tap/screen/network).</td></tr>
+    <tr><td><code>endpoint</code></td><td>Core HTTP queue URL. Rỗng = FPT Life chỉ fan-out qua Snowplow.</td></tr>
+    <tr><td><code>pii_salt</code></td><td>32-byte hex random, hash SHA-256 cho <code>user_id</code> / <code>phone_number</code> / <code>user_name</code>.</td></tr>
+    <tr><td><code>sdk_config.autoCapture</code></td><td>Master toggle auto-capture.</td></tr>
     <tr><td><code>sdk_config.trackScreens</code></td><td>Tự bắt UIViewController appear / Activity resume.</td></tr>
-    <tr><td><code>sdk_config.trackTaps</code></td><td>Tự bắt button taps (gesture recognizer / View click).</td></tr>
-    <tr><td><code>snowplow.endpoint</code> + <code>appId</code></td><td>Snowplow collector URL + app id chính của FPT Life.</td></tr>
-    <tr><td><code>snowplow.options.sessionContext</code></td><td><strong>false</strong>: UniTrack đã stamp <code>session_id</code> vào mọi event, Snowplow client_session entity là duplicate.</td></tr>
+    <tr><td><code>sdk_config.trackTaps</code></td><td>Tự bắt button taps.</td></tr>
+    <tr><td><code>snowplow.endpoint</code> + <code>appId</code></td><td>Snowplow collector URL + app id FPT Life.</td></tr>
     <tr><td><code>tracing.allowlist_hosts</code></td><td>Danh sách host inject <code>traceparent</code> W3C (fail-closed).</td></tr>
-    <tr><td><code>flavors.&lt;env&gt;.*</code></td><td>Override sâu deep merge cho từng flavor (dev/beta/uat). Build prod dùng base.</td></tr>
+    <tr><td><code>flavors.&lt;env&gt;.*</code></td><td>Deep-merge override theo flavor (dev/beta/uat).</td></tr>
   </tbody>
 </table>
 
@@ -261,10 +302,11 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 <div class="anchor-pad" id="events"></div>
 <h2>4. Tracking events</h2>
 
-<p>Mọi event đi qua <code>FSDKTracking</code> helper — API <strong>identical</strong> cả iOS + Android. Có 2 lựa chọn:</p>
+<p>Mọi event đi qua <code>FSDKTracking</code> — API <strong>identical</strong> iOS + Android. 3 nguồn event:</p>
 <ul>
-  <li><strong>Pre-built helpers</strong> (4.1, 4.2): 18+ hàm sẵn cho domain camera, gọi 1 dòng, schema fixed.</li>
-  <li><strong>Custom track</strong> (4.4): tự đặt tên event + truyền data dict tự do.</li>
+  <li><strong>Auto-capture</strong> — SDK tự bắt screen + tap. App không gọi gì.</li>
+  <li><strong>Pre-built helpers</strong> — 18+ hàm sẵn cho session + camera.</li>
+  <li><strong>Custom track</strong> — event tự đặt, payload tự do.</li>
 </ul>
 
 <h3>4.1 Session lifecycle</h3>
@@ -276,7 +318,44 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
   </tbody>
 </table>
 
-<h3>4.2 Camera + domain events</h3>
+<h3>4.2 Auto-capture (screen + tap)</h3>
+<p>App KHÔNG gọi helper nào — SDK tự bắt theo cờ trong <code>sdk_config</code> của <code>trackingConfig.json</code>. Tên event mặc định lấy từ JSON, đổi được mà không cần rebuild.</p>
+
+<table>
+  <thead><tr><th>Event name</th><th>Trigger</th><th>Bật/tắt</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>screen_viewed</code></td>
+      <td>iOS: UIViewController <code>viewDidAppear</code>. Android: Activity <code>onResume</code> / Fragment <code>onViewCreated</code>.</td>
+      <td><code>sdk_config.trackScreens</code> + <code>screen_start_event</code></td>
+    </tr>
+    <tr>
+      <td><code>screen_exited</code></td>
+      <td>iOS: <code>viewDidDisappear</code>. Android: <code>onPause</code> / Fragment <code>onDestroyView</code>. Kèm <code>duration_ms</code> = thời gian dwell.</td>
+      <td><code>sdk_config.trackScreens</code> + <code>screen_end_event</code></td>
+    </tr>
+    <tr>
+      <td><code>screen_load_completed</code></td>
+      <td>Bắn cùng lúc <code>screen_viewed</code> với field <code>load_ms</code> = thời gian từ <code>viewDidLoad</code> / Activity <code>onCreate</code> đến lúc render xong.</td>
+      <td><code>sdk_config.trackScreens</code> + <code>screen_load_event</code></td>
+    </tr>
+    <tr>
+      <td><code>click</code></td>
+      <td>iOS: UITapGestureRecognizer / UIControl. Android: <code>View.OnClickListener</code>. Resolve <code>element_key</code> theo thứ tự: accessibilityIdentifier &gt; tag &gt; classname.method.</td>
+      <td><code>sdk_config.trackTaps</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="panel note">
+  <strong>Tên screen tự bắt:</strong> iOS lấy <code>UIViewController.title</code>; nếu rỗng → fallback class name. Android lấy Activity label / Fragment <code>tag</code>; nếu không có → fallback class name. App muốn override → đặt <code>viewController.title</code> / <code>activity.title</code> trước khi screen hiển thị.
+</div>
+
+<div class="panel warn">
+  Tắt <code>trackScreens</code>/<code>trackTaps</code> = bỏ hẳn 3 event screen + click trên CẢ pipeline (UniTrack core + Snowplow fan-out). Chỉ tắt khi BE muốn FPT Life tự gửi screen qua helper riêng (vd <code>UniTrack.setScreen</code> thủ công).
+</div>
+
+<h3>4.3 Camera + domain helpers</h3>
 <table>
   <thead><tr><th>Helper</th><th>Event name</th></tr></thead>
   <tbody>
@@ -299,7 +378,7 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
   </tbody>
 </table>
 
-<h3>4.3 Ví dụ gọi</h3>
+<h3>4.4 Ví dụ gọi helper</h3>
 <div class="panel">
   <h4>iOS</h4>
 <pre><code><span class="ty">FSDKTracking</span>.<span class="fn">streamStarted</span>(
@@ -332,27 +411,20 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 )</code></pre>
 </div>
 
-<h3>4.4 Custom track (event tự do, 1 dòng)</h3>
-<p>Khi cần track event chưa có helper sẵn — gọi <code>FSDKTracking.customTrack(...)</code> trực tiếp từ app code. SDK tự stamp <code>session_id</code> + <code>user_id</code> (nếu cần) trước khi gửi lên Snowplow.</p>
-
-<p><strong>API có ở 2 layer</strong>, FPT Life code nên dùng <code>FSDKTracking.customTrack</code>:</p>
-<ul>
-  <li><code>FSDKTracking.customTrack(...)</code> — wrapper FPT Life, <strong>tự stamp thêm</strong>: <code>app_id</code>, <code>platform</code>. Khuyến nghị cho FPT Life để mọi custom event có shape giống helper camera/session sẵn.</li>
-  <li><code>UniTrack.customTrack(...)</code> — API public SDK (iOS 0.3.50+ / Android 0.3.41+). Stamp base: <code>event_action</code>, <code>session_id</code>, <code>user_id</code> (nếu includeUser). Dùng khi không cần các field FPT-specific (vd app khác dùng SDK).</li>
-</ul>
+<h3>4.5 Custom track — event không có helper sẵn</h3>
+<p>Khi cần track event chưa có trong danh sách helper: gọi <code>FSDKTracking.customTrack(...)</code> 1 dòng. SDK lo phần stamp <code>session_id</code> / <code>event_action</code> / <code>user_id</code>.</p>
 
 <h4>API signature</h4>
-<pre><code><span class="cm">// iOS — UniTrack.swift</span>
-<span class="kw">public static func</span> <span class="fn">customTrack</span>(
-    <span class="kw">_</span> eventName: <span class="ty">String</span>,            <span class="cm">// schema name = iglu:&lt;vendor&gt;/&lt;eventName&gt;/jsonschema/&lt;ver&gt;</span>
-    action: <span class="ty">String?</span> = <span class="kw">nil</span>,        <span class="cm">// event_action field. nil → dùng eventName làm action</span>
-    data: [<span class="ty">String</span>: <span class="ty">Any</span>] = [:],   <span class="cm">// field payload tự do</span>
-    includeUser: <span class="ty">Bool</span> = <span class="kw">false</span>     <span class="cm">// true → stamp user_id từ UniTrack.identify() cache</span>
+<pre><code><span class="cm">// iOS</span>
+<span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(
+    <span class="kw">_</span> eventName: <span class="ty">String</span>,
+    action: <span class="ty">String?</span> = <span class="kw">nil</span>,
+    data: [<span class="ty">String</span>: <span class="ty">Any</span>] = [:],
+    includeUser: <span class="ty">Bool</span> = <span class="kw">false</span>
 )
 
-<span class="cm">// Android — UniTrack.kt</span>
-<span class="kw">@JvmStatic @JvmOverloads</span>
-<span class="kw">fun</span> <span class="fn">customTrack</span>(
+<span class="cm">// Android</span>
+<span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(
     eventName: <span class="ty">String</span>,
     action: <span class="ty">String?</span> = <span class="kw">null</span>,
     data: <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="ty">Any?</span>&gt; = emptyMap(),
@@ -360,17 +432,17 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 )</code></pre>
 
 <table>
-  <thead><tr><th>Param</th><th>Default</th><th>Ý nghĩa</th></tr></thead>
+  <thead><tr><th>Param</th><th>Mô tả</th></tr></thead>
   <tbody>
-    <tr><td><code>eventName</code></td><td>—</td><td><strong>Schema name</strong> — phải khớp với Iglu schema đã register ở BE. Snake_case.</td></tr>
-    <tr><td><code>action</code></td><td><code>nil</code></td><td>Giá trị <code>event_action</code> field (filter downstream). Nil → SDK dùng <code>eventName</code> làm action.</td></tr>
-    <tr><td><code>data</code></td><td><code>[:]</code> / <code>emptyMap()</code></td><td>Field payload tự do. SDK tự thêm <code>event_action</code> + <code>session_id</code>.</td></tr>
-    <tr><td><code>includeUser</code></td><td><code>false</code></td><td>Nếu <code>true</code> → stamp <code>user_id</code> từ <code>UniTrack.identify()</code> cache (FSDKTracking gọi identify với hashed PII rồi, nên giá trị stamp đã là hash).</td></tr>
+    <tr><td><code>eventName</code></td><td>Schema name (snake_case). Phải khớp Iglu schema đã register BE.</td></tr>
+    <tr><td><code>action</code></td><td>Giá trị <code>event_action</code> field. Nil → SDK dùng <code>eventName</code>.</td></tr>
+    <tr><td><code>data</code></td><td>Field payload tự do.</td></tr>
+    <tr><td><code>includeUser</code></td><td><code>true</code> → kèm <code>user_id</code> (hashed) từ <code>identify()</code> cache.</td></tr>
   </tbody>
 </table>
 
-<h4>Pattern 1: 1 schema = 1 action (event độc lập)</h4>
-<p>Mỗi event 1 schema riêng. Phù hợp cho event 1-off, payload khác biệt rõ rệt.</p>
+<h4>Pattern 1: 1 schema = 1 action</h4>
+<p>Mỗi event 1 schema riêng. Phù hợp cho event 1-off, payload khác biệt.</p>
 
 <div class="panel">
   <h4>iOS</h4>
@@ -390,13 +462,12 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 ))</code></pre>
 </div>
 
-<h4>Pattern 2: 1 schema = nhiều action (gom theo domain)</h4>
-<p>Gom nhiều event cùng domain dưới 1 schema chung, phân biệt bằng <code>event_action</code>. Phù hợp khi payload có shape giống nhau — BE đỡ phải register N schema cho N action.</p>
+<h4>Pattern 2: 1 schema = nhiều action</h4>
+<p>Gom nhiều event cùng domain dưới 1 schema chung, phân biệt bằng <code>event_action</code>. Phù hợp khi payload shape giống nhau — BE chỉ register 1 schema cho N action.</p>
 
 <div class="panel">
   <h4>iOS</h4>
-<pre><code><span class="cm">// Tất cả dùng chung schema "payment_event"</span>
-<span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>, action: <span class="str">"payment_completed"</span>, data: [
+<pre><code><span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>, action: <span class="str">"payment_completed"</span>, data: [
     <span class="str">"order_id"</span>: orderId,
     <span class="str">"amount"</span>: <span class="num">99000</span>,
     <span class="str">"method"</span>: <span class="str">"momo"</span>
@@ -407,7 +478,7 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
     <span class="str">"error_code"</span>: <span class="str">"INSUFFICIENT_BALANCE"</span>
 ], includeUser: <span class="kw">true</span>)
 
-<span class="cm">// → cả 2 dùng schema: iglu:vn.fpt.ftel.snowplow/payment_event/jsonschema/1-0-0</span>
+<span class="cm">// → cùng schema: iglu:vn.fpt.ftel.snowplow/payment_event/jsonschema/1-0-0</span>
 <span class="cm">// → event_action: "payment_completed" hoặc "payment_failed"</span></code></pre>
 
   <h4>Android</h4>
@@ -444,79 +515,45 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
   </tbody>
 </table>
 
-<h4>Field SDK tự stamp vào payload</h4>
-<table>
-  <thead><tr><th>Field</th><th>Source</th><th>Tự stamp bởi</th></tr></thead>
-  <tbody>
-    <tr><td><code>event_action</code></td><td><code>action</code> param hoặc <code>eventName</code> nếu nil</td><td>UniTrack.customTrack</td></tr>
-    <tr><td><code>session_id</code></td><td>UniTrack core session</td><td>UniTrack.customTrack</td></tr>
-    <tr><td><code>user_id</code></td><td>Cached từ <code>UniTrack.identify()</code> (FSDKTracking đã hash SHA-256 trước khi identify)</td><td>UniTrack.customTrack — chỉ khi <code>includeUser: true</code></td></tr>
-    <tr><td><code>app_id</code></td><td>FSDKTracking.appId (từ Snowplow config)</td><td>FSDKTracking wrapper</td></tr>
-    <tr><td><code>platform</code></td><td>"iOS" / "Android"</td><td>FSDKTracking wrapper</td></tr>
-  </tbody>
-</table>
-<p>App KHÔNG cần truyền 5 field trên trong <code>data</code> — wrapper + SDK auto stamp. Truyền vào sẽ bị overwrite.</p>
-<p><em>Note:</em> helper domain sẵn (vd <code>sessionStarted</code>, <code>cameraStreamStarted</code>) thêm cả <code>login_session_id</code> qua <code>addLoginSession()</code> — nhưng customTrack ad-hoc KHÔNG stamp field này vì nó là concept BE-specific (login session từ <code>getUserInfo()</code> API), không phù hợp cho event UI ad-hoc.</p>
-<p>Nếu user chưa login (chưa gọi <code>identify</code>) → <code>includeUser: true</code> sẽ no-op, không stamp <code>user_id</code>.</p>
-
 <div class="panel warn">
   <strong>BE Iglu schema</strong> phải register trước theo <code>eventName</code>. Snowplow Tracker silently drop event nếu schema chưa tồn tại.<br>
   Với Pattern 2: schema phải có field <code>event_action</code> kiểu enum để chấp nhận tất cả action có thể xảy ra.
 </div>
 
-<!-- ============== DEDICATED HELPER ============== -->
-<div class="anchor-pad" id="custom"></div>
-<h2>5. Thêm helper dedicated vào FSDKTracking (optional)</h2>
+<h3>4.6 Thêm helper dedicated (optional)</h3>
+<p>Khi 1 event được gọi nhiều nơi + có 5+ field bắt buộc → thêm helper dedicated để app code không phải nhớ payload shape. Wrapper 3-5 dòng quanh <code>customTrack</code>:</p>
 
-<p>Nếu 1 event được gọi nhiều nơi + có 5+ field bắt buộc → thêm helper dedicated để DEV không phải nhớ payload shape. Helper là wrapper 3-5 dòng quanh <code>UniTrack.customTrack</code>, expose typed params.</p>
-
-<h3>5.1 iOS</h3>
-<p>Thêm vào <code>FSDKTracking+Events.swift</code>:</p>
+<div class="panel">
+  <h4>iOS — Thêm vào FSDKTracking+Events.swift</h4>
 <pre><code><span class="kw">static func</span> <span class="fn">paymentCompleted</span>(orderId: <span class="ty">String</span>,
                               amount: <span class="ty">Int</span>,
                               method: <span class="ty">String</span>) {
-    <span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>,
+    <span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(<span class="str">"payment_event"</span>,
                           action: <span class="str">"payment_completed"</span>,
-                          data: [
-                              <span class="str">"order_id"</span>: orderId,
-                              <span class="str">"amount"</span>:   amount,
-                              <span class="str">"method"</span>:   method,
-                          ],
+                          data: [<span class="str">"order_id"</span>: orderId, <span class="str">"amount"</span>: amount, <span class="str">"method"</span>: method],
                           includeUser: <span class="kw">true</span>)
 }</code></pre>
 
-<h3>5.2 Android</h3>
-<p>Thêm vào <code>FSDKTrackingEvents.kt</code>:</p>
+  <h4>Android — Thêm vào FSDKTrackingEvents.kt + expose qua FSDKTracking.kt</h4>
 <pre><code><span class="kw">fun</span> <span class="fn">paymentCompleted</span>(orderId: <span class="ty">String</span>, amount: <span class="ty">Int</span>, method: <span class="ty">String</span>) {
-    <span class="ty">UniTrack</span>.<span class="fn">customTrack</span>(
+    <span class="ty">FSDKTracking</span>.<span class="fn">customTrack</span>(
         eventName = <span class="str">"payment_event"</span>,
         action = <span class="str">"payment_completed"</span>,
-        data = mapOf(
-            <span class="str">"order_id"</span> to orderId,
-            <span class="str">"amount"</span>   to amount,
-            <span class="str">"method"</span>   to method,
-        ),
+        data = mapOf(<span class="str">"order_id"</span> to orderId, <span class="str">"amount"</span> to amount, <span class="str">"method"</span> to method),
         includeUser = <span class="kw">true</span>
     )
 }</code></pre>
-<p>Expose qua facade <code>FSDKTracking.kt</code>:</p>
-<pre><code><span class="kw">@JvmStatic</span>
-<span class="kw">fun</span> <span class="fn">paymentCompleted</span>(orderId: <span class="ty">String</span>, amount: <span class="ty">Int</span>, method: <span class="ty">String</span>) =
-    <span class="ty">FSDKTrackingEvents</span>.<span class="fn">paymentCompleted</span>(orderId, amount, method)</code></pre>
-
-<div class="panel note">
-  <strong>Khi nào cần helper dedicated</strong>: event xài 5+ nơi, có 5+ field bắt buộc, hoặc có logic build payload phức tạp (nested object, conditional field). Nếu chỉ 1-2 lần dùng đơn giản → gọi thẳng <code>customTrack</code>, không cần wrapper.
 </div>
 
-<div class="panel warn">
-  <strong>BE Iglu schema</strong> cho event mới phải register trước. Snowplow Tracker sẽ silently drop event nếu schema chưa tồn tại.
+<div class="panel note">
+  <strong>Khi nào cần helper dedicated</strong>: event gọi 5+ nơi, có 5+ field bắt buộc, hoặc build payload phức tạp (nested object, conditional field). Đơn giản → gọi thẳng <code>customTrack</code>.
 </div>
 
 <!-- ============== IDENTITY ============== -->
 <div class="anchor-pad" id="identity"></div>
-<h2>6. Identify user (JWT + PII hash)</h2>
+<h2>5. Identify user (JWT + PII hash)</h2>
 
-<h3>6.1 Auto identify từ Flutter access token</h3>
+<h3>5.1 Auto identify từ Flutter access token</h3>
 <p>FSDKTracking đã wire vào subscribe <code>.syncCheckExistingToken</code> của Flutter bridge. Login → token có → parse JWT → identify. Logout → token nil → reset user_context.</p>
 
 <div class="panel">
@@ -530,17 +567,17 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
 }</code></pre>
 </div>
 
-<h3>6.2 Identify thủ công (nếu cần)</h3>
+<h3>5.2 Identify thủ công (nếu cần)</h3>
 <pre><code><span class="cm">// iOS</span>
 <span class="ty">FSDKTracking</span>.<span class="fn">identify</span>(userId: phone, phoneNumber: phone)
 
 <span class="cm">// Android</span>
 <span class="ty">FSDKTracking</span>.<span class="fn">identify</span>(userId = phone, phoneNumber = phone)</code></pre>
 
-<h3>6.3 Logout</h3>
-<pre><code><span class="ty">FSDKTracking</span>.<span class="fn">clearIdentityAndReset</span>()    <span class="cm">// reset identity + UniTrack session + Snowplow user</span></code></pre>
+<h3>5.3 Logout</h3>
+<pre><code><span class="ty">FSDKTracking</span>.<span class="fn">clearIdentityAndReset</span>()    <span class="cm">// reset identity + session + Snowplow user</span></code></pre>
 
-<h3>6.4 PII hashing (SHA-256 + salt)</h3>
+<h3>5.4 PII hashing (SHA-256 + salt)</h3>
 
 <div class="panel warn">
   <strong>3 field bị hash trước outbound:</strong> <code>user_id</code>, <code>phone_number</code>, <code>user_name</code>. CSOC chặn raw phone_number trong payload.
@@ -557,140 +594,11 @@ unitrack-snowplow = { group = "com.github.sieuvitdet.unitrack-sdk", name = "unit
   </tbody>
 </table>
 
-<!-- ============== CROSS-BINARY ============== -->
-<div class="anchor-pad" id="cross-binary"></div>
-<h2>7. Cross-binary — Flutter trong app native</h2>
-
-<p>FPT Life là <strong>native iOS + Android</strong> nhúng <strong>Flutter module add-to-app</strong> (Flutter chạy trong cùng process với native, không phải process riêng). 2 binary cùng link UniTrack SDK → 2 singleton riêng → <strong>session_id khác nhau</strong> nếu không đồng bộ.</p>
-
-<p>SDK đã wire <strong>HostProxy pattern</strong>: Flutter plugin detect native UniTrack rồi forward mọi call sang singleton native. Đội Flutter chỉ cần làm 3 việc, KHÔNG cần code thêm.</p>
-
-<h3>7.1 Vấn đề: 2 singleton, 2 session_id</h3>
-
-<pre><code><span class="cm">Native process</span>
-┌─────────────────────────────────────────────────────┐
-│  Native code (Swift / Kotlin)                       │
-│     ↓                                                │
-│  UniTrack singleton #1     session_id = ABC-123     │  ← Native event stamp ABC-123
-│     ↓                                                │
-│  Snowplow Provider #1      app_id = 505             │
-│                                                      │
-│  ─────────────────────                               │
-│                                                      │
-│  Flutter module (Dart)                               │
-│     ↓                                                │
-│  unitrack plugin (Flutter)                          │
-│     ↓                                                │
-│  UniTrack singleton #2     session_id = XYZ-789     │  ← Flutter event stamp XYZ-789 (KHÁC)
-│     ↓                                                │
-│  Snowplow Provider #2      app_id = 505 (init lại)  │  ← collector thấy 2 device
-└─────────────────────────────────────────────────────┘</code></pre>
-
-<p>Hậu quả: data team thấy 1 user → 2 session_id song song, journey bị cắt khi user chuyển từ màn native → màn Flutter.</p>
-
-<h3>7.2 Cách giải quyết: HostProxy auto-detect</h3>
-
-<p>UniTrack Flutter plugin tự check class <code>UniTrack.UniTrack</code> tồn tại trong runtime qua <code>NSClassFromString</code> (iOS) / <code>Class.forName</code> (Android). Nếu có → biết là native đã link SDK → forward mọi call qua native singleton thay vì init singleton riêng.</p>
-
-<pre><code><span class="cm">Sau khi HostProxy active</span>
-┌─────────────────────────────────────────────────────┐
-│  Native code                                         │
-│     ↓                                                │
-│  UniTrack singleton (DUY NHẤT)   session_id = ABC   │
-│     ↑                                                │
-│  HostProxy forward          ←── Flutter plugin call  │
-│                                                      │
-│  Snowplow Provider (DUY NHẤT)                        │
-└─────────────────────────────────────────────────────┘</code></pre>
-
-<p>Mọi event Flutter fire (vd <code>UniTrack.instance.track("camera_stream_started", ...)</code> ở Dart) đều stamp <code>session_id = ABC</code> giống native → journey liên tục.</p>
-
-<h3>7.3 Hướng dẫn cho đội Flutter FPT Life</h3>
-
-<div class="panel note">
-  <strong>3 bước, không cần code thêm:</strong>
-</div>
-
-<h4>Bước 1: Add dependency Flutter</h4>
-<p>Trong <code>pubspec.yaml</code> của Flutter module:</p>
-<pre><code>dependencies:
-  unitrack: ^1.3.0</code></pre>
-
-<h4>Bước 2: Bật cờ skipVendor (chỉ Android)</h4>
-<p>Android plugin Flutter mặc định vendor native binary <code>libunitrack_jni.so</code> kèm. Vì host native FPT Life đã link <code>unitrack-sdk:unitrack</code> từ Maven, kéo plugin sẽ gây <strong>duplicate class</strong> error. Set 1 flag là plugin skip vendor:</p>
-
-<p>Trong file <code>android/gradle.properties</code> của Flutter module:</p>
-<pre><code>unitrack.skipVendor=true</code></pre>
-
-<p>iOS: KHÔNG cần làm gì — Swift module isolation tự handle, không có duplicate symbol.</p>
-
-<h4>Bước 3: Init bình thường ở Dart side</h4>
-<p>Code Dart KHÔNG cần phân biệt co-resident hay standalone — plugin tự gate:</p>
-<pre><code><span class="cm">// main.dart</span>
-<span class="kw">import</span> <span class="str">'package:unitrack/unitrack.dart'</span>;
-
-<span class="kw">void</span> main() <span class="kw">async</span> {
-    WidgetsFlutterBinding.ensureInitialized();
-    <span class="kw">await</span> UniTrack.instance.initialize(
-        apiKey: <span class="str">'utk_xxx'</span>,
-        config: UniTrackConfig(...),
-    );
-    <span class="cm">// → Plugin detect native UniTrack class → init() no-op, forward setUser/track/...</span>
-    <span class="cm">//   sang native singleton. Tất cả event stamp session_id của native.</span>
-    runApp(MyApp());
-}
-
-<span class="cm">// ViewController/Screen Flutter — track event như standalone app</span>
-UniTrack.instance.track(<span class="str">'camera_stream_started'</span>, properties: {
-    <span class="str">'camera_serial'</span>: serial,
-    <span class="str">'channel'</span>: <span class="num">0</span>,
-});
-<span class="cm">// → Event đi qua HostProxy → native singleton → cùng session_id với event từ native side</span></code></pre>
-
-<h3>7.4 Verify HostProxy đã active</h3>
-
-<p>Cold start app, tìm log:</p>
-<pre><code><span class="cm">// iOS — Xcode console</span>
-[UniTrackPlugin] co-resident detected — forwarding tới native singleton
-
-<span class="cm">// Android — logcat</span>
-[UniTrackPlugin] co-resident detected — forwarding tới native singleton</code></pre>
-
-<p>Nếu thấy log đó → mọi call Dart đã proxy sang native. Nếu KHÔNG thấy → plugin đang chạy standalone mode → 2 singleton song song.</p>
-
-<h3>7.5 Bảng so sánh field cross-binary</h3>
-
-<table>
-  <thead><tr><th>Field</th><th>Native event</th><th>Flutter event (sau HostProxy)</th></tr></thead>
-  <tbody>
-    <tr><td><code>session_id</code></td><td>ABC-123</td><td><strong>ABC-123</strong> ✓ giống native</td></tr>
-    <tr><td><code>user_id</code> (hashed)</td><td>từ identify()</td><td><strong>cùng cache</strong> ✓ giống native</td></tr>
-    <tr><td><code>app_id</code></td><td>505</td><td>505 ✓ từ JSON config chung</td></tr>
-    <tr><td>PII salt</td><td>fe04…3886</td><td><strong>cùng salt</strong> ✓ từ trackingConfig.json native</td></tr>
-    <tr><td>Snowplow collector</td><td>ftracking.fpt.vn</td><td><strong>cùng URL</strong> ✓ chung provider</td></tr>
-  </tbody>
-</table>
-
-<div class="panel warn">
-  <strong>Quan trọng:</strong> Flutter module KHÔNG được tự load <code>trackingConfig.json</code> riêng — plugin sẽ skip bootstrap khi co-resident. Native AppDelegate / Application gọi <code>FSDKTracking.bootstrap()</code> 1 lần là đủ cho cả native + Flutter side.
-</div>
-
-<h3>7.6 Use case thực tế</h3>
-
-<p>User flow điển hình ở FPT Life:</p>
-<ol>
-  <li>Native Login screen → <code>FSDKTracking.applyAuthFromToken(jwt)</code> → identify session bắt đầu.</li>
-  <li>Native Home → tap "Camera live" → fire <code>camera_stream_started</code> (native).</li>
-  <li>User nhấn icon → mở Flutter route (vd Settings) → Flutter screen fire <code>screen_viewed</code> (Flutter qua plugin).</li>
-  <li>Snowplow collector: tất cả event trên có <strong>cùng session_id + cùng user_id</strong> → journey 4 step join được trên BigQuery.</li>
-</ol>
-
 <hr style="margin: 40px 0; border: none; border-top: 1px solid var(--line)">
 
 <p class="sub" style="text-align:center">
   iOS SPM: <code>github.com/sieuvitdet/unitrack-ios-package</code> ·
-  Android Maven: <code>com.github.sieuvitdet/unitrack-sdk</code> ·
-  Flutter: <code>pub.dev/packages/unitrack</code>
+  Android Maven: <code>com.github.sieuvitdet/unitrack-sdk</code>
 </p>
 
 </div>

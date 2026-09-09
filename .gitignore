@@ -110,3 +110,4 @@ platforms/web/demo/
 # .gitignore:50 chặn package-lock.json toàn repo, nhưng react-native/ và
 # portal/ đã commit lock file từ trước — mở ngoại lệ cho web để nhất quán.
 !platforms/web/package-lock.json
+*.zip
