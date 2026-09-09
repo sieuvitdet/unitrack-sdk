@@ -87,6 +87,29 @@ function installLifecycleCapture(emit: Emit): void {
       screenEnteredAt = monoNow();
       closeBgWindow();
       fgWindowAt = monoNow();
+      // Mở lại vế `screen_viewed` cho chính màn đó. Nhánh `hidden` đã đóng một
+      // lượt bằng screen_exited, nên không mở lại thì màn bị đóng hai lần mà
+      // chỉ mở một lần: chuỗi xem-ẩn-quay lại-đổi màn cho ra viewed=1 exited=2,
+      // funnel của đội Data hụt mất một lượt xem.
+      //
+      // Không gọi setCurrentScreen(): tên màn không đổi nên dup guard sẽ nuốt,
+      // và nó còn roll bộ đếm (xoá quãng nền vừa đo) lẫn ghi đè ownership.
+      // Parity Android AppLifecycleObserver.onActivityStarted → reenterScreen().
+      if (screenEmit && lastScreen) {
+        screenEmit(screenStartEvent || 'screen_viewed', {
+          screen: lastScreen,
+          screen_name: lastScreen,
+          // previous = chính nó: màn không đổi, chỉ là app quay lại foreground.
+          // Stamp tường minh để provider không tự suy ra màn trước đó sai.
+          from: lastScreen,
+          from_screen: lastScreen,
+          previous_screen_name: lastScreen,
+          // KHÔNG thêm field nào khác: schema vn.fpt.ftel.snowplow/screen_view
+          // chỉ khai screen, screen_name, from, from_screen,
+          // previous_screen_name (core/src/tracker.cpp:213-225). Gắn thêm
+          // `reason` để phân biệt lượt reenter sẽ thành bad row.
+        });
+      }
       // KHÔNG gắn `background_sec` ở đây. iOS bắn app_foreground với payload
       // rỗng và chỉ đặt background_sec vào `session_ended`; web gắn thêm thì
       // cùng một event name mang schema khác nhau giữa hai nền, enricher phải
@@ -191,7 +214,8 @@ function resolveElementKey(el: HTMLElement): string | null {
 // ─── Screen ─────────────────────────────────────────────────────────────
 
 let lastScreen = '';
-/** Mốc vào màn hiện tại — để tính dwell_ms lúc rời đi. */
+/** Mốc vào màn hiện tại. Chỉ dùng làm cờ "màn đang mở" — dwell_ms suy từ bộ
+ * đếm fg/bg chứ không đo bằng mốc này. */
 let screenEnteredAt = 0;
 /** Tên event kết thúc màn + hàm emit, đặt lúc install để pagehide/background
  * dùng lại được (chúng không đi qua emitScreen). */
@@ -215,10 +239,16 @@ let fgWindowAt = 0;
 /** Mốc tab ẩn đi. 0 khi tab đang hiện. */
 let bgWindowAt = 0;
 
+// Bộ đếm giữ SỐ THỰC, chỉ làm tròn 2 chữ số lúc phát event. Làm tròn về giây ở
+// từng window rồi cộng lại làm mất tới ~0,5s mỗi lần chuyển fg/bg và sai số tích
+// luỹ theo số lần chuyển: sáu lần chuyển mỗi quãng 2,5s cho ra fg+bg = 18s trong
+// khi màn chỉ sống 15s. Cùng ngữ nghĩa Snowplow builtin screen_summary/1-0-0.
+// Parity mobile c92ec6a (Android) / 8fa67e9 (iOS), nơi bộ đếm đổi Int -> Double.
+
 /** Chốt cửa sổ fg đang mở vào bộ đếm. Gọi khi tab ẩn hoặc khi màn đóng. */
 function closeFgWindow(): void {
   if (fgWindowAt > 0) {
-    screenFgSec += Math.max(0, Math.round((monoNow() - fgWindowAt) / 1000));
+    screenFgSec += Math.max(0, (monoNow() - fgWindowAt) / 1000);
     fgWindowAt = 0;
   }
 }
@@ -226,7 +256,7 @@ function closeFgWindow(): void {
 /** Chốt cửa sổ bg đang mở vào bộ đếm. Gọi khi tab hiện lại. */
 function closeBgWindow(): void {
   if (bgWindowAt > 0) {
-    screenBgSec += Math.max(0, Math.round((monoNow() - bgWindowAt) / 1000));
+    screenBgSec += Math.max(0, (monoNow() - bgWindowAt) / 1000);
     bgWindowAt = 0;
   }
 }
@@ -242,6 +272,11 @@ function rollScreenCounters(): void {
   const hidden = isHidden();
   fgWindowAt = hidden ? 0 : monoNow();
   bgWindowAt = hidden ? monoNow() : 0;
+}
+
+/** Làm tròn 2 chữ số, khớp accessor bên iOS/Android. */
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 function isHidden(): boolean {
@@ -262,7 +297,16 @@ export function emitScreenEnd(emit: Emit, reason: 'screen_change' | 'app_backgro
   // chuyển trạng thái gần nhất tới giờ bị mất trắng.
   closeFgWindow();
   closeBgWindow();
-  const dwellMs = Math.max(0, monoNow() - screenEnteredAt);
+  // dwell_ms suy TỪ bộ đếm chứ không đo riêng bằng screenEnteredAt. Hai nguồn
+  // cập nhật theo hai nhịp khác nhau nên sẽ trôi khỏi nhau: bên Android đo thật
+  // ra lệch tới 392 giây. Nay bất biến dwell_ms = (fg + bg) x 1000 luôn đúng
+  // tuyệt đối, đội Data kiểm tra dữ liệu bằng phép so sánh trực tiếp được.
+  //
+  // Math.round chứ không Math.trunc: (4.85 + 3.02) * 1000 ra 7869.999... trong
+  // dấu phẩy động, cắt đi thành 7869 thay vì 7870 (bug 2a6f60a bên Android).
+  const fgSec = round2(screenFgSec);
+  const bgSec = round2(screenBgSec);
+  const dwellMs = Math.round((fgSec + bgSec) * 1000);
   emit(screenEndEvent || 'screen_exited', {
     screen: lastScreen,
     // screen_name — trùng giá trị `screen`, KHÔNG thừa: đây là field name mà
@@ -272,8 +316,8 @@ export function emitScreenEnd(emit: Emit, reason: 'screen_change' | 'app_backgro
     screen_name: lastScreen,
     dwell_ms: dwellMs,
     // String — parity Iglu schema bên native (Android gửi .toString()).
-    foreground_sec: String(screenFgSec),
-    background_sec: String(screenBgSec),
+    foreground_sec: String(fgSec),
+    background_sec: String(bgSec),
     // Màn cuối của một lượt dùng hay không. Parity mobile: đổi route thì
     // "false" (core C++ tracker.cpp:217 hardcode false), còn app xuống nền /
     // rời trang thì "true" (AppLifecycleObserver iOS:126, Android:150).
